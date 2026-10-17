@@ -187,6 +187,13 @@ pub fn same_origin_follows_a_tls_terminating_proxy_test() {
     request.Request(..proxied, port: Some(8443))
     |> testing.header("origin", "https://app.example:8443")
   assert { testing.send(on_port, app()) }.status == 426
+  // Traefik forwards a socket's scheme as the browser named it.
+  let wss = behind_proxy([#("x-forwarded-proto", "wss")])
+  assert from(wss, "https://app.example") == 426
+  assert from(wss, "http://app.example") == 403
+  let ws = behind_proxy([#("x-forwarded-proto", "ws")])
+  assert from(ws, "http://app.example") == 426
+  assert from(ws, "https://app.example") == 403
   // Without the header the request's own scheme decides, as before.
   assert from(behind_proxy([]), "https://app.example") == 403
   assert from(behind_proxy([]), "http://app.example") == 426
@@ -207,7 +214,7 @@ pub fn same_origin_follows_a_forwarded_host_test() {
 
 pub fn malformed_forwarded_values_fail_closed_test() {
   // An unknown scheme is ignored; a host that is not one matches nothing.
-  let ignored = behind_proxy([#("x-forwarded-proto", "wss")])
+  let ignored = behind_proxy([#("x-forwarded-proto", "ftp")])
   assert from(ignored, "http://app.example") == 426
   use host <- list.each([
     "app.example/path", "user@app.example", "app.example?x", "*.example",

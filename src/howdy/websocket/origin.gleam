@@ -55,9 +55,11 @@ pub fn allowed(req: Request(body), policy: Policy, required: Bool) -> Bool {
 /// The origin the browser reached the app at: the request's own, with the
 /// scheme and authority a proxy forwarded in place of what it sent on.
 fn served_at(req: Request(body)) -> Result(Origin, Nil) {
+  // Traefik names a socket's scheme, as the browser did: `wss` for one
+  // opened from an HTTPS page.
   let scheme = case forwarded(req, "x-forwarded-proto") {
-    Ok("https") -> "https"
-    Ok("http") -> "http"
+    Ok("https") | Ok("wss") -> "https"
+    Ok("http") | Ok("ws") -> "http"
     _ -> http.scheme_to_string(req.scheme)
   }
   case forwarded(req, "x-forwarded-host") {
