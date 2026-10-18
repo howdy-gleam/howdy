@@ -36,6 +36,7 @@ pub const packages = [
   #("howdy_database", "database"),
   #("howdy_auth", "auth"),
   #("howdy_mail", "mail"),
+  #("howdy_storage", "storage"),
   #("howdy_admin", "admin"),
   #("howdy_remote", "remote"),
   #("howdy_telemetry", "telemetry"),

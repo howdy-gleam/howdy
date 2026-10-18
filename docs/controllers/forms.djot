@@ -211,6 +211,9 @@ smaller size than the limit. `form.max_fields_size` limits everything but
 file contents, and `form.temporary_directory` picks where files go while a
 request uses them, `TMPDIR` by default.
 
+To keep files somewhere lasting, such as an S3 bucket, see
+[Howdy Storage](/docs/storage/overview).
+
 The name and content type are whatever the browser claimed. Check the
 content itself before relying on the type, and never build a path from the
 name; `file_name` has had any directories removed, but that is all.

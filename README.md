@@ -702,6 +702,23 @@ mail.message()
 
 `howdy/auth/emails` gives `howdy_auth` a ready-made email for every purpose.
 
+## File storage
+
+[`howdy_storage`](https://github.com/mikeyjones/howdy/blob/v2.1.1/storage/README.md) keeps files, such as uploads from
+`howdy/form`, behind one API: an S3-compatible bucket (AWS S3, Cloudflare R2,
+Tigris, MinIO, Garage and others), a local folder for development and single
+servers, or memory for tests. Browsers fetch files through signed URLs that
+expire, so files never pass through the app on their way out:
+
+```gleam
+let files = s3.adapter(s3_config)
+let key = storage.new_key(prefix: "avatars", file_name: upload.file_name)
+use Nil <- result.try(
+  storage.put_file(files, key, upload.path, content_type: "image/png"),
+)
+storage.url(files, key, expires_in: 3600)
+```
+
 ## Feature flags
 
 [`howdy_flags`](https://github.com/mikeyjones/howdy/blob/v2.1.1/flags/README.md) keeps feature flags defined in code and
@@ -796,6 +813,7 @@ The core package reserves `howdy/auth`, every `howdy/auth/*` module and
 `howdy/remote` and every `howdy/remote/*` module for `howdy_remote`, and
 `howdy/admin` and every `howdy/admin/*` module for `howdy_admin`, and
 `howdy/mail` and every `howdy/mail/*` module for `howdy_mail`, and
+`howdy/storage` and every `howdy/storage/*` module for `howdy_storage`,
 `howdy/flags` and every `howdy/flags/*` module for `howdy_flags`,
 `howdy/openapi` and every `howdy/openapi/*` module for `howdy_openapi`,
 `howdy/telemetry` and every `howdy/telemetry/*` module for `howdy_telemetry`,

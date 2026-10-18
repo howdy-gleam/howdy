@@ -1,0 +1,283 @@
+# Howdy Storage
+
+`howdy_storage` is an optional package for keeping files: uploads, avatars,
+exports, anything too big or too binary for a database column. It gives you
+one API over:
+
+- an S3-compatible bucket: AWS S3, Cloudflare R2, Tigris, MinIO, Garage,
+  SeaweedFS, Backblaze B2 and others
+- a local folder, for development and apps on one server
+- memory, for tests
+- an adapter of your own
+
+Browsers fetch files through signed URLs that expire, straight from the
+bucket, so downloads never pass through your app.
+
+## Install
+
+Add the package to `gleam.toml`, next to `howdy`:
+
+```toml
+howdy_storage = { git = "https://github.com/mikeyjones/howdy.git", ref = "v2.1.1", path = "storage" }
+```
+
+## Objects and keys
+
+A file in storage is an object, stored under a key such as
+`avatars/3f9c0b…e1.png`. Keys look like paths, but there are no folders:
+`/` is just a character that listing by prefix makes useful.
+
+Make keys with `storage.new_key`, which gives a random, unguessable name
+under a prefix and keeps the extension of the original file:
+
+```gleam
+let key = storage.new_key(prefix: "avatars", file_name: upload.file_name)
+// "avatars/3f9c0b5e8d1a4c7f9e2b6a0d1c3e5f71.png"
+```
+
+Never build a key from a name a user chose. Two users upload `photo.jpg`;
+one replaces the other's. Keep the original name in your database if you
+want to show it, and pass it to `download_url`.
+
+Keys are checked before any adapter sees them, so a key that works with one
+adapter works with all of them: 1 to 1024 bytes, `/`-separated segments that
+are not empty, `.` or `..`, and no control characters or backslashes.
+`storage.valid_key` tells you whether a key passes. Anything else gets
+`Error(Invalid(...))`.
+
+## Storing and reading
+
+```gleam
+import howdy/storage
+
+// From memory
+storage.put(files, "reports/q3.csv", csv, content_type: "text/csv")
+
+// From a file on disk, such as an upload. Read in parts, never all at once.
+storage.put_file(files, key, upload.path, content_type: "image/png")
+
+// With every option
+storage.write(key, storage.File(upload.path))
+|> storage.content_type("image/png")
+|> storage.cache_control("public, max-age=31536000, immutable")
+|> storage.download_as("avatar.png")
+|> storage.put_with(files, _)
+```
+
+A put replaces whatever was under the key. The rest of the API:
+
+- `storage.get(files, key)` reads the whole object into memory. To send a
+  file to a browser, redirect to a URL instead.
+- `storage.head(files, key)` gives the `Object`: its size, content type,
+  ETag and when it was last changed.
+- `storage.exists(files, key)` asks whether anything is there.
+- `storage.delete(files, key)` removes it. Deleting what is not there
+  succeeds, so retrying a delete is safe.
+- `storage.list(files, prefix:, after:, limit:)` gives a `Page` of up to
+  `limit` objects, at most 1000, in key order. When there are more,
+  `page.next` is the key to pass as `after` for the next page.
+
+Every call waits for its answer, up to the adapter's timeout.
+
+## Uploads from forms
+
+[`howdy/form`](/docs/controllers/forms) writes each uploaded file to a
+temporary file and deletes it when the handler returns. Store it before
+then:
+
+```gleam
+fn change_avatar(ctx: Context, files: storage.Storage) {
+  let limits =
+    form.limits() |> form.accept_files(max_files: 1, max_file_size: 5_000_000)
+  use fields <- form.read_with(ctx, limits)
+  let avatar = {
+    use avatar <- form.file(fields, "avatar", [
+      form.file_type(["image/png", "image/jpeg"]),
+    ])
+    validate.ok(avatar)
+  }
+  case avatar {
+    Error(errors) ->
+      controller.html(ctx, avatar_page(errors)) |> controller.with_status(422)
+    Ok(avatar) -> {
+      let key = storage.new_key(prefix: "avatars", file_name: avatar.file_name)
+      case storage.put_file(files, key, avatar.path, content_type: avatar.content_type) {
+        Ok(Nil) -> {
+          save_avatar_key(ctx, key)
+          controller.status(ctx, 303) |> response.set_header("location", "/profile")
+        }
+        Error(error) ->
+          service.error_response(ctx, storage.to_service_error(error))
+      }
+    }
+  }
+}
+```
+
+The content type here is what the browser claimed. The `file_type` rule
+keeps it to types you expect, but check the content itself before trusting
+it, especially for files you show to other people.
+
+## URLs
+
+`storage.url` gives a URL that anyone holding it can fetch the object from,
+until it expires. It is signed, so it cannot be changed to name another
+object or to last longer:
+
+```gleam
+let assert Ok(url) = storage.url(files, key, expires_in: 3600)
+controller.status(ctx, 303) |> response.set_header("location", url)
+```
+
+`storage.download_url(files, key, expires_in:, file_name:)` makes the
+browser download the file under that name rather than show it. URLs last
+from one second to seven days, the most S3 allows.
+
+For files everyone may see, such as public avatars behind a CDN,
+`storage.public_url(files, key)` gives a permanent unsigned URL. It needs
+storage set up for it: `s3.public_url` or `local.public`.
+
+## S3 and compatible services
+
+```gleam
+import howdy/storage/s3
+
+let assert Ok(config) = s3.from_env()
+let files = s3.adapter(config)
+```
+
+`s3.from_env` reads the variables AWS's own tools use, which hosts such as
+Fly.io's Tigris set for you:
+
+- `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`, and `AWS_SESSION_TOKEN`
+  for temporary credentials
+- `S3_BUCKET`, or `BUCKET_NAME`
+- `AWS_REGION` or `AWS_DEFAULT_REGION`, else `us-east-1`
+- `AWS_ENDPOINT_URL_S3` or `AWS_ENDPOINT_URL` for a service other than AWS
+
+Or describe the bucket in code:
+
+```gleam
+s3.new(
+  bucket: "acme-uploads",
+  region: "auto",
+  access_key_id: key_id,
+  secret_access_key: secret,
+)
+|> s3.endpoint("https://<account>.r2.cloudflarestorage.com")
+|> s3.adapter
+```
+
+Without an endpoint the bucket is on AWS and goes in the host name,
+`acme-uploads.s3.<region>.amazonaws.com`. With one, the bucket goes in the
+path, which every compatible service understands. `s3.path_style` changes
+either default.
+
+`put_file` sends files up to 16 MiB in one request and larger ones in 8 MiB
+parts, so no more than one part is in memory. A failed upload in parts is
+aborted, so its parts are not left in the bucket to be charged for.
+`s3.multipart` changes the sizes, and `s3.timeout` how long each request may
+take, 60 seconds by default.
+
+Browsers that fetch a signed URL from another origin, such as an `<img>` on
+your site, need nothing more. JavaScript that reads the response with
+`fetch` needs a CORS rule on the bucket, set in your provider's console.
+
+## A local folder
+
+```gleam
+import howdy/storage/local
+
+let config =
+  local.new("storage")
+  |> local.serve(at: "/files", secret: storage_secret)
+let files = local.adapter(config)
+
+howdy.new()
+|> howdy.controller(local.controller(config))
+```
+
+Each object is a file at its key under the folder, so you can look inside,
+back it up or sync it like any other folder. Each object's content type
+and other details are kept beside it under `.howdy-storage`, which keys may
+not start with. A file you copy into the folder by hand is found too, with
+a content type from its extension.
+
+`local.serve` is needed for URLs: `storage.url` gives a URL under that path,
+and `local.controller` answers it until it expires, or with a `403`. Use a
+secret of at least 32 random bytes from your configuration, the same on
+every node.
+
+Files are served from your app's own origin, where a script could read your
+cookies and act as the user. So the controller sends every file with
+`X-Content-Type-Options: nosniff` and a sandboxing
+`Content-Security-Policy`, and makes the browser download anything but
+images, audio, video, PDFs and plain text rather than show it. An HTML or
+SVG file someone uploaded cannot run script on your site.
+
+`local.public` serves every object without a signature and gives
+`public_url`s, like a public bucket.
+
+A folder cannot hold both a file `a` and a folder `a/`, so storing a key
+`a/b` when `a` exists is refused, unlike in a bucket.
+
+## Errors
+
+Every call returns a `storage.Error`:
+
+- `NotFound`: nothing is stored under the key.
+- `Invalid(reason)`: the call is wrong, such as a key `valid_key` refuses.
+- `Unavailable(reason)`: the service could not be reached, timed out or
+  asked to be tried later. `storage.retryable` is `True` for these alone.
+- `Refused(reason)`: bad credentials, no permission, or a bucket that does
+  not exist.
+
+`storage.to_service_error` turns one into a [service
+error](/docs/controllers/services): `NotFound` is a `404`, `Invalid` a
+`400`, and the service's own failures a `500`, logged and not shown to the
+client.
+
+Each call is a `storage.put`, `storage.get` and so on span when [telemetry
+is on](/docs/telemetry/tracing), with the adapter and the key.
+
+## Your own adapter
+
+`storage.adapter` builds storage from your functions. Keys and URL requests
+are checked before your functions see them:
+
+```gleam
+storage.adapter(
+  named: "archive",
+  put: fn(put) { ... },        // put.key, put.body, put.content_type, ...
+  get: fn(key) { ... },
+  head: fn(key) { ... },
+  delete: fn(key) { ... },     // succeed for a missing key
+  list: fn(prefix, after, limit) { ... },
+  url: fn(request) { ... },    // request.key, request.expires_in, ...
+)
+```
+
+## Testing
+
+`howdy/storage/memory` keeps objects in a process, so tests need no bucket
+and no folder:
+
+```gleam
+import howdy/storage/memory
+
+pub fn avatar_is_stored_test() {
+  let files = memory.new()
+  let res =
+    testing.post_multipart("/avatar", [], [
+      testing.FormFile("avatar", "me.png", "image/png", <<137, 80, 78, 71>>),
+    ])
+    |> testing.send(app(files))
+
+  assert res.status == 303
+  let assert Ok(page) = storage.list(files, prefix: "avatars/", after: None, limit: 10)
+  assert list.length(page.objects) == 1
+}
+```
+
+Its URLs are `memory:` followed by the key, which no browser can open, so
+a test can check that a URL was made without fetching it.

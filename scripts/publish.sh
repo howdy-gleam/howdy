@@ -26,6 +26,7 @@ packages=(
   "howdy_telemetry:telemetry"
   "howdy_database:database"
   "howdy_mail:mail"
+  "howdy_storage:storage"
   "howdy_openapi:openapi"
   "howdy_ui:ui"
   "howdy_remote:remote"
