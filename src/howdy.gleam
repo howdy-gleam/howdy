@@ -33,7 +33,7 @@ import howdy/trace
 import howdy/version.{type Group}
 
 /// The howdy framework version. Keep in sync with `gleam.toml`.
-pub const version = "2.0.0"
+pub const version = "2.1.1"
 
 pub opaque type App {
   App(

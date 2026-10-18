@@ -38,7 +38,7 @@ howdy.new()
 
 `howdy.start` returns the server's process and the `howdy.Address` it is
 listening on, whose `port` is the real one even when configured with port `0`.
-Once listening, it prints a HOWDY ASCII banner, the framework version (`2.0.0`),
+Once listening, it prints a HOWDY ASCII banner, the framework version (`howdy.version`),
 and the bound URL. Keep the calling process alive while serving requests.
 For anything beyond a script, run the server under a supervisor as an OTP
 application with `howdy.supervised` and `howdy.start_application`, so a crash

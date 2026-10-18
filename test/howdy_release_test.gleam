@@ -3,6 +3,7 @@ import gleam/json
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/order
+import howdy
 import howdy_release.{Life, Version}
 
 pub fn versions_parse_and_order_test() {
@@ -100,4 +101,9 @@ pub fn pretty_json_keeps_strings_intact_test() {
   assert howdy_release.pretty("{\"a\":[1,2],\"b\":\"x,{y}:\\\"z\"}")
     == "{\n  \"a\": [\n    1,\n    2\n  ],\n  \"b\": \"x,{y}:\\\"z\"\n}"
   assert howdy_release.pretty("{\"a\":{}}") == "{\n  \"a\": {}\n}"
+}
+
+pub fn banner_version_matches_gleam_toml_test() {
+  let assert Ok(versions) = howdy_release.package_versions()
+  assert list.key_find(versions, "howdy") == Ok(howdy.version)
 }

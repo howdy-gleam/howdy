@@ -109,10 +109,14 @@ find docs -name '*.djot' -print0 | xargs -0 sed -i -E \
   -e "s#(github\.com/mikeyjones/howdy\.git\", ref = \")v[^\"]*\"#\1v$version\"#g" \
   -e "s#(github\.com/mikeyjones/howdy/(tree|blob)/)[^/)\" ]+#\1v$version#g"
 
-# The READMEs are published to Hex, so their links go to this release too.
+# The READMEs are published to Hex, so their links and install
+# instructions go to this release too.
 readmes=()
 for entry in "${packages[@]}"; do readmes+=("${entry#*:}/README.md"); done
-sed -i -E "s#(github\.com/mikeyjones/howdy/(tree|blob)/)[^/)\" ]+#\1v$version#g" "${readmes[@]}"
+sed -i -E \
+  -e "s#(github\.com/mikeyjones/howdy\.git\", ref = \")v[^\"]*\"#\1v$version\"#g" \
+  -e "s#(github\.com/mikeyjones/howdy/(tree|blob)/)[^/)\" ]+#\1v$version#g" \
+  "${readmes[@]}"
 
 if [[ "$tag_it" == false ]]; then
   echo

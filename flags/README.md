@@ -13,9 +13,17 @@ one process's memory, or a service that manages them for you.
 - Behind a hosting service, a read-only store takes the settings from it,
   and the app only checks them.
 
-```sh
-gleam add howdy_flags@2
+Add it to `[dependencies]` in `gleam.toml`, from the same release as your
+app's other Howdy packages (`howdy add flags` does this for you):
+
+```toml
+howdy_flags = { git = "https://github.com/mikeyjones/howdy.git", ref = "v2.1.1", path = "flags" }
 ```
+
+Put it in `[dependencies]` even when the admin, a dev dependency, already
+brings it in. `gleam build` and `gleam test` would then compile the app,
+but a production build such as `gleam export erlang-shipment` leaves dev
+dependencies out, and fails. `howdy check` reports it.
 
 ## Defining and checking flags
 
