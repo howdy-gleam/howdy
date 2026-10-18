@@ -1,8 +1,8 @@
 # howdy_admin
 
-A development admin area for [howdy](https://github.com/mikeyjones/howdy/blob/v2/README.md) apps: browse and edit the
+A development admin area for [howdy](https://github.com/mikeyjones/howdy/blob/v2.1.1/README.md) apps: browse and edit the
 database, manage users and groups, and sign in as any user. It is mounted from
-the `dev/` entry point beside [`howdy_dev`](https://github.com/mikeyjones/howdy/blob/v2/howdy_dev/README.md), so it
+the `dev/` entry point beside [`howdy_dev`](https://github.com/mikeyjones/howdy/blob/v2.1.1/howdy_dev/README.md), so it
 never reaches a deployment.
 
 ```sh
@@ -32,7 +32,7 @@ pub fn main() {
 ```
 
 Run `gleam dev` and open <http://localhost:8787/_howdy> (whatever port the app
-listens on). See [`examples/admin`](https://github.com/mikeyjones/howdy/blob/v2/examples/admin/README.md) for a complete
+listens on). See [`examples/admin`](https://github.com/mikeyjones/howdy/blob/v2.1.1/examples/admin/README.md) for a complete
 app.
 
 ## What the app registers is what the admin shows
@@ -69,7 +69,7 @@ registry of the Repo or `auth.Auth` the app built, so the app hands them over:
   at desktop or mobile width (no scripts, links open in a new tab, inline
   `cid:` images shown), its text with links you can follow, its raw source
   (downloadable as `.eml`), and its attachments. See
-  [`howdy_mail`](https://github.com/mikeyjones/howdy/blob/v2/mail/README.md).
+  [`howdy_mail`](https://github.com/mikeyjones/howdy/blob/v2.1.1/mail/README.md).
 - `admin.mail_previews(previews, send_with: mailer)`: your templates built
   from sample data, grouped, each rendered as it would be sent, with a button
   that sends it through `mailer`. Point that mailer at the outbox or a local
@@ -81,7 +81,7 @@ registry of the Repo or `auth.Auth` the app built, so the app hands them over:
   opens as a timeline of its spans with their attributes and events, with
   failures, statements repeated five or more times (a query per row) and
   statements slower than 100 ms pointed out. See
-  [`howdy_telemetry`](https://github.com/mikeyjones/howdy/blob/v2/telemetry/README.md).
+  [`howdy_telemetry`](https://github.com/mikeyjones/howdy/blob/v2.1.1/telemetry/README.md).
 - `admin.flags(features)`: the feature flags of a running `howdy/flags`,
   including stored keys the code no longer registers. Each flag's page shows
   its rollout and ramp, and has its kill switch, the users, organizations and
@@ -92,7 +92,7 @@ registry of the Repo or `auth.Auth` the app built, so the app hands them over:
   the flags' store is read-only, the pages show everything and change
   nothing. **Groups** creates groups and manages
   their members. Changes are recorded as made by `howdy_admin`. See
-  [`howdy_flags`](https://github.com/mikeyjones/howdy/blob/v2/flags/README.md).
+  [`howdy_flags`](https://github.com/mikeyjones/howdy/blob/v2.1.1/flags/README.md).
 - `admin.at("/somewhere")` moves the pages, and `admin.named` sets the sidebar
   title.
 

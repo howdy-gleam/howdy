@@ -1,9 +1,9 @@
 # howdy_mail
 
-Email for [howdy](https://github.com/mikeyjones/howdy/blob/v2/README.md) apps: messages written with
+Email for [howdy](https://github.com/mikeyjones/howdy/blob/v2.1.1/README.md) apps: messages written with
 [smail](https://hexdocs.pm/smail) templates, sent over SMTP or an HTTP
 provider, and kept in a development outbox that the
-[admin area](https://github.com/mikeyjones/howdy/blob/v2/admin/README.md) shows. [`howdy_auth`](https://github.com/mikeyjones/howdy/blob/v2/auth/README.md)
+[admin area](https://github.com/mikeyjones/howdy/blob/v2.1.1/admin/README.md) shows. [`howdy_auth`](https://github.com/mikeyjones/howdy/blob/v2.1.1/auth/README.md)
 builds its emails on it.
 
 ```sh

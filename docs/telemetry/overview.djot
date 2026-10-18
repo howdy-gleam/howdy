@@ -18,7 +18,7 @@ they go:
 
 ```toml
 [dependencies]
-howdy_telemetry = { git = "https://github.com/mikeyjones/howdy.git", ref = "v2.1.0", path = "telemetry" }
+howdy_telemetry = { git = "https://github.com/mikeyjones/howdy.git", ref = "v2.1.1", path = "telemetry" }
 ```
 
 ## Sending traces to a collector

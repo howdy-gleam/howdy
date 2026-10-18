@@ -229,7 +229,7 @@ policy; see the deployment note above.
 The native verifier is pinned to **glasslock 1.0.0-rc1**, a recent prerelease,
 including internal metadata parsing APIs. It has not been independently audited
 as part of this work. Review upgrades explicitly; keep signed-ceremony regression
-tests. See [comparison and dependency research](https://github.com/mikeyjones/howdy/blob/v2/manual/passkey-mfa-research.md)
+tests. See [comparison and dependency research](https://github.com/mikeyjones/howdy/blob/v2.1.1/manual/passkey-mfa-research.md)
 for the official Better Auth references and inspected verifier behavior.
 
 ## Install and migrate
@@ -238,7 +238,7 @@ for the official Better Auth references and inspected verifier behavior.
 gleam add howdy_auth@2 howdy_database@2
 ```
 
-[`howdy_database`](https://github.com/mikeyjones/howdy/blob/v2/database/README.md) provides `howdy/migration` and the
+[`howdy_database`](https://github.com/mikeyjones/howdy/blob/v2.1.1/database/README.md) provides `howdy/migration` and the
 transactions auth runs on. Applications can use it for their own tables too.
 
 Run migrations explicitly during deployment, before starting the new version:
@@ -388,7 +388,7 @@ enabled and creates the user only after email verification.
 ### Ready-made emails
 
 `howdy/auth/emails` writes these emails for you with
-[`howdy_mail`](https://github.com/mikeyjones/howdy/blob/v2/mail/README.md), one for each purpose and one for MFA codes:
+[`howdy_mail`](https://github.com/mikeyjones/howdy/blob/v2.1.1/mail/README.md), one for each purpose and one for MFA codes:
 
 ```gleam
 import howdy/auth/emails
@@ -1695,7 +1695,7 @@ operator, with no session marked current, and
 recorded as `session.revoked` with the actor. Both are privileged.
 
 `auth.impersonate(identity, user_id, by:)` issues a session for a user without
-a credential, for an operator console or the [`howdy_admin`](https://github.com/mikeyjones/howdy/blob/v2/admin/README.md)
+a credential, for an operator console or the [`howdy_admin`](https://github.com/mikeyjones/howdy/blob/v2.1.1/admin/README.md)
 development area. The session's method is `auth.Impersonation` and the event
 is `session.impersonated`, so it is distinguishable from the user's own in
 `auth.sessions` and the audit trail. It skips second factors and SSO
@@ -1792,7 +1792,7 @@ pruned as a side effect of email requests and logins. For quiet installations
 call `auth.prune_expired(identity)` from a scheduled job; nothing is scheduled
 automatically.
 
-See [the runnable examples](https://github.com/mikeyjones/howdy/blob/v2/examples/auth/README.md), one per sign-in flow. Run verification with:
+See [the runnable examples](https://github.com/mikeyjones/howdy/blob/v2.1.1/examples/auth/README.md), one per sign-in flow. Run verification with:
 
 ```sh
 cd auth

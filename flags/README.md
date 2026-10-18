@@ -1,12 +1,12 @@
 # howdy_flags
 
-Feature flags for [howdy](https://github.com/mikeyjones/howdy/blob/v2/README.md) apps, defined in code and switched
+Feature flags for [howdy](https://github.com/mikeyjones/howdy/blob/v2.1.1/README.md) apps, defined in code and switched
 while the app runs: turned off for everyone at once, allowed or blocked for
 users, organizations and groups, and rolled out gradually to a share of
 users. Where the settings are kept is up to a store: the app's database,
 one process's memory, or a service that manages them for you.
 
-- In development the [admin area](https://github.com/mikeyjones/howdy/blob/v2/admin/README.md) shows them, with their
+- In development the [admin area](https://github.com/mikeyjones/howdy/blob/v2.1.1/admin/README.md) shows them, with their
   kill switches, rules, groups and history.
 - On your own servers, a task module gives you [command-line
   management](#the-command-line).

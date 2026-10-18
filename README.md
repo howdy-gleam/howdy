@@ -43,14 +43,14 @@ and the bound URL. Keep the calling process alive while serving requests.
 For anything beyond a script, run the server under a supervisor as an OTP
 application with `howdy.supervised` and `howdy.start_application`, so a crash
 is restarted and `SIGTERM` lets open requests finish; see
-[docs/guides/supervision.djot](https://github.com/mikeyjones/howdy/blob/v2/docs/guides/supervision.djot).
+[docs/guides/supervision.djot](https://github.com/mikeyjones/howdy/blob/v2.1.1/docs/guides/supervision.djot).
 Howdy runs on the [ewe](https://hexdocs.pm/ewe/) server, but your code never
 needs to name it. For ewe options `howdy.start` does not offer, pass
 `howdy.handler(app)` to `ewe.new` yourself.
 
 HTTP/2 is always on. Add `howdy.tls(cert: "priv/cert.pem", key: "priv/key.pem")`
 to serve HTTPS, which is also what lets browsers use HTTP/2. See
-[docs/guides/supervision.djot](https://github.com/mikeyjones/howdy/blob/v2/docs/guides/supervision.djot) for running the
+[docs/guides/supervision.djot](https://github.com/mikeyjones/howdy/blob/v2.1.1/docs/guides/supervision.djot) for running the
 app as a release, and check a deployed instance with `scripts/smoke.sh`, which
 probes HTTP/1.1, HTTP/2, forwarded headers and WebSocket origins.
 
@@ -162,7 +162,7 @@ nothing stops the request from arriving. An attacker cannot read the
 response, so this is about writes, not disclosure.
 
 Two defences already apply. `cookie.defaults()` sets `SameSite=Lax`, which
-keeps cookies off cross-site writes, and [`howdy_auth`](https://github.com/mikeyjones/howdy/blob/v2/auth/README.md)
+keeps cookies off cross-site writes, and [`howdy_auth`](https://github.com/mikeyjones/howdy/blob/v2.1.1/auth/README.md)
 requires a matching `Origin` on cookie-authenticated writes, both on its own
 routes and on any route behind its guard. An application that uses that guard
 for every write is already protected.
@@ -270,7 +270,7 @@ For authentication, let a guard validate the session and return `401` when neede
 
 ## Authentication and authorization
 
-[`howdy_auth`](https://github.com/mikeyjones/howdy/blob/v2/auth/README.md) is an optional package with email-token, opt-in password
+[`howdy_auth`](https://github.com/mikeyjones/howdy/blob/v2.1.1/auth/README.md) is an optional package with email-token, opt-in password
 and built-in Google login and registration, browser cookie sessions, bearer-token API routes, and optional
 starter pages. Custom pages can call the same JSON endpoints or use the headless
 operations directly. Separate role-based authorization supports simple role
@@ -278,10 +278,10 @@ checks and permissions scoped to an application or organization.
 
 The package accepts a configured Gloo Repo (PostgreSQL or SQLite), owns its
 schema, and ships explicit, checksummed migrations.
-[`howdy_database`](https://github.com/mikeyjones/howdy/blob/v2/database/README.md) provides those migrations and the
+[`howdy_database`](https://github.com/mikeyjones/howdy/blob/v2.1.1/database/README.md) provides those migrations and the
 portable transactions beneath them, and applications can use it for their own
 tables, with or without auth.
-See [the runnable example](https://github.com/mikeyjones/howdy/blob/v2/examples/auth/README.md) and the package documentation
+See [the runnable example](https://github.com/mikeyjones/howdy/blob/v2.1.1/examples/auth/README.md) and the package documentation
 for setup and current scope; enterprise federation is not yet
 implemented.
 
@@ -576,7 +576,7 @@ For one long body sent a piece at a time, such as a CSV export,
 ## Pages and live components
 
 Web pages, themes and Lustre server components live in a separate package,
-[`howdy_ui`](https://github.com/mikeyjones/howdy/blob/v2/ui/README.md), so howdy itself stays free of Lustre and Sketch.
+[`howdy_ui`](https://github.com/mikeyjones/howdy/blob/v2.1.1/ui/README.md), so howdy itself stays free of Lustre and Sketch.
 
 ```gleam
 import howdy/ui
@@ -604,7 +604,7 @@ embedded in each page by default, served as one file in development with
 
 ## Calling other services
 
-[`howdy_remote`](https://github.com/mikeyjones/howdy/blob/v2/remote/README.md) is an optional package for typed calls
+[`howdy_remote`](https://github.com/mikeyjones/howdy/blob/v2.1.1/remote/README.md) is an optional package for typed calls
 between services. Define a procedure once in a module both services share,
 serve it from the service that owns the data, and call it from anywhere:
 
@@ -629,7 +629,7 @@ only the target changes. See `examples/remote` for two services calling each oth
 
 ## Hot reload
 
-[`howdy_dev`](https://github.com/mikeyjones/howdy/blob/v2/howdy_dev/README.md) is a dev dependency that rebuilds and
+[`howdy_dev`](https://github.com/mikeyjones/howdy/blob/v2.1.1/howdy_dev/README.md) is a dev dependency that rebuilds and
 reloads the app when a file under `src` changes, and refreshes open pages.
 Put an entry point in `dev/` and run it with `gleam dev`:
 
@@ -648,7 +648,7 @@ macOS. Nothing from it reaches a `gleam export erlang-shipment`.
 
 ## Development admin
 
-[`howdy_admin`](https://github.com/mikeyjones/howdy/blob/v2/admin/README.md) is a dev dependency that mounts an admin
+[`howdy_admin`](https://github.com/mikeyjones/howdy/blob/v2.1.1/admin/README.md) is a dev dependency that mounts an admin
 area at `/_howdy` from the same `dev/` entry point: the tables of the app's
 database in a grid that follows changes, its users and groups, and its
 roles and permissions, with a button to sign in to the app as any user. The app registers what it has,
@@ -667,7 +667,7 @@ See `examples/admin` for a working app.
 
 ## Telemetry
 
-[`howdy_telemetry`](https://github.com/mikeyjones/howdy/blob/v2/telemetry/README.md) switches on OpenTelemetry. Howdy
+[`howdy_telemetry`](https://github.com/mikeyjones/howdy/blob/v2.1.1/telemetry/README.md) switches on OpenTelemetry. Howdy
 opens a span for every request, query, remote call, email and sign-in with
 `howdy/trace`, but they go nowhere until the app starts telemetry, so apps
 that do not want it pay next to nothing. Send traces to any OTLP collector
@@ -682,7 +682,7 @@ let assert Ok(Nil) =
 
 ## Email
 
-[`howdy_mail`](https://github.com/mikeyjones/howdy/blob/v2/mail/README.md) writes email with
+[`howdy_mail`](https://github.com/mikeyjones/howdy/blob/v2.1.1/mail/README.md) writes email with
 [smail](https://hexdocs.pm/smail) templates and sends it over SMTP, Resend,
 SendGrid or an adapter of your own. In development an outbox keeps the mail
 instead, and the admin shows it as it arrives, along with previews of every
@@ -704,7 +704,7 @@ mail.message()
 
 ## Feature flags
 
-[`howdy_flags`](https://github.com/mikeyjones/howdy/blob/v2/flags/README.md) keeps feature flags defined in code and
+[`howdy_flags`](https://github.com/mikeyjones/howdy/blob/v2.1.1/flags/README.md) keeps feature flags defined in code and
 switched at runtime: a kill switch, users, organizations and groups a flag is
 allowed or blocked for, and a rollout to a share of users that only ever adds
 people as it grows, raised by hand or step by step on a schedule. Checks read
@@ -765,7 +765,7 @@ pub fn blank_name_is_rejected_test() {
   message in `{"error": "..."}`, `field_errors` for a `422`, and `cookies` for
   the name and value pairs the response sets.
 
-Both [example applications](https://github.com/mikeyjones/howdy/tree/v2/examples) have a test suite written this way.
+Both [example applications](https://github.com/mikeyjones/howdy/tree/v2.1.1/examples) have a test suite written this way.
 
 ## Development
 

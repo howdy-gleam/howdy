@@ -33,6 +33,23 @@
         "howdy_openapi": "2.0.0",
         "howdy_flags": "2.0.0"
       }
+    },
+    {
+      "version": "2.1.1",
+      "date": "2026-10-18",
+      "packages": {
+        "howdy": "2.1.1",
+        "howdy_dev": "2.0.0",
+        "howdy_ui": "2.0.0",
+        "howdy_database": "2.0.0",
+        "howdy_auth": "2.0.0",
+        "howdy_mail": "2.0.0",
+        "howdy_admin": "2.0.0",
+        "howdy_remote": "2.0.0",
+        "howdy_telemetry": "2.0.0",
+        "howdy_openapi": "2.0.0",
+        "howdy_flags": "2.0.0"
+      }
     }
   ]
 }

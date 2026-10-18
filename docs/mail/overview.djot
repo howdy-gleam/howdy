@@ -20,7 +20,7 @@ gives you:
 Add the package to `gleam.toml`, next to `howdy` and `smail`:
 
 ```toml
-howdy_mail = { git = "https://github.com/mikeyjones/howdy.git", ref = "v2.1.0", path = "mail" }
+howdy_mail = { git = "https://github.com/mikeyjones/howdy.git", ref = "v2.1.1", path = "mail" }
 smail = ">= 2.0.1 and < 3.0.0"
 ```
 
