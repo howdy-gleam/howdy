@@ -113,23 +113,15 @@ pub fn other_content_types_are_rejected_test() {
     |> testing.send(app(ok_handler))
   assert res.status == 415
   assert testing.error(res)
-    == Ok("content type must be application/x-www-form-urlencoded")
+    == Ok(
+      "content type must be application/x-www-form-urlencoded or multipart/form-data",
+    )
 
   let res =
     testing.request(http.Post, "/signup")
     |> testing.bytes_body(<<"a=1":utf8>>)
     |> testing.send(app(ok_handler))
   assert res.status == 415
-}
-
-pub fn multipart_is_rejected_test() {
-  let res =
-    testing.request(http.Post, "/signup")
-    |> testing.bytes_body(<<"--x--":utf8>>)
-    |> testing.header("content-type", "multipart/form-data; boundary=x")
-    |> testing.send(app(ok_handler))
-  assert res.status == 415
-  assert testing.error(res) == Ok("multipart forms are not supported")
 }
 
 pub fn invalid_encoding_is_rejected_test() {

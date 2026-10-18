@@ -97,9 +97,9 @@ Use `howdy/validate` for constraints such as a minimum page number.
 
 ## Forms
 
-Use `howdy/form` for HTML forms posted as `application/x-www-form-urlencoded`.
-`form.read` reads the body once into a `Form`; fields are then taken from that
-value. Field problems come back as `howdy/validate` errors rather than
+Use `howdy/form` for HTML forms, posted as `application/x-www-form-urlencoded`
+or as `multipart/form-data` with file uploads. `form.read` reads the body once
+into a `Form`; fields are then taken from that value. Field problems come back as `howdy/validate` errors rather than
 responses, so a page can be rendered again with its errors and the values the
 user typed:
 

@@ -3,7 +3,7 @@
 -export([spawn_task/1, await/1, catch_panic/1, channel_member/1, stop_member/1]).
 -export([parallel_at_once/1, await/2, await_no_connections/1, scope_pid/0, putenv/2, unsetenv/1]).
 -export([with_static_tree/1]).
--export([with_http_server/2, http_status/3, plain_get/2, flat_size/1]).
+-export([with_http_server/2, http_status/3, plain_get/2, plain_post/4, flat_size/1]).
 -export([test_certificate/0, tls_probe/2, h2c_probe/1]).
 -export([open_websocket/1, receive_close_frame/1, socket_closed/1, tcp_connect/1, single_child/1]).
 
@@ -267,6 +267,30 @@ plain_get(Port, Path) ->
         [StatusLine | _] = binary:split(Head, <<"\r\n">>),
         [_, Status | _] = binary:split(StatusLine, <<" ">>, [global]),
         {binary_to_integer(Status), Body}
+    after gen_tcp:close(Socket)
+    end.
+
+%% POST Body to Path. A Body given as a list is sent with chunked transfer
+%% encoding, one chunk for each element.
+plain_post(Port, Path, ContentType, Body) ->
+    {ok, Socket} = gen_tcp:connect({127,0,0,1}, Port, [binary, {active, false}], 5000),
+    try
+        {Framing, Payload} = case is_list(Body) of
+            true ->
+                {"Transfer-Encoding: chunked\r\n",
+                 [[integer_to_list(byte_size(C), 16), "\r\n", C, "\r\n"] || C <- Body]
+                 ++ ["0\r\n\r\n"]};
+            false ->
+                {["Content-Length: ", integer_to_list(byte_size(Body)), "\r\n"], Body}
+        end,
+        ok = gen_tcp:send(Socket, ["POST ", Path, " HTTP/1.1\r\nHost: localhost\r\n",
+                                   "Content-Type: ", ContentType, "\r\n", Framing,
+                                   "Connection: close\r\n\r\n", Payload]),
+        Response = read_all(Socket, <<>>),
+        [Head, ResponseBody] = binary:split(Response, <<"\r\n\r\n">>),
+        [StatusLine | _] = binary:split(Head, <<"\r\n">>),
+        [_, Status | _] = binary:split(StatusLine, <<" ">>, [global]),
+        {binary_to_integer(Status), ResponseBody}
     after gen_tcp:close(Socket)
     end.
 

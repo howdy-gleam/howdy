@@ -84,7 +84,7 @@
         {
           "slug": "forms",
           "title": "Forms",
-          "description": "Read JSON bodies and HTML forms with howdy/body and howdy/form, validate the input, and report every field error."
+          "description": "Read JSON bodies, HTML forms and file uploads with howdy/body and howdy/form, validate the input, and report every field error."
         },
         {
           "slug": "responses",

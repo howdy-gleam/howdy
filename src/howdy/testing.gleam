@@ -57,6 +57,16 @@ import howdy/sse
 
 // -- Building requests -------------------------------------------------------
 
+/// A file to send in a form with `multipart_body`.
+pub type FormFile {
+  FormFile(
+    field: String,
+    file_name: String,
+    content_type: String,
+    content: BitArray,
+  )
+}
+
 /// A request with the given method and no body. A query string in `path`,
 /// such as `"/users?page=2"`, is split off and set as the query.
 pub fn request(method: Method, path: String) -> Request(Body) {
@@ -101,6 +111,71 @@ pub fn post_form(
   pairs: List(#(String, String)),
 ) -> Request(Body) {
   request(http.Post, path) |> form_body(pairs)
+}
+
+/// A `POST` of an HTML form with files, encoded as `multipart/form-data` as
+/// a browser would submit it.
+pub fn post_multipart(
+  path: String,
+  fields: List(#(String, String)),
+  files: List(FormFile),
+) -> Request(Body) {
+  request(http.Post, path) |> multipart_body(fields, files)
+}
+
+/// Replace the body with a `multipart/form-data` form, the fields and then
+/// the files, and set the content type. Read it with `form.read_with` and
+/// limits that accept files.
+pub fn multipart_body(
+  req: Request(Body),
+  fields: List(#(String, String)),
+  files: List(FormFile),
+) -> Request(Body) {
+  let boundary = "howdy-test-boundary-5a1f0c"
+  let part = fn(disposition, headers, content) {
+    <<
+      "--":utf8,
+      boundary:utf8,
+      "\r\nContent-Disposition: form-data; ":utf8,
+      disposition:utf8,
+      "\r\n":utf8,
+      headers:utf8,
+      "\r\n":utf8,
+      content:bits,
+      "\r\n":utf8,
+    >>
+  }
+  let fields =
+    list.map(fields, fn(field) {
+      part("name=" <> quoted(field.0), "", <<field.1:utf8>>)
+    })
+  let files =
+    list.map(files, fn(file) {
+      part(
+        "name=" <> quoted(file.field) <> "; filename=" <> quoted(file.file_name),
+        "Content-Type: " <> file.content_type <> "\r\n",
+        file.content,
+      )
+    })
+  let body =
+    list.append(fields, files)
+    |> list.fold(<<>>, fn(body, part) { <<body:bits, part:bits>> })
+  req
+  |> bytes_body(<<body:bits, "--":utf8, boundary:utf8, "--\r\n":utf8>>)
+  |> request.set_header(
+    "content-type",
+    "multipart/form-data; boundary=" <> boundary,
+  )
+}
+
+/// A quoted parameter value, escaped as browsers do.
+fn quoted(value: String) -> String {
+  let value =
+    value
+    |> string.replace("\"", "%22")
+    |> string.replace("\r", "%0D")
+    |> string.replace("\n", "%0A")
+  "\"" <> value <> "\""
 }
 
 /// Replace the body with JSON and set the content type.

@@ -66,6 +66,8 @@ Start with a function for the method:
   JSON content type.
 - `testing.post_form(path, pairs)` posts an HTML form as a browser would:
   the name and value pairs are encoded, and the form content type is set.
+- `testing.post_multipart(path, pairs, files)` posts a form with files as
+  `multipart/form-data`, each file a `testing.FormFile`.
 - `testing.request(method, path)` covers everything else, such as `HEAD`
   and `OPTIONS`, or a `POST` with no body.
 
@@ -79,8 +81,8 @@ Then adjust the request by piping it through any of these:
   the values for you. It replaces any query already there.
 - `cookie(name, value)` adds a cookie, encoded the way `cookie.set` writes
   them.
-- `json_body(json)`, `form_body(pairs)`, `text_body(string)` and
-  `bytes_body(bits)` replace the body. All but the last set a matching
+- `json_body(json)`, `form_body(pairs)`, `multipart_body(pairs, files)`,
+  `text_body(string)` and `bytes_body(bits)` replace the body. All but the last set a matching
   content type; to send a different one, set the header afterwards.
 - `from_ip(address)` makes the request appear to come from an address.
   Without it the client address is unknown, and `rate_limit.by_ip` does not

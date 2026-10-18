@@ -71,8 +71,10 @@ The `content-type` header is not checked, so a client that forgets to send
 
 A browser posting a `<form>` sends the fields as
 `application/x-www-form-urlencoded`: the same `name=Ada&age=36` format as a
-query string, but in the body. `howdy/form` reads it. `form.read` is
-designed for `use` like `body.json`, and hands the handler a `Form`:
+query string, but in the body. A form with `enctype="multipart/form-data"`,
+which a file input needs, sends each field as a separate part instead.
+`howdy/form` reads both. `form.read` is designed for `use` like `body.json`,
+and hands the handler a `Form`:
 
 ```gleam
 import howdy/form
@@ -93,18 +95,17 @@ The fields arrive already decoded, so
 `"ada@example.com"`. When the body cannot be read, the handler stops and the
 client gets an error:
 
-- A content type other than `application/x-www-form-urlencoded` answers
-  `415` with
-  `{"error":"content type must be application/x-www-form-urlencoded"}`.
+- Any other content type answers `415` with
+  `{"error":"content type must be application/x-www-form-urlencoded or multipart/form-data"}`.
   Unlike `body.json`, the content type is checked.
-- A form with a file input is sent as `multipart/form-data`, which is not
-  supported yet. It answers `415` with
-  `{"error":"multipart forms are not supported"}`.
 - A body with invalid encoding answers `400` with
-  `{"error":"request body is not a valid urlencoded form"}`.
-- A body over `body.default_limit` answers `400` with
+  `{"error":"request body is not a valid urlencoded form"}`, or a message
+  naming what is wrong with a multipart one.
+- Fields over `body.default_limit` answer `400` with
   `{"error":"request body too large"}`. `form.read_with_limit(ctx, limit)`
   picks a different limit for one route.
+- A file answers `400` with `{"error":"this form does not accept files"}`.
+  `form.read` takes no files; see [File uploads](#File-uploads).
 
 ### Typed fields
 
@@ -150,6 +151,69 @@ For anything the helpers do not cover there is raw access. `form.get` gives
 the first value of a field as a `Result`, `form.all` gives every value,
 `form.value` gives the first value or `""`, and `form.fields` gives every
 name and value pair in the order submitted.
+
+### File uploads
+
+A form only takes files when you say how many and how large, so a route
+that does not expect uploads cannot be made to fill your disk. Build
+limits with `form.limits()` and pass them to `form.read_with`:
+
+```html
+<form method="post" action="/avatar" enctype="multipart/form-data">
+  <input type="file" name="avatar" accept="image/png,image/jpeg">
+  <button>Upload</button>
+</form>
+```
+
+```gleam
+import simplifile
+
+fn change_avatar(ctx: Context) {
+  let limits =
+    form.limits() |> form.accept_files(max_files: 1, max_file_size: 5_000_000)
+  use fields <- form.read_with(ctx, limits)
+  let avatar = {
+    use avatar <- form.file(fields, "avatar", [
+      form.file_type(["image/png", "image/jpeg"]),
+    ])
+    validate.ok(avatar)
+  }
+  case avatar {
+    Ok(avatar) -> {
+      let assert Ok(Nil) = simplifile.copy_file(avatar.path, avatar_path(ctx))
+      controller.status(ctx, 303)
+      |> response.set_header("location", "/profile")
+    }
+    Error(errors) ->
+      controller.html(ctx, avatar_page(errors))
+      |> controller.with_status(422)
+  }
+}
+```
+
+Each file is an `UploadedFile` with its `file_name`, `content_type`, `size`
+in bytes and the `path` of a temporary file. Files are written to disk as
+they arrive, never held in memory, and deleted once the handler returns,
+even if it crashes. Copy or move a file somewhere lasting before then.
+
+- `file` requires one file, `optional_file` gives an `Option`, and `files`
+  gives every file of an input with `multiple`. Their rules run on each
+  file: `form.max_size(bytes)` and `form.file_type(types)`, which takes
+  exact types or patterns such as `"image/*"`.
+- A file input left empty is not a file, so `optional_file` gives `None`.
+- `form.get_file`, `form.all_files` and `form.uploaded_files` are the raw
+  access for files. `form.fields` holds only the text fields.
+
+The limits are a backstop, not validation. A file over `max_file_size`, one
+too many, or files over `form.max_total_file_size` stop reading and answer
+`400` straight away. For a message beside the input, give the rule a
+smaller size than the limit. `form.max_fields_size` limits everything but
+file contents, and `form.temporary_directory` picks where files go while a
+request uses them, `TMPDIR` by default.
+
+The name and content type are whatever the browser claimed. Check the
+content itself before relying on the type, and never build a path from the
+name; `file_name` has had any directories removed, but that is all.
 
 ## Validation
 
@@ -420,6 +484,21 @@ pub fn name_is_trimmed_test() {
 }
 ```
 
+`testing.post_multipart` posts a form with files. It takes the fields and a
+list of `testing.FormFile`s, and the handler reads real temporary files:
+
+```gleam
+pub fn avatar_upload_test() {
+  let res =
+    testing.post_multipart("/avatar", [], [
+      testing.FormFile("avatar", "me.png", "image/png", <<137, 80, 78, 71>>),
+    ])
+    |> testing.send(app())
+
+  assert res.status == 303
+}
+```
+
 The same goes for one that takes a `Form`. `form.from_fields` makes a form
 from name and value pairs:
 
@@ -436,3 +515,6 @@ pub fn age_must_be_a_number_test() {
     == Error([FieldError("age", "must be an integer")])
 }
 ```
+
+`form.with_files` adds files to such a form, each an `UploadedFile` you
+build yourself, so a validator's file rules need no request either.

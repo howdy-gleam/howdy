@@ -4,6 +4,7 @@ import ewe
 import gleam/bit_array
 import gleam/dict.{type Dict}
 import gleam/http/request.{type Request}
+import gleam/int
 import gleam/option.{type Option, None, Some}
 
 /// The body of an incoming request. Under ewe it wraps the live connection
@@ -90,6 +91,59 @@ pub fn read_body(
       case bit_array.byte_size(bits) > limit {
         True -> Error(BodyTooLarge)
         False -> Ok(bits)
+      }
+  }
+}
+
+/// A request body being read a piece at a time, so that a large one need not
+/// be held in memory.
+@internal
+pub opaque type Reader {
+  LiveReader(request: Request(ewe.Connection), limit: Int)
+  FakeReader(bits: BitArray)
+  FakeTooLarge
+}
+
+/// Start reading the body of `request` in pieces, refusing one larger than
+/// `limit` bytes in all.
+@internal
+pub fn reader(request: Request(Body), limit limit: Int) -> Reader {
+  case request.body {
+    Live(connection:) ->
+      LiveReader(request: request.set_body(request, connection), limit:)
+    Fake(bits:, ..) ->
+      // Like ewe, refuse the body when a piece is asked for.
+      case bit_array.byte_size(bits) > limit {
+        True -> FakeTooLarge
+        False -> FakeReader(bits)
+      }
+  }
+}
+
+/// The next piece of the body, of at most `max_bytes`, with the reader for
+/// the piece after it, or `None` once the body has been read to the end.
+@internal
+pub fn read_chunk(
+  reader: Reader,
+  max_bytes max_bytes: Int,
+) -> Result(Option(#(BitArray, Reader)), BodyError) {
+  case reader {
+    FakeTooLarge -> Error(BodyTooLarge)
+    FakeReader(<<>>) -> Ok(None)
+    FakeReader(bits) -> {
+      let size = bit_array.byte_size(bits)
+      let take = int.min(int.max(max_bytes, 1), size)
+      let assert Ok(chunk) = bit_array.slice(bits, 0, take)
+      let assert Ok(rest) = bit_array.slice(bits, take, size - take)
+      Ok(Some(#(chunk, FakeReader(rest))))
+    }
+    LiveReader(request:, limit:) ->
+      case ewe.read_body_chunk(request, max_chunk_bytes: max_bytes, limit:) {
+        Ok(ewe.Chunk(data:, request:)) ->
+          Ok(Some(#(data, LiveReader(request:, limit:))))
+        Ok(ewe.Done(_)) -> Ok(None)
+        Error(ewe.BodyTooLarge) -> Error(BodyTooLarge)
+        Error(ewe.InvalidBody) -> Error(InvalidBody)
       }
   }
 }
