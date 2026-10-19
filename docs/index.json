@@ -20,6 +20,11 @@
           "description": "Run the server and everything else your app keeps alive under a supervisor, as an OTP application, so crashes are restarted and SIGTERM lets requests finish."
         },
         {
+          "slug": "health-checks",
+          "title": "Health checks",
+          "description": "Answer load balancers and container platforms at /up, check the database and other dependencies, and give Kubernetes separate liveness and readiness probes."
+        },
+        {
           "slug": "testing",
           "title": "Testing",
           "description": "Test a Howdy app by sending it requests with howdy/testing, without starting a server."

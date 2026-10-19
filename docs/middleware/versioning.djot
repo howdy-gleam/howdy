@@ -29,7 +29,7 @@ pub fn app() {
     |> version.add("v2", [users_v2.controller()])
 
   howdy.new()
-  |> howdy.controller(health.controller())
+  |> howdy.controller(status.controller())
   |> howdy.versions(api)
 }
 ```
@@ -44,7 +44,7 @@ With that app:
 - `GET /v2/users` reaches the `v2` user controller.
 - `GET /v1/users` reaches the `v1` one.
 - `GET /users` names no version, so it gets the default, `v1`.
-- `GET /health` reaches the health controller, which is not versioned.
+- `GET /status` reaches the status controller, which is not versioned.
 
 ## Falling back
 
@@ -114,7 +114,7 @@ If you truly need it, a custom resolver can express any rule you like.
 What happens when the version is missing or wrong depends on the strategy.
 
 With the path strategy, the first segment is only treated as a version if
-it is one you declared. Anything else is left alone, which is how `/health`
+it is one you declared. Anything else is left alone, which is how `/status`
 still reaches an unversioned controller. So an unknown version such as
 `/v9/users` is simply a path nothing matches, and answers `404`. Without a
 default, so does `/users`.
@@ -154,7 +154,7 @@ are not part of the API contract: health checks, the home page, static
 files, webhooks whose shape someone else decides.
 
 They are not available under a version prefix: with the app above,
-`/v2/health` is a `404`. An app can have one version group, and mounting a
+`/v2/status` is a `404`. An app can have one version group, and mounting a
 second panics.
 
 ## Reading the version

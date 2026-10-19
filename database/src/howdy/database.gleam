@@ -92,6 +92,26 @@ pub fn sqlite_defaults(repo: Repo) -> service.Result(Nil) {
   }
 }
 
+/// A check for `howdy/health` that the database answers a `SELECT 1`:
+///
+/// ```gleam
+/// health.new()
+/// |> health.check("database", database.health_check(db))
+/// ```
+///
+/// On SQLite it waits its turn behind the queries in progress, like any
+/// other, so a write that holds the database for longer than the health
+/// check's timeout fails the check too.
+pub fn health_check(repo: Repo) -> fn() -> Result(Nil, String) {
+  fn() {
+    case connect(repo, fn(conn) { Ok(repo.execute(conn, "SELECT 1", [])) }) {
+      Ok(Ok(_)) -> Ok(Nil)
+      Ok(Error(e)) -> Error(error.to_string(e))
+      Error(_) -> Error("unsupported Gloo database adapter")
+    }
+  }
+}
+
 /// Gloo's SQLite Repo has one connection. Serialize operations so a
 /// concurrent request cannot join another request's transaction. Everything
 /// that goes through this module shares the lock, so modules and application

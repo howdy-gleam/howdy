@@ -198,3 +198,20 @@ its own, opened on the same file.
 
 PostgreSQL's pool hands each transaction its own connection, so none of
 this applies there.
+
+## Health checks
+
+`database.health_check(db)` is a check for a
+[health check](/docs/guides/health-checks): it runs `SELECT 1` and fails if
+the database does not answer.
+
+```gleam
+howdy.health_check(
+  app,
+  health.new() |> health.check("database", database.health_check(db)),
+)
+```
+
+On SQLite the check takes its turn on the connection like everything else,
+so a write that holds it for longer than the health check's timeout fails
+the check too.

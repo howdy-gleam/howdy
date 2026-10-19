@@ -27,6 +27,7 @@ import howdy/context.{type Body, Context}
 import howdy/controller.{
   type Controller, type Handler, type Middleware, type Route,
 }
+import howdy/health.{type Health}
 import howdy/router
 import howdy/service
 import howdy/trace
@@ -41,6 +42,7 @@ pub opaque type App {
     middleware: List(Middleware),
     versions: Option(Group),
     not_found: Option(Handler),
+    health: List(Health),
     bind_address: String,
     port: Int,
     tls: Option(Tls),
@@ -66,6 +68,7 @@ pub fn new() -> App {
     middleware: [],
     versions: None,
     not_found: None,
+    health: [],
     bind_address: "0.0.0.0",
     port: 8787,
     tls: None,
@@ -407,6 +410,26 @@ pub fn not_found(app: App, handler: Handler) -> App {
   App(..app, not_found: Some(handler))
 }
 
+/// Answer health checks from load balancers, container platforms and uptime
+/// monitors: `GET /up` with `health.new()`. The health check is answered
+/// before routing and before the app's middleware, so nothing the app does
+/// to other requests, such as rate limits, guards or redirects, can turn it
+/// away, and the logger and tracing do not see it. See `howdy/health` for
+/// checks of the app's database and other dependencies.
+///
+/// ```gleam
+/// howdy.new()
+/// |> howdy.controller(pages())
+/// |> howdy.health_check(health.new())
+/// ```
+///
+/// Call it again to answer at more than one path, such as a liveness probe
+/// that checks nothing and a readiness probe that checks the database. If
+/// two share a path, the first added answers.
+pub fn health_check(app: App, health: Health) -> App {
+  App(..app, health: list.append(app.health, [health]))
+}
+
 /// Compile routes and middleware into a reusable ewe request handler, for
 /// running the app under ewe directly with options `start` does not offer.
 /// Pass the result to `ewe.new`; construct it once and reuse it for every
@@ -449,12 +472,26 @@ pub fn serve(app: App) -> fn(Request(Body)) -> Response(Content) {
       #(group, table)
     })
   fn(request: Request(Body)) {
+    use <- health_first(app.health, request)
     use <- traced(request)
     case router.match_table(routes, request.method, request.path), versions {
       router.NotFound, Some(#(group, table)) ->
         versioned(group, table, unmatched, request)
       match, _ -> respond(match, request, unmatched, None, "")
     }
+  }
+}
+
+/// The health check's answer, if the request is for it, without a span:
+/// load balancers ask every few seconds, and traces of that are noise.
+fn health_first(
+  checks: List(Health),
+  request: Request(Body),
+  otherwise: fn() -> Response(Content),
+) -> Response(Content) {
+  case list.find_map(checks, health.answer(_, request)) {
+    Ok(response) -> response
+    Error(Nil) -> otherwise()
   }
 }
 
