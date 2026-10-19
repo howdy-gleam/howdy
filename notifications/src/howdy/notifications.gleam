@@ -248,7 +248,7 @@ pub fn schema() -> migration.Package {
        );
        CREATE TABLE howdy_notifications_digests (
          user_id TEXT PRIMARY KEY,
-         sent_at BIGINT NOT NULL
+         sent_at BIGINT
        );
        CREATE TABLE howdy_notifications_push_subscriptions (
          endpoint TEXT PRIMARY KEY,
@@ -1167,11 +1167,11 @@ fn queue_digest(
         conn,
         "SELECT sent_at FROM howdy_notifications_digests WHERE user_id = $1",
         [sql.string(recipient)],
-        decode.field(0, decode.int, decode.success),
+        decode.field(0, decode.optional(decode.int), decode.success),
       ))
       let due = case last {
-        [sent_at, ..] -> int.max(now, sent_at + digest.every)
-        [] -> now
+        [Some(sent_at), ..] -> int.max(now, sent_at + digest.every)
+        _ -> now
       }
       jobs.new(digest_job(), recipient)
       |> jobs.at(due)
@@ -1279,14 +1279,15 @@ fn deliver_digest(
           let finish = fn(state) {
             use conn <- database.transaction(notifier.repo)
             use _ <- result.try(set_digest_state(conn, ids, state))
-            case state {
-              // More waited than one email holds: the rest go next time.
-              "sent" ->
-                case list.length(notifications) >= digest_size {
-                  True -> queue_digest(notifier, conn, recipient, now)
-                  False -> Ok(Nil)
-                }
+            use _ <- result.try(case state {
+              "sent" -> Ok(Nil)
               _ -> restore_digest(conn, recipient, previous)
+            })
+            // More waited than one email holds: the rest go in the next,
+            // whether this one went or not.
+            case list.length(notifications) >= digest_size {
+              True -> queue_digest(notifier, conn, recipient, now)
+              False -> Ok(Nil)
             }
           }
           case outcome, jobs.is_last(attempt) {
@@ -1335,14 +1336,26 @@ fn claim_digest(
     notifier.repo,
     touching: "howdy_notifications_digests",
   )
-  use previous <- result.try(database.query(
+  // The recipient's stamp row is made once and then only updated, so on
+  // PostgreSQL a second job taking the same digest waits on its lock and
+  // then sees the new stamp. A row that was deleted and inserted again
+  // would let it through.
+  use _ <- result.try(
+    database.execute(
+      conn,
+      "INSERT INTO howdy_notifications_digests (user_id, sent_at)
+     VALUES ($1, NULL) ON CONFLICT (user_id) DO NOTHING",
+      [sql.string(recipient)],
+    ),
+  )
+  use previous <- result.try(database.one(
     conn,
     "SELECT sent_at FROM howdy_notifications_digests d WHERE user_id = $1"
       <> database.for_update(conn, "d"),
     [sql.string(recipient)],
-    decode.field(0, decode.int, decode.success),
+    decode.field(0, decode.optional(decode.int), decode.success),
+    or: service.Internal("the digest stamp is missing"),
   ))
-  let previous = list.first(previous) |> option.from_result
   case previous {
     Some(sent_at) if sent_at + digest.every > now ->
       Ok(NotYet(sent_at + digest.every))
@@ -1366,26 +1379,24 @@ fn claim_digest(
       case notifications {
         [] -> Ok(Nothing)
         _ -> {
-          use _ <- result.try(
-            database.execute(
-              conn,
-              "DELETE FROM howdy_notifications_digests WHERE user_id = $1",
-              [sql.string(recipient)],
-            ),
-          )
-          use _ <- result.map(
-            database.execute(
-              conn,
-              "INSERT INTO howdy_notifications_digests (user_id, sent_at)
-             VALUES ($1, $2)",
-              [sql.string(recipient), sql.int(now)],
-            ),
-          )
+          use _ <- result.map(set_stamp(conn, recipient, Some(now)))
           Claimed(previous, notifications)
         }
       }
     }
   }
+}
+
+fn set_stamp(
+  conn: Repo,
+  recipient: String,
+  sent_at: Option(Int),
+) -> service.Result(Nil) {
+  database.execute(
+    conn,
+    "UPDATE howdy_notifications_digests SET sent_at = $1 WHERE user_id = $2",
+    [sql.nullable(sql.int, sent_at), sql.string(recipient)],
+  )
 }
 
 fn set_digest_state(
@@ -1407,20 +1418,7 @@ fn restore_digest(
   recipient: String,
   previous: Option(Int),
 ) -> service.Result(Nil) {
-  case previous {
-    Some(sent_at) ->
-      database.execute(
-        conn,
-        "UPDATE howdy_notifications_digests SET sent_at = $1 WHERE user_id = $2",
-        [sql.int(sent_at), sql.string(recipient)],
-      )
-    None ->
-      database.execute(
-        conn,
-        "DELETE FROM howdy_notifications_digests WHERE user_id = $1",
-        [sql.string(recipient)],
-      )
-  }
+  set_stamp(conn, recipient, previous)
 }
 
 /// A notification by id, whoever it is for, with its email and push states.

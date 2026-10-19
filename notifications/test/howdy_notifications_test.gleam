@@ -2,6 +2,7 @@ import gleam/dict
 import gleam/dynamic/decode
 import gleam/erlang/process
 import gleam/http/response
+import gleam/int
 import gleam/json
 import gleam/list
 import gleam/option.{None, Some}
@@ -784,4 +785,94 @@ pub fn a_running_runner_delivers_soon_after_a_send_test() {
   let assert Ok(outgoing) = process.receive(outbox, 2000)
   assert outgoing.subject == "Quick"
   jobs.stop(runner)
+}
+
+// -- Found in review ----------------------------------------------------------
+
+fn digest_setup(notifier) {
+  notifier
+  |> notifications.with_defaults(fn(_) {
+    Delivery(..notifications.default_delivery, email: EmailDigest)
+  })
+  |> notifications.with_digest(every: 3600, render: fn(all) {
+    mail.message()
+    |> mail.subject(int.to_string(list.length(all)) <> " notifications")
+    |> mail.text("Digest")
+  })
+}
+
+fn waiting_digest_rows(notifier: notifications.Notifier) -> Int {
+  let assert Ok([count]) =
+    database.query(
+      notifications.repo(notifier),
+      "SELECT COUNT(*) FROM howdy_notifications_items WHERE email = 'digest'",
+      [],
+      decode.field(0, decode.int, decode.success),
+    )
+  count
+}
+
+pub fn a_digest_that_fails_for_good_still_sends_the_rest_on_test() {
+  let #(notifier, _) =
+    with_mail_failing(notifier(), fn(_) { Error(mail.Refused("no")) })
+  let notifier = digest_setup(notifier)
+  // More than one digest holds.
+  int.range(from: 0, to: 101, with: Nil, run: fn(_, n) {
+    let _ = send(notifier, "u1", "N" <> int.to_string(n))
+    Nil
+  })
+  // The first hundred fail; the one that did not fit gets a job of its
+  // own, due at once, which fails in turn.
+  assert deliver(notifier).failed == 2
+  assert waiting_digest_rows(notifier) == 0
+}
+
+pub fn two_jobs_for_one_digest_send_it_once_test() {
+  let sending = process.new_subject()
+  let #(notifier, outbox) =
+    with_mail_failing(notifier(), fn(_) {
+      // Slow enough for both jobs to be running at once.
+      process.send(sending, Nil)
+      process.sleep(300)
+      Ok(Nil)
+    })
+  let notifier = digest_setup(notifier)
+  // A digest went out earlier, so the recipient has a stamp to lock.
+  let _ = send(notifier, "u1", "Earlier")
+  assert deliver(notifier).completed == 1
+  let _ = drain_subject(outbox)
+  let _ = drain_subject(sending)
+  advance(3_600_000)
+  let _ = send(notifier, "u1", "Now")
+  // A second job for the same digest, as a race between nodes could leave.
+  let assert Ok(_) =
+    jobs.new(
+      jobs.define(
+        "howdy_notifications.digest",
+        encode: json.string,
+        decoder: decode.string,
+      )
+        |> jobs.on_queue("notifications"),
+      "u1",
+    )
+    |> jobs.at(clock())
+    |> jobs.insert(into: notifications.repo(notifier))
+  let runner =
+    jobs.runner(notifications.repo(notifier))
+    |> jobs.with_clock(clock)
+    |> jobs.queue("notifications", concurrency: 2)
+    |> jobs.check_every(20)
+    |> notifications.handle_jobs(notifier)
+  let assert Ok(_) = jobs.start(runner)
+  let assert Ok(Nil) = process.receive(sending, 2000)
+  process.sleep(1000)
+  jobs.stop(runner)
+  assert list.length(drain_subject(outbox)) == 1
+}
+
+fn drain_subject(subject: process.Subject(a)) -> List(a) {
+  case process.receive(subject, 0) {
+    Ok(value) -> [value, ..drain_subject(subject)]
+    Error(Nil) -> []
+  }
 }
