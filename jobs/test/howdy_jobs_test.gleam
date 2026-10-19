@@ -828,23 +828,29 @@ pub fn a_superseded_waiting_job_is_cancelled_rather_than_retried_test() {
       case text {
         "old" -> {
           process.send(started, Nil)
-          // Another job with the key is queued while this one runs.
+          // Another job with the key is queued while this one runs, for
+          // much later.
           let assert Ok(_) =
             jobs.insert(
-              jobs.new(echo_job(), "new") |> jobs.unique_while_waiting("k"),
+              jobs.new(echo_job(), "new")
+                |> jobs.unique_while_waiting("k")
+                |> jobs.after(3_600_000),
               db,
             )
-          Retry("down")
+          RetryIn(30_000, "down")
         }
         _ -> Done
       }
     })
   let old =
     queue(db, jobs.new(echo_job(), "old") |> jobs.unique_while_waiting("k"))
-  assert drained(runner).completed == 1
+  assert drained(runner).retried == 1
   let assert Ok(Nil) = process.receive(started, 0)
-  let superseded = record(db, old)
-  assert superseded.state == Cancelled
+  assert record(db, old).state == Cancelled
+  // The waiting one does the work when the retry would have, not an hour
+  // later.
+  advance(clock, 30_000)
+  assert drained(runner).completed == 1
 }
 
 // -- Found in review ---------------------------------------------------------------

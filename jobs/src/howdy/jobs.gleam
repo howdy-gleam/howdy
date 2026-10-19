@@ -250,6 +250,11 @@ pub fn unique(insert: Insert, key: String) -> Insert {
 /// change made while it runs is not lost. `insert` gives `Duplicate` with
 /// the waiting job's id when there is one. Keys of `unique` jobs and of
 /// these are separate.
+///
+/// A job like this that fails, snoozes or is handed back while another
+/// with its key waits is cancelled rather than waiting again: the other
+/// does the work, brought forward to when this one would have run again if
+/// it was due later.
 pub fn unique_while_waiting(insert: Insert, key: String) -> Insert {
   Insert(..insert, unique: Some(key), unique_waiting: True)
 }
