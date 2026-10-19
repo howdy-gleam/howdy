@@ -149,6 +149,7 @@ If your app starts pog itself, `postgres.from_pog(started)` wraps the pool
 in the same way, without waiting for the server. Queries sent straight to
 pog skip the query spans that the Repo records.
 
+{since="2.2"}
 ### Listening for changes
 
 PostgreSQL can tell every connection to a database that something
