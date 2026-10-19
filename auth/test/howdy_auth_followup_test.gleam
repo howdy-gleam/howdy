@@ -74,11 +74,11 @@ pub fn local_blocklist_normalizes_and_rejects_without_changing_password_test() {
     auth.authenticate(identity, secret.reveal(session.token))
   let checker = password_check.blocklist(["another café password"])
   let identity = auth.with_password_check(identity, checker)
-  let assert Error(service.Invalid(_)) =
+  let assert Error(service.Coded(_, service.Invalid(_))) =
     auth.set_password(identity, principal, "another cafe\u{0301} password")
-  let assert Error(service.Invalid(_)) =
+  let assert Error(service.Coded(_, service.Invalid(_))) =
     auth.set_password(identity, principal, "Password123456789!")
-  let assert Error(service.Invalid(_)) =
+  let assert Error(service.Coded(_, service.Invalid(_))) =
     auth.set_password(identity, principal, "aaaaaaaaaaaaaaaaaa")
   assert support.count(database, "SELECT COUNT(*) FROM howdy_auth_passwords")
     == 0

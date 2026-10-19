@@ -1,0 +1,18 @@
+{
+  "@@locale": "fr",
+  "@@x-review": "machine translation, not yet reviewed by a native speaker",
+  "blank": "ne doit pas être vide",
+  "email": "doit être une adresse e-mail valide",
+  "file_too_large": "ne doit pas dépasser {maximum}",
+  "file_type": "doit être de l’un des types suivants : {allowed}",
+  "integer": "doit être un nombre entier",
+  "one_of": "doit être l’une des valeurs suivantes : {allowed}",
+  "repeated": "ne doit apparaître qu’une seule fois",
+  "required": "est obligatoire",
+  "too_few_items": "doit contenir au moins {minimum, plural, one {# élément} many {# éléments} other {# éléments}}",
+  "too_large": "doit être inférieur ou égal à {maximum, number}",
+  "too_long": "doit contenir au plus {maximum, plural, one {# caractère} many {# caractères} other {# caractères}}",
+  "too_many_items": "doit contenir au plus {maximum, plural, one {# élément} many {# éléments} other {# éléments}}",
+  "too_short": "doit contenir au moins {minimum, plural, one {# caractère} many {# caractères} other {# caractères}}",
+  "too_small": "doit être supérieur ou égal à {minimum, number}"
+}

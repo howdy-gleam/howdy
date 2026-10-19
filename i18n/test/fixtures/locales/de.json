@@ -1,0 +1,12 @@
+{
+  "@@locale": "de",
+  "@@x-review": "test fixture",
+  "greeting": "Hallo, {name}!",
+  "cart": {
+    "items": "{count, plural, =0 {Ihr Warenkorb ist leer} one {# Artikel} other {# Artikel}}"
+  },
+  "reply": "{gender, select, female {Sie} male {Er} other {Sie}} hat geantwortet",
+  "place": "Du bist {place}. geworden",
+  "saved": "Gespeichert am {when, date, long} um {at, time, short}",
+  "progress": "{ratio, number, percent} erledigt"
+}

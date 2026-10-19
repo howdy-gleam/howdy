@@ -1,0 +1,18 @@
+{
+  "@@locale": "de",
+  "title": "Howdy in vielen Sprachen",
+  "greeting": "Hallo, {name}!",
+  "cart": "{count, plural, =0 {Ihr Warenkorb ist leer.} one {Sie haben # Artikel im Warenkorb.} other {Sie haben # Artikel im Warenkorb.}}",
+  "total": "Summe: {amount}",
+  "updated": "Preise zuletzt geändert {ago}.",
+  "today": "Heute ist {date, date, full}.",
+  "team": "Gemacht von {names}.",
+  "language": "Sprache",
+  "change": "Ändern",
+  "signup.heading": "Registrieren",
+  "signup.name": "Name",
+  "signup.email": "E-Mail",
+  "signup.password": "Passwort",
+  "signup.submit": "Konto erstellen",
+  "signup.welcome": "Willkommen, {name}!"
+}

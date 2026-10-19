@@ -10,6 +10,7 @@ import gleam/string
 import howdy/ui
 import howdy/ui/button.{Primary}
 import howdy/ui/chat.{Incoming, Outgoing}
+import howdy/ui/words
 import howdy_gallery/timer
 import lustre
 import lustre/attribute
@@ -157,6 +158,7 @@ fn view(model: Model) -> Element(Msg) {
       ui.card_description([text("A live view. Replies stream in.")]),
     ]),
     ui.chat_conversation(
+      words.english(),
       [attribute.aria_label("Messages"), attribute.style("height", "24rem")],
       [ui.chat_note([text("Today")]), ..list.map(model.messages, message)],
     ),

@@ -23,11 +23,15 @@
 //// once, render the matches from the server instead: listen for `input`
 //// on the search box and pass `server_filtered` so the browser leaves the
 //// list as it is.
+////
+//// `dialog` and the comboboxes take `words` for their names and the
+//// labels of their clear and remove buttons; see `howdy/ui/words`.
 
 import gleam/list
 import gleam/string
 import howdy/ui/style.{anchor_name, class}
 import howdy/ui/theme/tokens
+import howdy/ui/words.{type Words}
 import lustre/attribute.{type Attribute}
 import lustre/element.{type Element, text}
 import lustre/element/html
@@ -159,6 +163,7 @@ pub fn empty(children: List(Element(msg))) -> Element(msg) {
 /// ⌘ on macOS or Ctrl elsewhere; pass `""` for none. Open it with a button
 /// too, using `howdy/ui/dialog.trigger`.
 pub fn dialog(
+  words: Words,
   id: String,
   shortcut shortcut: String,
   attributes attributes: List(Attribute(msg)),
@@ -173,7 +178,7 @@ pub fn dialog(
       class(dialog_class()),
       attribute.id(id),
       attribute.attribute("closedby", "any"),
-      attribute.aria_label("Command menu"),
+      attribute.aria_label(words.command_menu),
       ..list.append(shortcut, attributes)
     ],
     [command],
@@ -186,6 +191,7 @@ pub fn dialog(
 /// value, made with `option`. `attributes` go on the button: pass
 /// `attribute.disabled(True)` or `attribute.aria_invalid("true")` there.
 pub fn combobox(
+  words words: Words,
   id id: String,
   name name: String,
   value value: String,
@@ -195,7 +201,17 @@ pub fn combobox(
   attributes attributes: List(Attribute(msg)),
   options options: List(Element(msg)),
 ) -> Element(msg) {
-  picker(id, name, value, label, placeholder, search, attributes, options)
+  picker(
+    words,
+    id,
+    name,
+    value,
+    label,
+    placeholder,
+    search,
+    attributes,
+    options,
+  )
 }
 
 /// A combobox where several options can be chosen, from `options` given
@@ -207,6 +223,7 @@ pub fn combobox(
 /// hold any character; read them with `list.key_filter(fields, name)`. A
 /// live view hears the whole set with `howdy/ui/live.on_values`.
 pub fn multiple_combobox(
+  words words: Words,
   id id: String,
   name name: String,
   values values: List(String),
@@ -251,7 +268,7 @@ pub fn multiple_combobox(
                     [
                       class(chip_remove_class()),
                       attribute.type_("button"),
-                      attribute.aria_label("Remove " <> label),
+                      attribute.aria_label(words.remove(label)),
                       attribute.data("howdy-chip-remove", ""),
                     ],
                     [html.span([attribute.aria_hidden(True)], [text("×")])],
@@ -300,7 +317,7 @@ pub fn multiple_combobox(
           [
             class(clear_class()),
             attribute.type_("button"),
-            attribute.aria_label("Clear"),
+            attribute.aria_label(words.clear),
             attribute.data("howdy-select-clear", ""),
             attribute.hidden(values == []),
           ],
@@ -337,6 +354,7 @@ pub fn multiple_combobox(
 }
 
 fn picker(
+  words: Words,
   id: String,
   name: String,
   value: String,
@@ -383,7 +401,7 @@ fn picker(
       [
         class(clear_class()),
         attribute.type_("button"),
-        attribute.aria_label("Clear"),
+        attribute.aria_label(words.clear),
         attribute.data("howdy-select-clear", ""),
         attribute.hidden(value == ""),
       ],

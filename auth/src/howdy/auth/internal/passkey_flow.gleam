@@ -119,7 +119,11 @@ fn key_name(name: String) -> service.Result(String) {
   let name = string.trim(name)
   case name != "" && string.byte_size(name) <= 100 {
     True -> Ok(name)
-    False -> Error(service.Invalid("passkey name must contain 1 to 100 bytes"))
+    False ->
+      Error(service.Coded(
+        "passkey_name",
+        service.Invalid("passkey name must contain 1 to 100 bytes"),
+      ))
   }
 }
 
@@ -142,7 +146,7 @@ pub fn begin_registration(
     use keys <- result.try(security_store.passkeys(conn, user.id))
     use _ <- result.try(case list.length(keys) < 20 {
       True -> Ok(Nil)
-      False -> Error(service.Conflict("at most 20 passkeys per account"))
+      False -> Error(passkey_limit())
     })
     let #(options, state) =
       passkey.registration_options(
@@ -197,7 +201,7 @@ pub fn finish_registration(
   use keys <- result.try(security_store.passkeys(conn, user.id))
   use _ <- result.try(case list.length(keys) < 20 {
     True -> Ok(Nil)
-    False -> Error(service.Conflict("at most 20 passkeys per account"))
+    False -> Error(passkey_limit())
   })
   use key <- result.try(passkey.register(
     ceremony.payload,
@@ -438,4 +442,11 @@ pub fn finish_login(
     session_flow.issue_session(conn, config, user, Passkey, client)
   })
   session_flow.publish_step(config, issued)
+}
+
+fn passkey_limit() -> service.Error {
+  service.Coded(
+    "passkey_limit",
+    service.Conflict("at most 20 passkeys per account"),
+  )
 }

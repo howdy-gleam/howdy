@@ -1,5 +1,5 @@
 name = "howdy_openapi"
-version = "2.0.0"
+version = "2.1.0"
 gleam = ">= 1.18.0"
 description = "OpenAPI documents for Howdy apps, built from schemas that also decode requests and encode responses"
 licences = ["Apache-2.0"]

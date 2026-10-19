@@ -11,6 +11,7 @@ import howdy
 import howdy/context
 import howdy/controller
 import howdy/form.{type Form, type UploadedFile, UploadedFile}
+import howdy/problem
 import howdy/service.{FieldError}
 import howdy/testing.{type FormFile, FormFile}
 import howdy/validate
@@ -386,7 +387,7 @@ pub fn typed_files_test() {
 
 pub fn file_errors_test() {
   assert upload(form.from_fields([]))
-    == Error([FieldError("avatar", "is required")])
+    == Error([FieldError("avatar", problem.Required)])
   let fields =
     form.from_fields([])
     |> form.with_files([
@@ -396,19 +397,19 @@ pub fn file_errors_test() {
     ])
   assert upload(fields)
     == Error([
-      FieldError("avatar", "must be image/png or image/jpeg"),
-      FieldError("cover", "must be image/*"),
-      FieldError("extras", "must be at most 2 KB"),
+      FieldError("avatar", problem.FileType(["image/png", "image/jpeg"])),
+      FieldError("cover", problem.FileType(["image/*"])),
+      FieldError("extras", problem.FileTooLarge(2000)),
     ])
   let too_big =
     form.from_fields([])
     |> form.with_files([#("avatar", file("image/png", 2_000_000))])
   assert upload(too_big)
-    == Error([FieldError("avatar", "must be at most 1 MB")])
+    == Error([FieldError("avatar", problem.FileTooLarge(1_048_576))])
   let twice =
     form.from_fields([])
     |> form.with_files([#("avatar", avatar()), #("avatar", avatar())])
-  assert upload(twice) == Error([FieldError("avatar", "must occur only once")])
+  assert upload(twice) == Error([FieldError("avatar", problem.Repeated)])
 }
 
 fn avatar() -> UploadedFile {

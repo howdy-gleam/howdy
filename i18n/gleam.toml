@@ -1,0 +1,17 @@
+name = "howdy_i18n"
+version = "2.0.0"
+gleam = ">= 1.18.0"
+description = "Translations for Howdy apps: typed ICU message catalogues, CLDR plural rules, and number and date formatting"
+licences = ["Apache-2.0"]
+repository = { type = "github", user = "mikeyjones", repo = "howdy", path = "i18n", tag-prefix = "howdy_i18n-" }
+internal_modules = ["howdy/i18n/internal", "howdy/i18n/internal/*"]
+
+[dependencies]
+gleam_stdlib = ">= 1.0.0 and < 2.0.0"
+gleam_time = ">= 1.8.0 and < 2.0.0"
+gleam_json = ">= 3.1.0 and < 4.0.0"
+simplifile = ">= 2.7.0 and < 3.0.0"
+argv = ">= 1.0.0 and < 2.0.0"
+
+[dev_dependencies]
+gleeunit = ">= 1.0.0 and < 2.0.0"

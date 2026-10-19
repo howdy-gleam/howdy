@@ -15,6 +15,7 @@ import howdy/ui/command
 import howdy/ui/live
 import howdy/ui/questionnaire
 import howdy/ui/toast
+import howdy/ui/words
 import howdy_gallery/timer
 import lustre
 import lustre/attribute
@@ -202,6 +203,7 @@ fn view(model: Model) -> Element(Msg) {
     // Several values, heard as a list.
     html.section([live.on_values("toppings", Toppings)], [
       command.multiple_combobox(
+        words: words.english(),
         id: "lab-toppings",
         name: "toppings",
         values: model.toppings,
@@ -269,12 +271,14 @@ fn view(model: Model) -> Element(Msg) {
       ]),
     ]),
     toast.view(
+      words.english(),
       model.toasts,
       on_close: fn(id) { [event.on_click(Dismiss(id))] },
       on_hold: Held,
     ),
     // History loaded as the reader scrolls back.
     chat.conversation(
+      words.english(),
       [
         attribute.id("lab-conversation"),
         attribute.aria_label("History"),
@@ -311,7 +315,7 @@ fn view(model: Model) -> Element(Msg) {
           ),
         ])
       False ->
-        questionnaire.view(model.asked, [
+        questionnaire.view(words.english(), model.asked, [
           attribute.id("lab-questionnaire"),
           event.on_submit(Answered),
         ])

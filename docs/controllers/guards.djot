@@ -46,7 +46,7 @@ themselves. Read the request directly, as above, with `request.get_cookies`,
 `request.get_header` or `request.get_query`.
 
 The error decides the response. `service.Unauthorized` answers `401` with
-`{"error":"unauthorized"}`, and `service.Forbidden` answers `403`. Any error
+`{"error":"unauthorized","code":"unauthorized"}`, and `service.Forbidden` answers `403`. Any error
 in [Services and errors](/docs/controllers/services) will do.
 
 A check with nothing useful to hand on returns `Ok(Nil)`.

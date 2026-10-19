@@ -2,7 +2,7 @@
 //// avatar and a header, speech bubbles, reactions and notes.
 ////
 //// ```gleam
-//// chat.conversation([attribute.aria_label("Messages")], [
+//// chat.conversation(words.english(), [attribute.aria_label("Messages")], [
 ////   chat.note([text("Today")]),
 ////   chat.message(chat.Incoming, avatar: avatar.initials("GH"), header: [text("Grace · 09:41")], content: [
 ////     chat.bubble(chat.Incoming, [text("Did the deploy go out?")]),
@@ -31,6 +31,7 @@ import gleam/int
 import gleam/list
 import howdy/ui/style.{class}
 import howdy/ui/theme/tokens
+import howdy/ui/words.{type Words}
 import lustre/attribute.{type Attribute}
 import lustre/element.{type Element, text}
 import lustre/element/html
@@ -68,18 +69,10 @@ pub type Tone {
 
 /// The scrolling list of messages. Size it with a height or by placing it
 /// in a flex column; label it with `aria-label`. When it is scrolled back
-/// from the newest message, a "Jump to newest" button appears.
+/// from the newest message, a button saying the words' `jump_to_newest`
+/// appears.
 pub fn conversation(
-  attributes: List(Attribute(msg)),
-  children: List(Element(msg)),
-) -> Element(msg) {
-  conversation_with("Jump to newest", attributes, children)
-}
-
-/// A conversation whose jump button says something else, such as in
-/// another language.
-pub fn conversation_with(
-  jump: String,
+  words: Words,
   attributes: List(Attribute(msg)),
   children: List(Element(msg)),
 ) -> Element(msg) {
@@ -94,7 +87,10 @@ pub fn conversation_with(
         attribute.data("howdy-latest", ""),
         attribute.hidden(True),
       ],
-      [text(jump), html.span([attribute.aria_hidden(True)], [text(" ↓")])],
+      [
+        text(words.jump_to_newest),
+        html.span([attribute.aria_hidden(True)], [text(" ↓")]),
+      ],
     ),
   ])
 }

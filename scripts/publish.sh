@@ -23,6 +23,7 @@ if [[ "${1:-}" == "--dry-run" ]]; then dry_run=true; fi
 # Each package comes after the packages it depends on.
 packages=(
   "howdy:."
+  "howdy_i18n:i18n"
   "howdy_telemetry:telemetry"
   "howdy_database:database"
   "howdy_mail:mail"

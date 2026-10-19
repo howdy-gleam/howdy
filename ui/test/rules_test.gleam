@@ -14,6 +14,7 @@ import howdy/ui/page
 import howdy/ui/progress
 import howdy/ui/theme
 import howdy/ui/toast
+import howdy/ui/words
 import lustre/element.{type Element, text}
 import lustre/element/html
 
@@ -72,8 +73,8 @@ pub fn every_built_in_rule_is_registered_by_its_component_test() {
           effects.shimmer([text("Thinking")]),
           loading.skeleton([]),
           progress.indeterminate(label: "Working"),
-          toast.region([], []),
-          drawer.drawer("sheet", [], []),
+          toast.region(words.english(), [], []),
+          drawer.drawer(words.english(), "sheet", [], []),
         ]),
       )
     })
@@ -85,7 +86,8 @@ pub fn every_built_in_rule_is_registered_by_its_component_test() {
 pub fn the_rendered_css_for_one_instance_is_unchanged_test() {
   // The block is the same text that used to travel inline; only where it
   // lives has changed.
-  let #(_, css) = stylesheet.scoped(fn() { render(toast.region([], [])) })
+  let #(_, css) =
+    stylesheet.scoped(fn() { render(toast.region(words.english(), [], [])) })
   let assert [#("howdy-toast", body)] = toast.rules()
   assert string.contains(css, body)
   assert count(css, "@keyframes howdy-toast-in") == 1

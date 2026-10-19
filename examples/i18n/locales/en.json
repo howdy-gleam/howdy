@@ -1,0 +1,17 @@
+{
+  "title": "Howdy in many languages",
+  "greeting": "Hello, {name}!",
+  "cart": "{count, plural, =0 {Your basket is empty.} one {You have # item in your basket.} other {You have # items in your basket.}}",
+  "total": "Total: {amount}",
+  "updated": "Prices last changed {ago}.",
+  "today": "Today is {date, date, full}.",
+  "team": "Made by {names}.",
+  "language": "Language",
+  "change": "Change",
+  "signup.heading": "Sign up",
+  "signup.name": "Name",
+  "signup.email": "Email",
+  "signup.password": "Password",
+  "signup.submit": "Create account",
+  "signup.welcome": "Welcome, {name}!"
+}

@@ -1,0 +1,3 @@
+{
+  "cart.items": "{count, plural, one {# produkt} few {# produkty} many {# produktów} other {# produktu}}"
+}

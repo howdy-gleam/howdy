@@ -17,6 +17,8 @@ gleam_http = ">= 4.4.0 and < 5.0.0"
 gleam_json = ">= 3.1.0 and < 4.0.0"
 argv = ">= 1.0.0 and < 2.0.0"
 howdy = { path = ".." }
+howdy_i18n = { path = "../i18n" }
+gleam_time = ">= 1.8.0 and < 2.0.0"
 lustre = ">= 5.7.0 and < 6.0.0"
 simplifile = ">= 2.7.0 and < 3.0.0"
 sketch = ">= 4.2.0 and < 5.0.0"

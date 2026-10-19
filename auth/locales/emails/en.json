@@ -1,0 +1,58 @@
+{
+  "@@locale": "en",
+  "sign_in": {
+    "subject": "Sign in to {app}",
+    "heading": "Sign in to {app}",
+    "body": "Use this to sign in. It works once and expires soon.",
+    "action": "Sign in",
+    "closing": "If you did not ask to sign in, you can ignore this email."
+  },
+  "registration": {
+    "subject": "Confirm your {app} account",
+    "heading": "Welcome to {app}",
+    "body": "Confirm this address to finish creating your account.",
+    "action": "Confirm and sign in",
+    "closing": "If you did not create an account, you can ignore this email."
+  },
+  "already_registered": {
+    "subject": "You already have a {app} account",
+    "heading": "You already have an account",
+    "body": "Someone asked to register this address, but it already has an account. Use this to sign in to it instead.",
+    "action": "Sign in",
+    "closing": "If this was not you, you can ignore this email. Nothing has changed."
+  },
+  "email_change": {
+    "subject": "Confirm your new email address",
+    "heading": "Confirm your new email address",
+    "body": "Confirm this address to make it the one your {app} account signs in with.",
+    "action": "Confirm this address",
+    "closing": "If you did not ask for this, you can ignore this email."
+  },
+  "email_change_approval": {
+    "subject": "Approve your {app} email change",
+    "heading": "Approve the email change",
+    "body": "Someone signed in to your account asked to move it to another email address. Approve it while signed in to go ahead.",
+    "action": "Approve the change",
+    "closing": "If this was not you, do not approve it. Sign in and change your password, and sign out of your other sessions."
+  },
+  "email_changed": {
+    "subject": "Your {app} email address changed",
+    "heading": "Your email address changed",
+    "body": "Your account now signs in with a different email address, and this one can no longer be used to recover it.",
+    "closing": "If you did not do this, contact support straight away."
+  },
+  "password_changed": {
+    "subject": "Your {app} password changed",
+    "heading": "Your password changed",
+    "body": "The password for your account was just changed.",
+    "closing": "If you did not do this, sign in with a link sent by email and set a new password."
+  },
+  "code_prompt": "Or enter this code:",
+  "token_prompt": "Paste this token where you were asked for it:",
+  "mfa": {
+    "subject": "Your {app} verification code",
+    "heading": "Your verification code",
+    "body": "Enter this code to finish signing in:",
+    "closing": "If you are not signing in, someone has your password: change it."
+  }
+}

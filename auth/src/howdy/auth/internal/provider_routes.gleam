@@ -13,6 +13,7 @@ import howdy/controller
 import howdy/cookie
 import howdy/form
 import howdy/guard
+import howdy/locale
 import howdy/middleware
 import howdy/query
 import howdy/rate_limit
@@ -83,6 +84,11 @@ pub fn routes(
         use code <- query.optional_string(ctx, "code")
         use error <- query.optional_string(ctx, "error")
         use browser <- cookie.optional_string(ctx, cookie_name(identity, id))
+        let identity =
+          auth.in_locale(
+            identity,
+            locale.to_string(auth.request_locale(identity, ctx)),
+          )
         let principal =
           auth.required_from(identity, key)(ctx) |> option.from_result
         let code = case error {

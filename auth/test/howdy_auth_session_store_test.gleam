@@ -293,9 +293,9 @@ pub fn provisioning_creates_users_without_public_registration_test() {
     auth.provision(closed, " ADA@Example.com ", by: user.System)
   assert ada
     == user.User(..ada, email: "ada@example.com", group_id: group.default_id)
-  let assert Error(service.Conflict(_)) =
+  let assert Error(service.Coded(_, service.Conflict(_))) =
     auth.provision(closed, "ada@example.com", by: user.System)
-  let assert Error(service.Invalid(_)) =
+  let assert Error(service.Coded(_, service.Invalid(_))) =
     auth.provision(closed, "not an address", by: user.System)
   // Nothing was sent; the user signs in when they are ready.
   assert process.receive(mailbox, 0) == Error(Nil)
@@ -315,7 +315,7 @@ pub fn provisioning_follows_the_group_mode_test() {
   let assert Ok(_) = groups.create_with_id(identity, id: "acme", name: "A", by:)
   let assert Ok(_) =
     groups.create_with_id(identity, id: "globex", name: "G", by:)
-  let assert Error(service.Invalid(_)) =
+  let assert Error(service.Coded(_, service.Invalid(_))) =
     auth.provision(identity, "ada@example.com", by:)
   assert auth.provision(
       auth.in_group(identity, "missing"),
@@ -329,7 +329,7 @@ pub fn provisioning_follows_the_group_mode_test() {
     auth.provision(auth.in_group(identity, "globex"), "ada@example.com", by:)
   assert first.id != second.id
   assert second.group_id == "globex"
-  let assert Error(service.Conflict(_)) =
+  let assert Error(service.Coded(_, service.Conflict(_))) =
     auth.provision(auth.in_group(identity, "acme"), "ada@example.com", by:)
   // One account per address everywhere once the mode says so.
   let assert Error(service.Conflict(_)) =

@@ -23,8 +23,9 @@ pub fn blocklist(passwords: List(String)) -> fn(String) -> service.Result(Nil) {
   fn(value) {
     case dict.has_key(denied, token.digest(password.normalize(value))) {
       True ->
-        Error(service.Invalid(
-          "choose a password that is not common or breached",
+        Error(service.Coded(
+          "password_common",
+          service.Invalid("choose a password that is not common or breached"),
         ))
       False -> Ok(Nil)
     }

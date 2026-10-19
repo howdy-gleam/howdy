@@ -193,6 +193,7 @@ pub fn every_copyable_entry_depends_only_on_what_it_may_test() {
   let core = fn(line) {
     string.starts_with(line, "import howdy/ui/style")
     || string.starts_with(line, "import howdy/ui/theme/tokens")
+    || string.starts_with(line, "import howdy/ui/words")
   }
   case entry.kind {
     // Components use the core modules and, for a few, other components,

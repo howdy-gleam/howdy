@@ -275,7 +275,10 @@ pub fn malformed_email_is_rejected_before_delivery_test() {
     ["missing-at", "x@", "x@foo\nbar.com", "x@foo\u{0000}bar.com"],
     fn(email) {
       assert auth.request_token(identity, email, auth.Register)
-        == Error(service.Invalid("invalid email address"))
+        == Error(service.Coded(
+          "email_invalid",
+          service.Invalid("invalid email address"),
+        ))
     },
   )
   assert process.receive(mailbox, 0) == Error(Nil)

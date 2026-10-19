@@ -65,12 +65,18 @@ pub fn target(
     Single, Some(id) if id == group.default_id -> Ok(Some(id))
     Single, Some(_) -> Error(service.NotFound("group"))
     AccountPerGroup, None ->
-      Error(service.Invalid(
-        "accounts belong to a group here; choose one with auth.in_group",
+      Error(service.Coded(
+        "group_required",
+        service.Invalid(
+          "accounts belong to a group here; choose one with auth.in_group",
+        ),
       ))
     OneGroupPerUser, None if registering ->
-      Error(service.Invalid(
-        "registration needs a group; choose one with auth.in_group",
+      Error(service.Coded(
+        "group_required",
+        service.Invalid(
+          "registration needs a group; choose one with auth.in_group",
+        ),
       ))
     _, within -> Ok(within)
   }
@@ -243,6 +249,7 @@ pub fn delivery(
   token: String,
   purpose: Purpose,
   code: Option(String),
+  locale: Option(String),
 ) -> Delivery {
   let page = case purpose {
     SignIn | Registration | AlreadyRegistered -> Some("/login#token=")
@@ -261,7 +268,17 @@ pub fn delivery(
     purpose,
     link,
     option.map(code, secret.wrap),
+    locale,
   )
+}
+
+/// The locale to write to a recipient in: their own when they have one,
+/// otherwise the request's.
+pub fn recipient_locale(
+  config: Config,
+  stored: Option(String),
+) -> Option(String) {
+  option.or(stored, config.locale)
 }
 
 pub fn email_code_digest(
@@ -312,7 +329,11 @@ pub fn consume_ceremony(
   use _ <- result.try(valid_token(challenge))
   use _ <- result.try(case string.byte_size(response) <= 65_536 {
     True -> Ok(Nil)
-    False -> Error(service.Invalid("credential response is too large"))
+    False ->
+      Error(service.Coded(
+        "credential_too_large",
+        service.Invalid("credential response is too large"),
+      ))
   })
   db.transaction(config.repo, security_store.consume(
     _,

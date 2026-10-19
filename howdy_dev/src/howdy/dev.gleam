@@ -20,6 +20,27 @@
 //// every open page reloads. If it fails the compiler output appears in the
 //// terminal and over the page, and the old code keeps serving.
 ////
+//// ## Generating code before a build
+////
+//// `before_build` runs a task of your own before each build, such as
+//// regenerating messages when a catalogue changes:
+////
+//// ```gleam
+//// import howdy/i18n/cli
+////
+//// pub fn main() {
+////   let assert Ok(_) =
+////     dev.new(my_app.app)
+////     |> dev.watch("locales")
+////     |> dev.before_build(fn(_changed) { cli.execute(["gen"]) })
+////     |> dev.run
+////   process.sleep_forever()
+//// }
+//// ```
+////
+//// A task that fails stops the build, and its output is shown like a
+//// compiler error.
+////
 //// ## Staying out of production
 ////
 //// `howdy_dev` is a dev dependency and the entry point lives in `dev/`.
@@ -55,16 +76,20 @@ pub opaque type Dev {
     interval: Int,
     address: String,
     hosts: List(String),
+    tasks: List(fn(List(String)) -> Result(String, String)),
   )
 }
 
 /// Describe a development server for the app `build` makes. Watches `src`.
 pub fn new(build: fn() -> App) -> Dev {
-  Dev(build:, watch: ["src"], interval: 250, address: "127.0.0.1", hosts: [
-    "localhost",
-    "127.0.0.1",
-    "[::1]",
-  ])
+  Dev(
+    build:,
+    watch: ["src"],
+    interval: 250,
+    address: "127.0.0.1",
+    hosts: ["localhost", "127.0.0.1", "[::1]"],
+    tasks: [],
+  )
 }
 
 /// Override the development listener's loopback default. Network exposure
@@ -89,6 +114,17 @@ pub fn allow_hosts(dev: Dev, hosts: List(String)) -> Dev {
 /// pages should reload for even though nothing compiles.
 pub fn watch(dev: Dev, directory: String) -> Dev {
   Dev(..dev, watch: list.append(dev.watch, [directory]))
+}
+
+/// Run `task` before each build, with the files that changed. Its output is
+/// printed; an `Error` stops the build and is shown over the page like a
+/// compiler error. Files a task writes do not trigger another build. Tasks
+/// run in the order they are added.
+pub fn before_build(
+  dev: Dev,
+  task: fn(List(String)) -> Result(String, String),
+) -> Dev {
+  Dev(..dev, tasks: list.append(dev.tasks, [task]))
 }
 
 /// How often to look for changes, in milliseconds. Defaults to 250.
@@ -168,8 +204,18 @@ fn poll(
     changed -> {
       // Let an editor finish writing before building.
       process.sleep(50)
+      io.println("howdy_dev: " <> string.join(changed, ", ") <> " changed")
+      let tasks = run_tasks(dev.tasks, changed)
+      // Taken after the tasks, so what they write does not count as a
+      // change, but before the build, so edits made during it still do.
       let after = watch.snapshot(dev.watch)
-      rebuild(session, changed)
+      case tasks {
+        Ok(Nil) -> rebuild(session)
+        Error(output) -> {
+          io.println("howdy_dev: a task before the build failed")
+          reload.show_error(session, output)
+        }
+      }
       after
     }
   }
@@ -184,8 +230,23 @@ fn build_project() -> #(Int, String)
 @external(erlang, "howdy_dev_ffi", "reload_modules")
 fn reload_modules() -> List(String)
 
-fn rebuild(session: reload.Session, changed: List(String)) -> Nil {
-  io.println("howdy_dev: " <> string.join(changed, ", ") <> " changed")
+@internal
+pub fn run_tasks(
+  tasks: List(fn(List(String)) -> Result(String, String)),
+  changed: List(String),
+) -> Result(Nil, String) {
+  list.try_each(tasks, fn(task) {
+    case task(changed) {
+      Ok(output) -> Ok(print_build_output(output))
+      Error(output) -> {
+        print_build_output(output)
+        Error(output)
+      }
+    }
+  })
+}
+
+fn rebuild(session: reload.Session) -> Nil {
   case build_project() {
     #(0, output) -> {
       print_build_output(output)

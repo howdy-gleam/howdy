@@ -180,7 +180,11 @@ pub fn add_passkey(conn: Repo, key: passkey.Stored) -> service.Result(Nil) {
         "UPDATE howdy_auth_passkeys SET created_at = $1 WHERE id = $2",
         [sql.int(key.info.created_at), sql.string(key.info.id)],
       )
-    _ -> Error(service.Conflict("passkey is already registered"))
+    _ ->
+      Error(service.Coded(
+        "passkey_registered",
+        service.Conflict("passkey is already registered"),
+      ))
   }
 }
 

@@ -98,7 +98,7 @@ pub fn begin(
     use factor <- result.try(security_store.factor(conn, user.id))
     use _ <- result.try(case factor {
       None -> Ok(Nil)
-      Some(_) -> Error(service.Conflict("MFA is already enabled"))
+      Some(_) -> Error(mfa_enabled())
     })
     use kind <- result.try(case method {
       TotpCode -> Ok(Totp)
@@ -235,7 +235,7 @@ pub fn confirm(
     use existing <- result.try(security_store.factor(conn, user.id))
     use _ <- result.try(case existing {
       None -> Ok(Nil)
-      _ -> Error(service.Conflict("MFA is already enabled"))
+      _ -> Error(mfa_enabled())
     })
     use factor <- result.try(case labels.factor_from(ceremony.label) {
       Ok(Totp) -> {
@@ -603,4 +603,8 @@ pub fn revoke_trusted_device(
   ))
   use _ <- result.try(security_store.delete_trusted(conn, user.id, id))
   audit.event(conn, user.id, "mfa.device_revoked", Acting(principal), "")
+}
+
+fn mfa_enabled() -> service.Error {
+  service.Coded("mfa_enabled", service.Conflict("MFA is already enabled"))
 }

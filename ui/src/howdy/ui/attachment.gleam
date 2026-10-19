@@ -5,13 +5,14 @@
 //// ```gleam
 //// attachment.group([
 ////   attachment.attachment(
+////     words: attachment.english(),
 ////     name: "report.pdf",
 ////     detail: "PDF · 2.4 MB",
 ////     status: attachment.Uploading(64),
 ////     media: None,
 ////     actions: [ui.sized_button(Ghost, IconSmall, [attribute.aria_label("Remove report.pdf")], [text("×")])],
 ////   ),
-////   attachment.styled(attachment.Tile, name: "photo.jpeg", detail: "820 KB",
+////   attachment.styled(attachment.english(), attachment.Tile, name: "photo.jpeg", detail: "820 KB",
 ////     status: attachment.Done,
 ////     media: Some(html.img([attribute.src(thumbnail), attribute.alt("")])),
 ////     actions: []),
@@ -20,6 +21,9 @@
 ////
 //// Receiving and storing the file is the application's job; an attachment
 //// shows the state it reports. A failure is announced to screen readers.
+////
+//// `words` say what an upload in progress is called; `howdy/ui/words`
+//// holds them for a locale as its `attachment` field.
 
 import gleam/int
 import gleam/list
@@ -45,6 +49,16 @@ pub type Status {
   Done
 }
 
+/// What an attachment says about an upload in progress: `uploading` names
+/// the progress bar of a file, given its name.
+pub type Words {
+  Words(uploading: fn(String) -> String, processing: String)
+}
+
+pub fn english() -> Words {
+  Words(uploading: fn(name) { "Uploading " <> name }, processing: "Processing…")
+}
+
 /// How an attachment is laid out.
 pub type Layout {
   /// A row: picture or type, then name and details, then actions.
@@ -65,18 +79,20 @@ pub fn group(attachments: List(Element(msg))) -> Element(msg) {
 
 /// An attachment as a row.
 pub fn attachment(
+  words words: Words,
   name name: String,
   detail detail: String,
   status status: Status,
   media media: Option(Element(msg)),
   actions actions: List(Element(msg)),
 ) -> Element(msg) {
-  styled(Row, name:, detail:, status:, media:, actions:)
+  styled(words, Row, name:, detail:, status:, media:, actions:)
 }
 
 /// An attachment in another layout. `media`, such as a thumbnail `<img>`,
 /// takes the place of the file type.
 pub fn styled(
+  words: Words,
   layout: Layout,
   name name: String,
   detail detail: String,
@@ -103,7 +119,7 @@ pub fn styled(
     html.div([class(text_class())], [
       html.div([class(name_class())], [text(name)]),
       html.div([class(detail_class())], [text(detail)]),
-      progress(name, status),
+      progress(words, name, status),
     ]),
     case actions {
       [] -> element.none()
@@ -112,7 +128,7 @@ pub fn styled(
   ])
 }
 
-fn progress(name: String, status: Status) -> Element(msg) {
+fn progress(words: Words, name: String, status: Status) -> Element(msg) {
   case status {
     Uploading(done) -> {
       let done = int.clamp(done, 0, 100)
@@ -120,7 +136,7 @@ fn progress(name: String, status: Status) -> Element(msg) {
         [
           class(track_class()),
           attribute.role("progressbar"),
-          attribute.aria_label("Uploading " <> name),
+          attribute.aria_label(words.uploading(name)),
           attribute.attribute("aria-valuemin", "0"),
           attribute.attribute("aria-valuemax", "100"),
           attribute.attribute("aria-valuenow", int.to_string(done)),
@@ -138,7 +154,7 @@ fn progress(name: String, status: Status) -> Element(msg) {
     }
     Processing ->
       html.div([class(state_class()), attribute.role("status")], [
-        text("Processing…"),
+        text(words.processing),
       ])
     Failed(reason) ->
       html.div([class(failed_class()), attribute.role("alert")], [text(reason)])

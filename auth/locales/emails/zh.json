@@ -1,0 +1,59 @@
+{
+  "@@locale": "zh",
+  "@@x-review": "machine translation, not yet reviewed by a native speaker",
+  "sign_in": {
+    "subject": "登录 {app}",
+    "heading": "登录 {app}",
+    "body": "用它来登录。它只能使用一次，并且很快就会过期。",
+    "action": "登录",
+    "closing": "如果你没有请求登录，可以忽略这封邮件。"
+  },
+  "registration": {
+    "subject": "确认你的 {app} 账户",
+    "heading": "欢迎使用 {app}",
+    "body": "确认此地址以完成账户创建。",
+    "action": "确认并登录",
+    "closing": "如果你没有创建账户，可以忽略这封邮件。"
+  },
+  "already_registered": {
+    "subject": "你已经有 {app} 账户了",
+    "heading": "你已经有账户了",
+    "body": "有人请求注册此地址，但它已经有账户。请改用它登录该账户。",
+    "action": "登录",
+    "closing": "如果这不是你本人操作，可以忽略这封邮件。没有任何更改。"
+  },
+  "email_change": {
+    "subject": "确认你的新电子邮件地址",
+    "heading": "确认你的新电子邮件地址",
+    "body": "确认此地址后，你将使用它登录 {app} 账户。",
+    "action": "确认此地址",
+    "closing": "如果你没有请求此操作，可以忽略这封邮件。"
+  },
+  "email_change_approval": {
+    "subject": "批准更改你的 {app} 电子邮件地址",
+    "heading": "批准电子邮件地址更改",
+    "body": "有人登录了你的账户并请求将其改到另一个电子邮件地址。请在登录状态下批准以继续。",
+    "action": "批准更改",
+    "closing": "如果这不是你本人操作，请不要批准。请登录并修改密码，然后退出其他会话。"
+  },
+  "email_changed": {
+    "subject": "你的 {app} 电子邮件地址已更改",
+    "heading": "你的电子邮件地址已更改",
+    "body": "你的账户现在使用另一个电子邮件地址登录，此地址已不能再用于找回账户。",
+    "closing": "如果这不是你本人操作，请立即联系支持人员。"
+  },
+  "password_changed": {
+    "subject": "你的 {app} 密码已更改",
+    "heading": "你的密码已更改",
+    "body": "你的账户密码刚刚被更改。",
+    "closing": "如果这不是你本人操作，请通过邮件中的链接登录并设置新密码。"
+  },
+  "code_prompt": "或输入此验证码：",
+  "token_prompt": "请将此令牌粘贴到要求输入的位置：",
+  "mfa": {
+    "subject": "你的 {app} 验证码",
+    "heading": "你的验证码",
+    "body": "输入此验证码以完成登录：",
+    "closing": "如果你没有在登录，说明有人知道你的密码：请修改密码。"
+  }
+}

@@ -18,13 +18,22 @@
 ////
 //// A token, link or code is only revealed into the message body. A failed
 //// send is logged without it, and the auth flow reports the failure.
+////
+//// The default templates are written in the delivery's `locale` (see
+//// `auth.with_locales`), in English when there is none or no translation.
+//// Their words live in `auth/locales/emails/*.json`; after editing them,
+//// regenerate `howdy/auth/internal/emails_messages` with
+//// `cd i18n && gleam run -m howdy/i18n/cli -- gen --locales=../auth/locales/emails --out=../auth/src/howdy/auth/internal/emails_messages.gleam`.
 
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/string
 import howdy/auth.{type Delivery, type Purpose, Delivery}
+import howdy/auth/internal/emails_messages as words
 import howdy/auth/secret.{type Secret}
 import howdy/auth/user.{type User}
+import howdy/i18n.{type Translator}
+import howdy/locale
 import howdy/mail.{type Mailer, type Message}
 import howdy/mail/preview.{type Preview}
 import logging
@@ -38,7 +47,7 @@ pub opaque type Emails {
     mailer: Mailer,
     app_name: String,
     templates: List(#(Purpose, fn(Delivery) -> Message)),
-    mfa: Option(fn(String, Secret) -> Message),
+    mfa: Option(fn(String, Secret, Option(String)) -> Message),
   )
 }
 
@@ -60,10 +69,11 @@ pub fn with_template(
   ])
 }
 
-/// Build the MFA code email yourself, from the address and the code.
+/// Build the MFA code email yourself, from the address, the code and the
+/// recipient's locale, if they have one.
 pub fn with_mfa_template(
   emails: Emails,
-  build: fn(String, Secret) -> Message,
+  build: fn(String, Secret, Option(String)) -> Message,
 ) -> Emails {
   Emails(..emails, mfa: Some(build))
 }
@@ -84,7 +94,7 @@ pub fn deliver_mfa(emails: Emails) -> fn(User, Secret) -> Result(Nil, Nil) {
   fn(user: User, code: Secret) {
     send(
       emails,
-      mfa_message(emails, user.email, code),
+      mfa_message(emails, user.email, code, user.locale),
       "auth.mfa for user " <> user.id,
     )
   }
@@ -120,11 +130,16 @@ pub fn message(emails: Emails, delivery: Delivery) -> Message {
   |> mail.tag("auth." <> purpose_name(delivery.purpose))
 }
 
-/// The MFA code message.
-pub fn mfa_message(emails: Emails, email: String, code: Secret) -> Message {
+/// The MFA code message, in `locale` if it is given.
+pub fn mfa_message(
+  emails: Emails,
+  email: String,
+  code: Secret,
+  locale: Option(String),
+) -> Message {
   case emails.mfa {
-    Some(build) -> build(email, code)
-    None -> default_mfa(emails.app_name, code)
+    Some(build) -> build(email, code, locale)
+    None -> default_mfa(emails.app_name, code, locale)
   }
   |> mail.to([mail.address(email)])
   |> mail.tag("auth.mfa_code")
@@ -156,6 +171,22 @@ const purposes = [
 /// A preview of every template, grouped under "Auth", with made-up tokens,
 /// links and codes sent to `someone@example.com`.
 pub fn previews(emails: Emails) -> List(Preview) {
+  previews_for(emails, None, "Auth")
+}
+
+/// Previews of every template in each of `locales`, such as `["de", "ja"]`,
+/// grouped under "Auth (de)" and so on, to check translations in the admin.
+pub fn previews_in(emails: Emails, locales: List(String)) -> List(Preview) {
+  list.flat_map(locales, fn(tag) {
+    previews_for(emails, Some(tag), "Auth (" <> tag <> ")")
+  })
+}
+
+fn previews_for(
+  emails: Emails,
+  locale: Option(String),
+  group: String,
+) -> List(Preview) {
   let sample = fn(purpose) {
     let notice = purpose == auth.EmailChanged || purpose == auth.PasswordChanged
     let signs_in =
@@ -180,18 +211,24 @@ pub fn previews(emails: Emails) -> List(Preview) {
         True -> Some(secret.wrap("123456"))
         False -> None
       },
+      locale:,
     )
   }
   list.append(
     list.map(purposes, fn(purpose) {
       preview.new(title(purpose), fn() { message(emails, sample(purpose)) })
-      |> preview.in_group("Auth")
+      |> preview.in_group(group)
     }),
     [
       preview.new("MFA code", fn() {
-        mfa_message(emails, "someone@example.com", secret.wrap("482913"))
+        mfa_message(
+          emails,
+          "someone@example.com",
+          secret.wrap("482913"),
+          locale,
+        )
       })
-      |> preview.in_group("Auth"),
+      |> preview.in_group(group),
     ],
   )
 }
@@ -210,70 +247,63 @@ fn title(purpose: Purpose) -> String {
 
 // -- The default templates -----------------------------------------------------
 
-/// The default message for a delivery, without its recipient.
+/// The default message for a delivery, without its recipient, in the
+/// delivery's locale.
 pub fn default(app_name: String, delivery: Delivery) -> Message {
+  let t = translator(delivery.locale)
   let link = option.map(delivery.link, secret.reveal)
   let code = option.map(delivery.code, secret.reveal)
   let token = secret.reveal(delivery.token)
+  let app = app_name
   let #(subject, heading, paragraphs, action, closing) = case delivery.purpose {
     auth.SignIn -> #(
-      "Sign in to " <> app_name,
-      "Sign in to " <> app_name,
-      ["Use this to sign in. It works once and expires soon."],
-      "Sign in",
-      "If you did not ask to sign in, you can ignore this email.",
+      words.sign_in_subject(t, app:),
+      words.sign_in_heading(t, app:),
+      [words.sign_in_body(t)],
+      words.sign_in_action(t),
+      words.sign_in_closing(t),
     )
     auth.Registration -> #(
-      "Confirm your " <> app_name <> " account",
-      "Welcome to " <> app_name,
-      ["Confirm this address to finish creating your account."],
-      "Confirm and sign in",
-      "If you did not create an account, you can ignore this email.",
+      words.registration_subject(t, app:),
+      words.registration_heading(t, app:),
+      [words.registration_body(t)],
+      words.registration_action(t),
+      words.registration_closing(t),
     )
     auth.AlreadyRegistered -> #(
-      "You already have a " <> app_name <> " account",
-      "You already have an account",
-      [
-        "Someone asked to register this address, but it already has an account. Use this to sign in to it instead.",
-      ],
-      "Sign in",
-      "If this was not you, you can ignore this email. Nothing has changed.",
+      words.already_registered_subject(t, app:),
+      words.already_registered_heading(t),
+      [words.already_registered_body(t)],
+      words.already_registered_action(t),
+      words.already_registered_closing(t),
     )
     auth.EmailChange -> #(
-      "Confirm your new email address",
-      "Confirm your new email address",
-      [
-        "Confirm this address to make it the one your "
-        <> app_name
-        <> " account signs in with.",
-      ],
-      "Confirm this address",
-      "If you did not ask for this, you can ignore this email.",
+      words.email_change_subject(t),
+      words.email_change_heading(t),
+      [words.email_change_body(t, app:)],
+      words.email_change_action(t),
+      words.email_change_closing(t),
     )
     auth.EmailChangeApproval -> #(
-      "Approve your " <> app_name <> " email change",
-      "Approve the email change",
-      [
-        "Someone signed in to your account asked to move it to another email address. Approve it while signed in to go ahead.",
-      ],
-      "Approve the change",
-      "If this was not you, do not approve it. Sign in and change your password, and sign out of your other sessions.",
+      words.email_change_approval_subject(t, app:),
+      words.email_change_approval_heading(t),
+      [words.email_change_approval_body(t)],
+      words.email_change_approval_action(t),
+      words.email_change_approval_closing(t),
     )
     auth.EmailChanged -> #(
-      "Your " <> app_name <> " email address changed",
-      "Your email address changed",
-      [
-        "Your account now signs in with a different email address, and this one can no longer be used to recover it.",
-      ],
+      words.email_changed_subject(t, app:),
+      words.email_changed_heading(t),
+      [words.email_changed_body(t)],
       "",
-      "If you did not do this, contact support straight away.",
+      words.email_changed_closing(t),
     )
     auth.PasswordChanged -> #(
-      "Your " <> app_name <> " password changed",
-      "Your password changed",
-      ["The password for your account was just changed."],
+      words.password_changed_subject(t, app:),
+      words.password_changed_heading(t),
+      [words.password_changed_body(t)],
       "",
-      "If you did not do this, sign in with a link sent by email and set a new password.",
+      words.password_changed_closing(t),
     )
   }
   let credential = case delivery.purpose {
@@ -300,7 +330,7 @@ pub fn default(app_name: String, delivery: Delivery) -> Message {
         },
         case code {
           Some(code) -> [
-            paragraph("Or enter this code:"),
+            paragraph(words.code_prompt(t)),
             email.paragraph(
               [
                 style.font_size("28px"),
@@ -315,7 +345,7 @@ pub fn default(app_name: String, delivery: Delivery) -> Message {
         },
         case link, code {
           None, None -> [
-            paragraph("Paste this token where you were asked for it:"),
+            paragraph(words.token_prompt(t)),
             monospace(token),
           ]
           _, _ -> []
@@ -337,13 +367,11 @@ pub fn default(app_name: String, delivery: Delivery) -> Message {
               None -> []
             },
             case code {
-              Some(code) -> ["Or enter this code: " <> code]
+              Some(code) -> [words.code_prompt(t) <> " " <> code]
               None -> []
             },
             case link, code {
-              None, None -> [
-                "Paste this token where you were asked for it:\n" <> token,
-              ]
+              None, None -> [words.token_prompt(t) <> "\n" <> token]
               _, _ -> []
             },
           ])
@@ -354,6 +382,7 @@ pub fn default(app_name: String, delivery: Delivery) -> Message {
   mail.message()
   |> mail.subject(subject)
   |> mail.template(page(
+    t,
     app_name,
     preview: heading,
     content: list.flatten([
@@ -370,16 +399,23 @@ pub fn default(app_name: String, delivery: Delivery) -> Message {
   |> mail.text(plain)
 }
 
-/// The default MFA code message, without its recipient.
-pub fn default_mfa(app_name: String, code: Secret) -> Message {
+/// The default MFA code message, without its recipient, in `locale` if it
+/// is given.
+pub fn default_mfa(
+  app_name: String,
+  code: Secret,
+  locale: Option(String),
+) -> Message {
+  let t = translator(locale)
+  let heading = words.mfa_heading(t)
   mail.message()
-  |> mail.subject("Your " <> app_name <> " verification code")
+  |> mail.subject(words.mfa_subject(t, app: app_name))
   |> mail.template(
-    page(app_name, preview: "Your verification code", content: [
+    page(t, app_name, preview: heading, content: [
       email.h1([style.font_size("24px"), style.line_height("32px")], [
-        html.text("Your verification code"),
+        html.text(heading),
       ]),
-      paragraph("Enter this code to finish signing in:"),
+      paragraph(words.mfa_body(t)),
       email.paragraph(
         [
           style.font_size("28px"),
@@ -389,23 +425,43 @@ pub fn default_mfa(app_name: String, code: Secret) -> Message {
         ],
         [html.text(secret.reveal(code))],
       ),
-      small("If you are not signing in, someone has your password: change it."),
+      small(words.mfa_closing(t)),
     ]),
   )
   |> mail.text(
-    "Your verification code\n\nEnter this code to finish signing in: "
+    heading
+    <> "\n\n"
+    <> words.mfa_body(t)
+    <> " "
     <> secret.reveal(code)
-    <> "\n\nIf you are not signing in, someone has your password: change it.\n\n-- \n"
+    <> "\n\n"
+    <> words.mfa_closing(t)
+    <> "\n\n-- \n"
     <> app_name,
   )
 }
 
+/// A translator for a recipient's locale, English when there is none.
+fn translator(locale: Option(String)) -> Translator {
+  i18n.new(option.unwrap(locale, "en"))
+}
+
 fn page(
+  t: Translator,
   app_name: String,
   preview preview: String,
   content content: List(html.Element),
 ) -> html.Element {
-  email.html([attribute.lang("en")], [
+  let tag = i18n.locale(t)
+  let direction = case locale.parse(tag) {
+    Ok(parsed) ->
+      case locale.right_to_left(parsed) {
+        True -> "rtl"
+        False -> "ltr"
+      }
+    Error(Nil) -> "ltr"
+  }
+  email.html([attribute.lang(tag), attribute.dir(direction)], [
     email.head([], []),
     email.body(
       [

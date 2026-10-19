@@ -3,6 +3,7 @@
 
 import gleam/dynamic/decode
 import gleam/json
+import gleam/option.{type Option}
 import gleam/time/calendar
 import gleam/time/timestamp.{type Timestamp}
 
@@ -10,7 +11,10 @@ import gleam/time/timestamp.{type Timestamp}
 /// `updated_at` moves when the user is suspended or resumed, changes group,
 /// or has a field changed; credentials and sessions do not move it. Both are
 /// whole seconds. `created_at` is the epoch for a user who predates it and
-/// whose registration has been pruned from the audit trail.
+/// whose registration has been pruned from the audit trail. `locale` is
+/// the BCP 47 tag pages and emails use for the user, such as `de`: the
+/// locale they registered in, or one they chose; `None` for a user who
+/// predates it or was provisioned without one.
 pub type User {
   User(
     id: String,
@@ -18,6 +22,7 @@ pub type User {
     group_id: String,
     created_at: Timestamp,
     updated_at: Timestamp,
+    locale: Option(String),
   )
 }
 
@@ -66,6 +71,7 @@ pub fn to_json(user: User) -> json.Json {
     #("group_id", json.string(user.group_id)),
     #("created_at", time_to_json(user.created_at)),
     #("updated_at", time_to_json(user.updated_at)),
+    #("locale", json.nullable(user.locale, json.string)),
   ])
 }
 
@@ -82,11 +88,13 @@ pub fn row() -> decode.Decoder(User) {
   use group_id <- decode.field(2, decode.string)
   use created_at <- decode.field(3, decode.int)
   use updated_at <- decode.field(4, decode.int)
+  use locale <- decode.field(5, decode.optional(decode.string))
   decode.success(User(
     id,
     email,
     group_id,
     timestamp.from_unix_seconds(created_at),
     timestamp.from_unix_seconds(updated_at),
+    locale,
   ))
 }

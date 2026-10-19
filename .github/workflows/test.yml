@@ -272,6 +272,49 @@ jobs:
       - run: gleam test
       - run: gleam format --check src test
 
+  i18n:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: i18n
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cache/gleam
+            i18n/build/packages
+          key: gleam-i18n-${{ hashFiles('**/gleam.toml', '**/manifest.toml') }}
+          restore-keys: gleam-i18n-
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "29"
+          gleam-version: "1.18.1"
+          rebar3-version: "3"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: $GITHUB_WORKSPACE/scripts/ci-deps.sh
+      - run: gleam test
+      # The package has no Erlang-only code, so it is tested on JavaScript
+      # too.
+      - run: gleam test --target javascript
+      - run: gleam format --check src test
+      # Generated translations must match their catalogues.
+      - name: Translations are up to date
+        run: |
+          gleam run -m howdy/i18n/cli -- check --locales=test/fixtures/locales
+          gleam run -m howdy/i18n/cli -- check --locales=../ui/locales
+          gleam run -m howdy/i18n/cli -- check --locales=../auth/locales/pages
+          gleam run -m howdy/i18n/cli -- check --locales=../auth/locales/emails
+          gleam run -m howdy/i18n/cli -- check --locales=../locales/problem
+          gleam run -m howdy/i18n/cli -- gen --locales=../locales/problem --out=../src/howdy/problem/translations.gleam --standalone
+          gleam run -m howdy/i18n/cli -- gen --locales=test/fixtures/locales --out=test/howdy/i18n/fixture_messages.gleam
+          gleam run -m howdy/i18n/cli -- gen --locales=../ui/locales --out=../ui/src/howdy/ui/internal/messages.gleam
+          gleam run -m howdy/i18n/cli -- gen --locales=../auth/locales/pages --out=../auth/src/howdy/auth/internal/pages_messages.gleam
+          gleam run -m howdy/i18n/cli -- gen --locales=../auth/locales/emails --out=../auth/src/howdy/auth/internal/emails_messages.gleam
+          git diff --exit-code -- ../src/howdy/problem/translations.gleam test/howdy/i18n/fixture_messages.gleam ../ui/src/howdy/ui/internal/messages.gleam ../auth/src/howdy/auth/internal/pages_messages.gleam ../auth/src/howdy/auth/internal/emails_messages.gleam
+
   flags:
     runs-on: ubuntu-latest
     services:
@@ -477,7 +520,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        example: [simple, guards, chat, live, remote, admin, openapi, gallery, notifications]
+        example: [simple, guards, chat, live, remote, admin, openapi, gallery, notifications, i18n]
     defaults:
       run:
         working-directory: examples/${{ matrix.example }}

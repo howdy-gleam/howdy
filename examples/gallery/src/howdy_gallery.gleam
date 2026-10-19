@@ -14,12 +14,14 @@ import gleam/int
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/otp/static_supervisor as supervisor
+import gleam/result
 import gleam/string
 import gleam/uri
 import howdy
 import howdy/controller.{type Context}
 import howdy/cookie
 import howdy/form
+import howdy/i18n
 import howdy/query
 import howdy/storage/local
 import howdy/ui
@@ -32,11 +34,13 @@ import howdy/ui/calendar.{type Date, Date}
 import howdy/ui/chart
 import howdy/ui/command
 import howdy/ui/data_table.{Ascending, Descending, Links, Sort}
+import howdy/ui/direction
 import howdy/ui/gallery
 import howdy/ui/live
 import howdy/ui/page
 import howdy/ui/questionnaire
 import howdy/ui/toast
+import howdy/ui/words
 import howdy/validate
 import howdy_gallery/chat
 import howdy_gallery/inbox
@@ -162,7 +166,7 @@ fn survey_page(ctx: Context, asked: questionnaire.Questionnaire) {
       ]),
     ]
     False -> [
-      questionnaire.view(asked, [
+      questionnaire.view(words.english(), asked, [
         attribute.method("post"),
         attribute.action("/survey"),
       ]),
@@ -291,7 +295,7 @@ fn dashboard(ctx: Context) {
       ]),
     ]),
     live.mount("/live/orders"),
-    ui.toast_region([], greeting),
+    ui.toast_region(words.english(), [], greeting),
   ]
   use page <- shell(ctx, "Dashboard", "/", content)
   page.live(page)
@@ -299,22 +303,30 @@ fn dashboard(ctx: Context) {
 
 fn components(ctx: Context) {
   use sort_column <- query.string_or(ctx, "sort", default: "")
-  use direction <- query.string_or(ctx, "dir", default: "asc")
+  use sort_direction <- query.string_or(ctx, "dir", default: "asc")
   use page_number <- query.int_or(ctx, "page", default: 3)
   use day <- query.string_or(ctx, "day", default: "")
+  use lang <- query.string_or(ctx, "lang", default: "en")
+  // `?lang=de` shows the components that speak in another language.
+  let w = case lang {
+    "en" -> words.english()
+    _ -> words.translated(i18n.new(lang))
+  }
   let now = today()
   let sort = case sort_column {
     "" -> None
     column ->
       Some(
-        Sort(column:, direction: case direction {
+        Sort(column:, direction: case sort_direction {
           "desc" -> Descending
           _ -> Ascending
         }),
       )
   }
   let sort_href = fn(sort: data_table.Sort) {
-    "/components?sort="
+    "/components?lang="
+    <> lang
+    <> "&sort="
     <> sort.column
     <> "&dir="
     <> case sort.direction {
@@ -323,117 +335,149 @@ fn components(ctx: Context) {
     }
   }
   let chosen = calendar.from_iso(day)
+  let languages =
+    list.map(["en", ..list.filter(words.locales(), fn(l) { l != "en" })], fn(l) {
+      let name = i18n.language_name(l) |> result.unwrap(l)
+      case l == lang {
+        True -> html.strong([attribute.lang(l)], [text(name)])
+        False ->
+          html.a([attribute.href("/components?lang=" <> l), attribute.lang(l)], [
+            text(name),
+          ])
+      }
+    })
   let content = [
-    ui.stack([attribute.style("gap", "1.5rem")], [
-      section("Line chart", [
-        chart.line(
-          title: "Response time by region, milliseconds",
-          labels: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
-          series: [
-            chart.Series("Europe", [
-              120.0,
-              132.0,
-              101.0,
-              134.0,
-              90.0,
-              230.0,
-              210.0,
-            ]),
-            chart.Series("Americas", [
-              220.0,
-              182.0,
-              191.0,
-              234.0,
-              290.0,
-              330.0,
-              310.0,
-            ]),
-            chart.Series("Asia", [
-              150.0,
-              232.0,
-              201.0,
-              154.0,
-              190.0,
-              330.0,
-              410.0,
-            ]),
-          ],
-        )
-        |> chart.view,
-      ]),
-      section("Data table, sorted with links", [
-        data_table.new(
-          [
-            data_table.column("name", "Name", fn(row: #(String, Int)) {
-              text(row.0)
-            })
-              |> data_table.sortable(fn(a: #(String, Int), b: #(String, Int)) {
-                string.compare(a.0, b.0)
-              }),
-            data_table.column("seats", "Seats", fn(row: #(String, Int)) {
-              text(int.to_string(row.1))
-            })
-              |> data_table.sortable(fn(a: #(String, Int), b: #(String, Int)) {
-                int.compare(a.1, b.1)
+    ui.direction(direction.of_tag(w.locale), [attribute.lang(w.locale)], [
+      ui.stack([attribute.style("gap", "1.5rem")], [
+        section("Language", [
+          ui.muted(
+            "The chart, data table, pagination, calendar and toast below speak the chosen language.",
+          ),
+          ui.row([attribute.style("flex-wrap", "wrap")], languages),
+        ]),
+        section("Line chart", [
+          chart.line(
+            title: "Response time by region, milliseconds",
+            labels: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
+            series: [
+              chart.Series("Europe", [
+                120.0,
+                132.0,
+                101.0,
+                134.0,
+                90.0,
+                230.0,
+                210.0,
+              ]),
+              chart.Series("Americas", [
+                220.0,
+                182.0,
+                191.0,
+                234.0,
+                290.0,
+                330.0,
+                310.0,
+              ]),
+              chart.Series("Asia", [
+                150.0,
+                232.0,
+                201.0,
+                154.0,
+                190.0,
+                330.0,
+                410.0,
+              ]),
+            ],
+          )
+          |> chart.words(w)
+          |> chart.view,
+        ]),
+        section("Data table, sorted with links", [
+          data_table.new(
+            [
+              data_table.column("name", "Name", fn(row: #(String, Int)) {
+                text(row.0)
               })
-              |> data_table.numeric,
-          ],
-          [#("Acme", 12), #("Globex", 48), #("Initech", 7), #("Umbrella", 150)],
-        )
-        |> data_table.sort(sort, by: Links(sort_href))
-        |> data_table.caption([text("Customers by seats")])
-        |> data_table.view,
-      ]),
-      section("Pagination", [
-        ui.pagination(current: page_number, total: 12, href: fn(n) {
-          "/components?page=" <> int.to_string(n)
-        }),
-      ]),
-      section("Calendar in a form", [
-        html.form([attribute.action("/components")], [
-          ui.stack([], [
-            calendar.new("day", year: now.year, month: now.month)
-              |> calendar.today(now)
-              |> calendar.selected(option.from_result(chosen))
-              |> calendar.name("day")
-              |> calendar.view,
-            ui.row([], [
-              ui.submit_button(Primary, [], [text("Choose")]),
-              case chosen {
-                Ok(date) ->
-                  ui.muted("You chose " <> calendar.long_date(date) <> ".")
-                Error(Nil) -> ui.muted("Pick a day and choose it.")
-              },
+                |> data_table.sortable(fn(a: #(String, Int), b: #(String, Int)) {
+                  string.compare(a.0, b.0)
+                }),
+              data_table.column("seats", "Seats", fn(row: #(String, Int)) {
+                text(int.to_string(row.1))
+              })
+                |> data_table.sortable(fn(a: #(String, Int), b: #(String, Int)) {
+                  int.compare(a.1, b.1)
+                })
+                |> data_table.numeric,
+            ],
+            [
+              #("Acme", 12),
+              #("Globex", 48),
+              #("Initech", 7),
+              #("Umbrella", 150),
+            ],
+          )
+          |> data_table.sort(sort, by: Links(sort_href))
+          |> data_table.caption([text("Customers by seats")])
+          |> data_table.words(w)
+          |> data_table.view,
+        ]),
+        section("Pagination", [
+          ui.pagination(w, current: page_number, total: 12, href: fn(n) {
+            "/components?lang=" <> lang <> "&page=" <> int.to_string(n)
+          }),
+        ]),
+        section("Calendar in a form", [
+          html.form([attribute.action("/components")], [
+            html.input([
+              attribute.type_("hidden"),
+              attribute.name("lang"),
+              attribute.value(lang),
+            ]),
+            ui.stack([], [
+              calendar.new("day", year: now.year, month: now.month)
+                |> calendar.locale(w.calendar)
+                |> calendar.today(now)
+                |> calendar.selected(option.from_result(chosen))
+                |> calendar.name("day")
+                |> calendar.view,
+              ui.row([], [
+                ui.submit_button(Primary, [], [text("Choose")]),
+                case chosen {
+                  Ok(date) ->
+                    ui.muted("You chose " <> calendar.long_date(date) <> ".")
+                  Error(Nil) -> ui.muted("Pick a day and choose it.")
+                },
+              ]),
             ]),
           ]),
         ]),
-      ]),
-      section("Command menu", [
-        html.div([attribute.class("gallery-command")], [
-          ui.command(
-            "fruit",
-            placeholder: "Search fruit…",
-            attributes: [],
-            children: [
-              ui.command_group("Fruit", [
-                ui.command_item([], [text("Apple")]),
-                ui.command_item([], [text("Banana")]),
-                ui.command_item([attribute.aria_disabled(True)], [
-                  text("Blueberry"),
+        section("Command menu", [
+          html.div([attribute.class("gallery-command")], [
+            ui.command(
+              "fruit",
+              placeholder: "Search fruit…",
+              attributes: [],
+              children: [
+                ui.command_group("Fruit", [
+                  ui.command_item([], [text("Apple")]),
+                  ui.command_item([], [text("Banana")]),
+                  ui.command_item([attribute.aria_disabled(True)], [
+                    text("Blueberry"),
+                  ]),
+                  ui.command_item([], [text("Cherry")]),
                 ]),
-                ui.command_item([], [text("Cherry")]),
-              ]),
-              ui.command_group("Vegetables", [
-                ui.command_item([], [text("Carrot")]),
-                ui.command_item([], [text("Leek")]),
-              ]),
-              ui.command_empty([text("Nothing grows by that name.")]),
-            ],
-          ),
+                ui.command_group("Vegetables", [
+                  ui.command_item([], [text("Carrot")]),
+                  ui.command_item([], [text("Leek")]),
+                ]),
+                ui.command_empty([text("Nothing grows by that name.")]),
+              ],
+            ),
+          ]),
         ]),
       ]),
     ]),
-    ui.toast_region([], [
+    ui.toast_region(w, [], [
       toast.toast(toast.Info, [toast.persistent()], [
         toast.title([text("This one stays")]),
         toast.description([text("Persistent toasts wait to be closed.")]),
@@ -448,6 +492,7 @@ fn components(ctx: Context) {
 /// The ⌘K command menu: every page, searchable.
 fn search() -> Element(msg) {
   ui.command_dialog(
+    words.english(),
     "search",
     shortcut: "k",
     attributes: [],

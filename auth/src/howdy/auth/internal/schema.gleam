@@ -413,6 +413,16 @@ UPDATE howdy_auth_sessions SET method = pre_impersonation_method;
 ",
       ),
     ),
+    // The locale pages and emails use for a user: the one the request that
+    // registered them asked for, or one they chose. NULL for users who
+    // predate it, who get whatever their requests ask for.
+    gloo_migration.new(
+      19,
+      "add_user_locale",
+      "
+ALTER TABLE howdy_auth_users ADD COLUMN locale TEXT;
+",
+    ),
   ])
 }
 

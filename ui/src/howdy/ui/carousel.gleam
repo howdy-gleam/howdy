@@ -2,7 +2,7 @@
 //// and next buttons.
 ////
 //// ```gleam
-//// carousel.carousel("tour", label: "Product tour", attributes: [], slides: [
+//// carousel.carousel(words.english(), "tour", label: "Product tour", attributes: [], slides: [
 ////   carousel.slide([ui.card([], [text("One")])]),
 ////   carousel.slide([ui.card([], [text("Two")])]),
 //// ])
@@ -27,6 +27,7 @@ import gleam/int
 import gleam/list
 import howdy/ui/style.{class}
 import howdy/ui/theme/tokens
+import howdy/ui/words.{type Words}
 import lustre/attribute.{type Attribute}
 import lustre/element.{type Element, text}
 import lustre/element/html
@@ -50,12 +51,14 @@ pub type Orientation {
 }
 
 pub fn carousel(
+  words: Words,
   id: String,
   label label: String,
   attributes attributes: List(Attribute(msg)),
   slides slides: List(Slide(msg)),
 ) -> Element(msg) {
   styled(
+    words,
     id,
     label:,
     orientation: Horizontal,
@@ -69,6 +72,7 @@ pub fn carousel(
 /// last slide goes back to the first, and previous on the first to the
 /// last.
 pub fn styled(
+  words: Words,
   id: String,
   label label: String,
   orientation orientation: Orientation,
@@ -76,15 +80,15 @@ pub fn styled(
   attributes attributes: List(Attribute(msg)),
   slides slides: List(Slide(msg)),
 ) -> Element(msg) {
-  let count = int.to_string(list.length(slides))
+  let count = list.length(slides)
   let viewport = id <> "-slides"
   let looping = case looping {
     True -> [attribute.data("loop", "")]
     False -> []
   }
-  let #(orientation_name, previous, next) = case orientation {
-    Horizontal -> #("horizontal", "Previous slide", "Next slide")
-    Vertical -> #("vertical", "Previous slide", "Next slide")
+  let orientation_name = case orientation {
+    Horizontal -> "horizontal"
+    Vertical -> "vertical"
   }
   html.section(
     [
@@ -93,7 +97,7 @@ pub fn styled(
       attribute.data("index", "0"),
       attribute.id(id),
       attribute.aria_label(label),
-      attribute.attribute("aria-roledescription", "carousel"),
+      attribute.attribute("aria-roledescription", words.carousel),
       attribute.data("howdy-carousel", ""),
       ..list.append(looping, attributes)
     ],
@@ -109,8 +113,8 @@ pub fn styled(
             [
               class(slide_class()),
               attribute.role("group"),
-              attribute.attribute("aria-roledescription", "slide"),
-              attribute.aria_label(int.to_string(index + 1) <> " of " <> count),
+              attribute.attribute("aria-roledescription", words.slide),
+              attribute.aria_label(words.position(index + 1, count)),
             ],
             slide.children,
           )
@@ -122,15 +126,17 @@ pub fn styled(
           [
             class(play_class()),
             attribute.type_("button"),
-            attribute.aria_label("Pause slides"),
+            attribute.aria_label(words.pause_slides),
             attribute.aria_controls(viewport),
             attribute.data("howdy-carousel-play", ""),
+            attribute.data("text-pause", words.pause_slides),
+            attribute.data("text-play", words.play_slides),
           ],
           // Drawn by the stylesheet: two bars, or a triangle once paused.
           [html.span([attribute.aria_hidden(True)], [])],
         ),
-        control("previous", previous, "‹", viewport),
-        control("next", next, "›", viewport),
+        control("previous", words.previous_slide, "‹", viewport),
+        control("next", words.next_slide, "›", viewport),
       ]),
     ],
   )

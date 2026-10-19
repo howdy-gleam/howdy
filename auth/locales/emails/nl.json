@@ -1,0 +1,59 @@
+{
+  "@@locale": "nl",
+  "@@x-review": "machine translation, not yet reviewed by a native speaker",
+  "sign_in": {
+    "subject": "Inloggen bij {app}",
+    "heading": "Inloggen bij {app}",
+    "body": "Gebruik dit om in te loggen. Het werkt één keer en verloopt binnenkort.",
+    "action": "Inloggen",
+    "closing": "Als je niet hebt gevraagd om in te loggen, kun je deze e-mail negeren."
+  },
+  "registration": {
+    "subject": "Bevestig je {app}-account",
+    "heading": "Welkom bij {app}",
+    "body": "Bevestig dit adres om het aanmaken van je account af te ronden.",
+    "action": "Bevestigen en inloggen",
+    "closing": "Als je geen account hebt aangemaakt, kun je deze e-mail negeren."
+  },
+  "already_registered": {
+    "subject": "Je hebt al een {app}-account",
+    "heading": "Je hebt al een account",
+    "body": "Iemand wilde dit adres registreren, maar er bestaat al een account voor. Gebruik dit om daar in te loggen.",
+    "action": "Inloggen",
+    "closing": "Als jij dit niet was, kun je deze e-mail negeren. Er is niets veranderd."
+  },
+  "email_change": {
+    "subject": "Bevestig je nieuwe e-mailadres",
+    "heading": "Bevestig je nieuwe e-mailadres",
+    "body": "Bevestig dit adres om er voortaan mee in te loggen bij je {app}-account.",
+    "action": "Dit adres bevestigen",
+    "closing": "Als je dit niet hebt gevraagd, kun je deze e-mail negeren."
+  },
+  "email_change_approval": {
+    "subject": "Keur de wijziging van je {app}-e-mailadres goed",
+    "heading": "Keur de wijziging van je e-mailadres goed",
+    "body": "Iemand die in je account is ingelogd, wil het naar een ander e-mailadres verplaatsen. Keur dit goed terwijl je bent ingelogd om door te gaan.",
+    "action": "De wijziging goedkeuren",
+    "closing": "Als jij dit niet was, keur het dan niet goed. Log in, wijzig je wachtwoord en log uit bij je andere sessies."
+  },
+  "email_changed": {
+    "subject": "Je {app}-e-mailadres is gewijzigd",
+    "heading": "Je e-mailadres is gewijzigd",
+    "body": "Je account logt nu in met een ander e-mailadres, en dit adres kan niet meer worden gebruikt om het te herstellen.",
+    "closing": "Als jij dit niet hebt gedaan, neem dan meteen contact op met support."
+  },
+  "password_changed": {
+    "subject": "Je {app}-wachtwoord is gewijzigd",
+    "heading": "Je wachtwoord is gewijzigd",
+    "body": "Het wachtwoord van je account is zojuist gewijzigd.",
+    "closing": "Als jij dit niet hebt gedaan, log dan in met een link per e-mail en stel een nieuw wachtwoord in."
+  },
+  "code_prompt": "Of voer deze code in:",
+  "token_prompt": "Plak dit token waar erom werd gevraagd:",
+  "mfa": {
+    "subject": "Je {app}-verificatiecode",
+    "heading": "Je verificatiecode",
+    "body": "Voer deze code in om het inloggen af te ronden:",
+    "closing": "Als je niet aan het inloggen bent, kent iemand je wachtwoord: wijzig het."
+  }
+}

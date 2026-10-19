@@ -1,0 +1,18 @@
+{
+  "@@locale": "ar",
+  "@@x-review": "machine translation, not yet reviewed by a native speaker",
+  "blank": "يجب ألا يكون فارغًا",
+  "email": "يجب أن يكون عنوان بريد إلكتروني صالحًا",
+  "file_too_large": "يجب ألا يزيد حجمه على {maximum}",
+  "file_type": "يجب أن يكون من أحد الأنواع التالية: {allowed}",
+  "integer": "يجب أن يكون عددًا صحيحًا",
+  "one_of": "يجب أن يكون إحدى القيم التالية: {allowed}",
+  "repeated": "يجب أن يظهر مرة واحدة فقط",
+  "required": "مطلوب",
+  "too_few_items": "يجب ألا يقل عن {minimum, plural, zero {# عنصر} one {عنصر واحد} two {عنصرين} few {# عناصر} many {# عنصرًا} other {# عنصر}}",
+  "too_large": "يجب ألا يزيد على {maximum, number}",
+  "too_long": "يجب ألا يزيد على {maximum, plural, zero {# حرف} one {حرف واحد} two {حرفين} few {# أحرف} many {# حرفًا} other {# حرف}}",
+  "too_many_items": "يجب ألا يزيد على {maximum, plural, zero {# عنصر} one {عنصر واحد} two {عنصرين} few {# عناصر} many {# عنصرًا} other {# عنصر}}",
+  "too_short": "يجب ألا يقل عن {minimum, plural, zero {# حرف} one {حرف واحد} two {حرفين} few {# أحرف} many {# حرفًا} other {# حرف}}",
+  "too_small": "يجب ألا يقل عن {minimum, number}"
+}

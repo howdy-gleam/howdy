@@ -12,8 +12,9 @@ import gleam/result
 import gleam/string
 
 pub type Kind {
-  /// A component module. It depends on `howdy/ui/style`, tokens and, for a
-  /// few, other components, which copying it copies too.
+  /// A component module. It depends on `howdy/ui/style`, tokens,
+  /// `howdy/ui/words` and, for a few, other components, which copying it
+  /// copies too.
   Component
   /// A screen or card composed of components. Copying one copies the
   /// components it uses and points its imports at the copies.

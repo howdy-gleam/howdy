@@ -95,6 +95,7 @@ fn enroll_as(
     email:,
     group_id:,
     login_key:,
+    locale: config.locale,
   ))
   audit.event_from(conn, id, "user.registered", System, group_id, client)
 }
@@ -120,7 +121,10 @@ pub fn provision_with(
   use _ <- result.try(case taken {
     False -> Ok(Nil)
     True ->
-      Error(service.Conflict("an account already exists for this address"))
+      Error(service.Coded(
+        "email_taken",
+        service.Conflict("an account already exists for this address"),
+      ))
   })
   use writes <- result.try(field.writes(changes, Some(group_id)))
   let id = token.new()
@@ -130,6 +134,7 @@ pub fn provision_with(
     email:,
     group_id:,
     login_key:,
+    locale: config.locale,
   ))
   use _ <- result.try(case writes {
     [] -> Ok(Nil)
@@ -208,8 +213,23 @@ pub fn request_email_change(
   })
   deliver_email_change(config, digest, case config.email_change_approval {
     True ->
-      common.delivery(config, user.email, secret, EmailChangeApproval, None)
-    False -> common.delivery(config, email, secret, EmailChange, None)
+      common.delivery(
+        config,
+        user.email,
+        secret,
+        EmailChangeApproval,
+        None,
+        common.recipient_locale(config, user.locale),
+      )
+    False ->
+      common.delivery(
+        config,
+        email,
+        secret,
+        EmailChange,
+        None,
+        common.recipient_locale(config, user.locale),
+      )
   })
 }
 
@@ -271,7 +291,14 @@ pub fn approve_email_change(
   deliver_email_change(
     config,
     token.digest(confirmation),
-    common.delivery(config, change.new_email, confirmation, EmailChange, None),
+    common.delivery(
+      config,
+      change.new_email,
+      confirmation,
+      EmailChange,
+      None,
+      common.recipient_locale(config, principal.user.locale),
+    ),
   )
 }
 
@@ -297,7 +324,11 @@ fn available_email(
   email: String,
 ) -> service.Result(Nil) {
   use _ <- result.try(case user.email == email {
-    True -> Error(service.Invalid("choose a different email address"))
+    True ->
+      Error(service.Coded(
+        "email_unchanged",
+        service.Invalid("choose a different email address"),
+      ))
     False -> Ok(Nil)
   })
   use taken <- result.try(store.login_key_taken(
@@ -305,7 +336,11 @@ fn available_email(
     group.login_key(config.groups, user.group_id, email),
   ))
   case taken {
-    True -> Error(service.Conflict("email address is unavailable"))
+    True ->
+      Error(service.Coded(
+        "email_taken",
+        service.Conflict("email address is unavailable"),
+      ))
     False -> Ok(Nil)
   }
 }
@@ -360,6 +395,7 @@ pub fn confirm_email_change(
       "",
       EmailChanged,
       None,
+      common.recipient_locale(config, principal.user.locale),
     ))
   Ok(Nil)
 }
@@ -437,7 +473,11 @@ pub fn delete_account(
   ))
   use _ <- result.try(case user.email == confirm_email {
     True -> Ok(Nil)
-    False -> Error(service.Invalid("confirm your current email address"))
+    False ->
+      Error(service.Coded(
+        "email_mismatch",
+        service.Invalid("confirm your current email address"),
+      ))
   })
   use _ <- result.try(cleanup(conn, user))
   use _ <- result.try(store.delete_challenges_for_user(conn, user.id))
@@ -514,4 +554,22 @@ pub fn add_device_session(
   list.drop(others, list.length(evicted))
   |> list.map(fn(entry) { entry.0 })
   |> list.append([new])
+}
+
+// -- Locale -------------------------------------------------------------------
+
+pub fn set_locale(
+  config: Config,
+  principal: Principal,
+  locale: Option(String),
+) -> service.Result(Nil) {
+  use conn <- db.write_transaction(config.repo, touching: "howdy_auth_users")
+  use _ <- result.try(store.set_locale(conn, principal.user.id, locale))
+  audit.event(
+    conn,
+    principal.user.id,
+    "user.locale_changed",
+    Acting(principal),
+    option.unwrap(locale, ""),
+  )
 }

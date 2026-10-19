@@ -1,0 +1,59 @@
+{
+  "@@locale": "fr",
+  "@@x-review": "machine translation, not yet reviewed by a native speaker",
+  "sign_in": {
+    "subject": "Connexion à {app}",
+    "heading": "Connexion à {app}",
+    "body": "Utilisez ceci pour vous connecter. Ce lien ne fonctionne qu’une fois et expire bientôt.",
+    "action": "Se connecter",
+    "closing": "Si vous n’avez pas demandé à vous connecter, vous pouvez ignorer cet e-mail."
+  },
+  "registration": {
+    "subject": "Confirmez votre compte {app}",
+    "heading": "Bienvenue sur {app}",
+    "body": "Confirmez cette adresse pour terminer la création de votre compte.",
+    "action": "Confirmer et se connecter",
+    "closing": "Si vous n’avez pas créé de compte, vous pouvez ignorer cet e-mail."
+  },
+  "already_registered": {
+    "subject": "Vous avez déjà un compte {app}",
+    "heading": "Vous avez déjà un compte",
+    "body": "Quelqu’un a demandé à inscrire cette adresse, mais elle a déjà un compte. Utilisez plutôt ceci pour vous y connecter.",
+    "action": "Se connecter",
+    "closing": "Si ce n’était pas vous, vous pouvez ignorer cet e-mail. Rien n’a changé."
+  },
+  "email_change": {
+    "subject": "Confirmez votre nouvelle adresse e-mail",
+    "heading": "Confirmez votre nouvelle adresse e-mail",
+    "body": "Confirmez cette adresse pour en faire celle qui permet de vous connecter à votre compte {app}.",
+    "action": "Confirmer cette adresse",
+    "closing": "Si vous n’avez rien demandé, vous pouvez ignorer cet e-mail."
+  },
+  "email_change_approval": {
+    "subject": "Approuvez le changement d’adresse e-mail de {app}",
+    "heading": "Approuver le changement d’adresse e-mail",
+    "body": "Une personne connectée à votre compte a demandé à le transférer vers une autre adresse e-mail. Approuvez-le en étant connecté pour continuer.",
+    "action": "Approuver le changement",
+    "closing": "Si ce n’était pas vous, ne l’approuvez pas. Connectez-vous, changez votre mot de passe et déconnectez vos autres sessions."
+  },
+  "email_changed": {
+    "subject": "Votre adresse e-mail {app} a changé",
+    "heading": "Votre adresse e-mail a changé",
+    "body": "Votre compte se connecte désormais avec une autre adresse e-mail, et celle-ci ne peut plus servir à le récupérer.",
+    "closing": "Si vous n’êtes pas à l’origine de ce changement, contactez immédiatement l’assistance."
+  },
+  "password_changed": {
+    "subject": "Votre mot de passe {app} a changé",
+    "heading": "Votre mot de passe a changé",
+    "body": "Le mot de passe de votre compte vient d’être modifié.",
+    "closing": "Si vous n’êtes pas à l’origine de ce changement, connectez-vous avec un lien envoyé par e-mail et choisissez un nouveau mot de passe."
+  },
+  "code_prompt": "Ou saisissez ce code :",
+  "token_prompt": "Collez ce jeton là où il vous a été demandé :",
+  "mfa": {
+    "subject": "Votre code de vérification {app}",
+    "heading": "Votre code de vérification",
+    "body": "Saisissez ce code pour terminer la connexion :",
+    "closing": "Si vous n’êtes pas en train de vous connecter, quelqu’un connaît votre mot de passe : changez-le."
+  }
+}

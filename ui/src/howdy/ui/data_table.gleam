@@ -37,6 +37,7 @@ import howdy/ui/button
 import howdy/ui/menu
 import howdy/ui/style.{class}
 import howdy/ui/theme/tokens
+import howdy/ui/words.{type Words} as ui_words
 import lustre/attribute.{type Attribute}
 import lustre/element.{type Element, text}
 import lustre/element/html
@@ -109,9 +110,10 @@ pub opaque type DataTable(row, msg) {
     sort: Option(Sort),
     sort_by: Option(SortBy(msg)),
     selection: Option(Selection(row, msg)),
-    empty: List(Element(msg)),
+    empty: Option(List(Element(msg))),
     caption: List(Element(msg)),
     hidden: List(String),
+    words: Words,
   )
 }
 
@@ -125,9 +127,10 @@ pub fn new(
     sort: None,
     sort_by: None,
     selection: None,
-    empty: [text("No results.")],
+    empty: None,
     caption: [],
     hidden: [],
+    words: ui_words.english(),
   )
 }
 
@@ -158,12 +161,19 @@ pub fn selectable(
   )
 }
 
-/// What to show when there are no rows.
+/// What to show when there are no rows, instead of the words'
+/// `no_results`.
 pub fn empty(
   table: DataTable(row, msg),
   children: List(Element(msg)),
 ) -> DataTable(row, msg) {
-  DataTable(..table, empty: children)
+  DataTable(..table, empty: Some(children))
+}
+
+/// Speak another language: the empty message and the selection
+/// checkboxes' labels. English by default.
+pub fn words(table: DataTable(row, msg), words: Words) -> DataTable(row, msg) {
+  DataTable(..table, words:)
 }
 
 /// A caption under the table, which also names it for screen readers.
@@ -253,7 +263,7 @@ pub fn view(table: DataTable(row, msg)) -> Element(msg) {
             class(empty_class()),
             attribute.attribute("colspan", int.to_string(width)),
           ],
-          table.empty,
+          option.unwrap(table.empty, [text(table.words.no_results)]),
         ),
       ]),
     ]
@@ -283,7 +293,7 @@ fn header(table: DataTable(row, msg), rows: List(row)) -> List(Element(msg)) {
           html.input([
             class(checkbox_class()),
             attribute.type_("checkbox"),
-            attribute.aria_label("Select all rows"),
+            attribute.aria_label(table.words.select_all_rows),
             attribute.checked(all),
             attribute.property("indeterminate", json.bool(some)),
             ..selection.toggle_all
@@ -372,7 +382,7 @@ fn row(table: DataTable(row, msg), record: row) -> Element(msg) {
             html.input([
               class(checkbox_class()),
               attribute.type_("checkbox"),
-              attribute.aria_label("Select row"),
+              attribute.aria_label(table.words.select_row),
               attribute.checked(checked),
               ..selection.toggle(key)
             ]),

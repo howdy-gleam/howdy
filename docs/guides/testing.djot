@@ -145,6 +145,7 @@ pub fn show_user_test() {
 For errors, assert on the status and the message:
 
 ```gleam
+import howdy/problem
 import howdy/service.{FieldError}
 
 pub fn blank_name_is_rejected_test() {
@@ -154,7 +155,7 @@ pub fn blank_name_is_rejected_test() {
 
   assert res.status == 422
   assert testing.field_errors(res)
-    == Ok([FieldError("name", "must not be empty")])
+    == Ok([FieldError("name", problem.Blank)])
 }
 ```
 

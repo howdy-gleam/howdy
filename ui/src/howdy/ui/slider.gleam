@@ -14,6 +14,7 @@ import gleam/pair
 import gleam/result
 import howdy/ui/style.{class}
 import howdy/ui/theme/tokens
+import howdy/ui/words.{type Words}
 import lustre/attribute.{type Attribute}
 import lustre/element.{type Element}
 import lustre/element/html
@@ -41,8 +42,10 @@ pub fn vertical() -> Attribute(msg) {
 /// price between £20 and £80. Each thumb is its own range input, named
 /// `low_name` and `high_name`, so both submit with a form and each can be
 /// moved with the keyboard; the thumbs cannot pass each other. `label`
-/// names the pair, and each thumb is announced as its minimum or maximum.
+/// names the pair, and each thumb is announced as its minimum or maximum,
+/// in the words' language.
 pub fn range(
+  words words: Words,
   label label: String,
   min min: Int,
   max max: Int,
@@ -53,6 +56,7 @@ pub fn range(
   attributes attributes: List(Attribute(msg)),
 ) -> Element(msg) {
   thumbs(
+    words:,
     label:,
     min:,
     max:,
@@ -68,6 +72,7 @@ pub fn range(
 /// neighbours. The track is filled from the first thumb to the last. Two
 /// thumbs are announced as the minimum and maximum; more as "2 of 3".
 pub fn thumbs(
+  words words: Words,
   label label: String,
   min min: Int,
   max max: Int,
@@ -93,9 +98,9 @@ pub fn thumbs(
   let last = list.last(values) |> result.map(pair.second) |> result.unwrap(max)
   let which = fn(index) {
     case count, index {
-      2, 0 -> "minimum"
-      2, _ -> "maximum"
-      _, _ -> int.to_string(index + 1) <> " of " <> int.to_string(count)
+      2, 0 -> words.minimum
+      2, _ -> words.maximum
+      _, _ -> words.position(index + 1, count)
     }
   }
   html.div(

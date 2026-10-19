@@ -1,7 +1,7 @@
 //// Breadcrumbs: the trail of pages above the current one.
 ////
 //// ```gleam
-//// breadcrumb.breadcrumb([], [
+//// breadcrumb.breadcrumb(words.english(), [], [
 ////   breadcrumb.link("/", [text("Home")]),
 ////   breadcrumb.ellipsis(),
 ////   breadcrumb.link("/orders", [text("Orders")]),
@@ -11,17 +11,20 @@
 
 import howdy/ui/style.{class}
 import howdy/ui/theme/tokens
+import howdy/ui/words.{type Words}
 import lustre/attribute.{type Attribute}
 import lustre/element.{type Element, text}
 import lustre/element/html
 import sketch/css.{type Class}
 import sketch/css/length.{rem}
 
+/// The trail, named for screen readers by the words' `breadcrumb`.
 pub fn breadcrumb(
+  words: Words,
   attributes: List(Attribute(msg)),
   items: List(Element(msg)),
 ) -> Element(msg) {
-  html.nav([attribute.aria_label("Breadcrumb"), ..attributes], [
+  html.nav([attribute.aria_label(words.breadcrumb), ..attributes], [
     html.ol([class(list_class())], items),
   ])
 }

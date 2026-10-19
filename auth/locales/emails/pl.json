@@ -1,0 +1,59 @@
+{
+  "@@locale": "pl",
+  "@@x-review": "machine translation, not yet reviewed by a native speaker",
+  "sign_in": {
+    "subject": "Zaloguj się do {app}",
+    "heading": "Zaloguj się do {app}",
+    "body": "Użyj tego, aby się zalogować. Działa tylko raz i wkrótce wygaśnie.",
+    "action": "Zaloguj się",
+    "closing": "Jeśli nie prosiłeś o logowanie, możesz zignorować tę wiadomość."
+  },
+  "registration": {
+    "subject": "Potwierdź swoje konto {app}",
+    "heading": "Witamy w {app}",
+    "body": "Potwierdź ten adres, aby dokończyć zakładanie konta.",
+    "action": "Potwierdź i zaloguj się",
+    "closing": "Jeśli nie zakładałeś konta, możesz zignorować tę wiadomość."
+  },
+  "already_registered": {
+    "subject": "Masz już konto {app}",
+    "heading": "Masz już konto",
+    "body": "Ktoś chciał zarejestrować ten adres, ale istnieje już dla niego konto. Użyj tego, aby się do niego zalogować.",
+    "action": "Zaloguj się",
+    "closing": "Jeśli to nie Ty, możesz zignorować tę wiadomość. Nic się nie zmieniło."
+  },
+  "email_change": {
+    "subject": "Potwierdź nowy adres e-mail",
+    "heading": "Potwierdź nowy adres e-mail",
+    "body": "Potwierdź ten adres, aby logować się nim do konta {app}.",
+    "action": "Potwierdź ten adres",
+    "closing": "Jeśli o to nie prosiłeś, możesz zignorować tę wiadomość."
+  },
+  "email_change_approval": {
+    "subject": "Zatwierdź zmianę adresu e-mail w {app}",
+    "heading": "Zatwierdź zmianę adresu e-mail",
+    "body": "Ktoś zalogowany na Twoje konto poprosił o przeniesienie go na inny adres e-mail. Zatwierdź to, będąc zalogowanym, aby kontynuować.",
+    "action": "Zatwierdź zmianę",
+    "closing": "Jeśli to nie Ty, nie zatwierdzaj. Zaloguj się, zmień hasło i wyloguj pozostałe sesje."
+  },
+  "email_changed": {
+    "subject": "Twój adres e-mail w {app} został zmieniony",
+    "heading": "Twój adres e-mail został zmieniony",
+    "body": "Twoje konto loguje się teraz innym adresem e-mail, a tego adresu nie można już użyć do jego odzyskania.",
+    "closing": "Jeśli to nie Ty, natychmiast skontaktuj się z pomocą techniczną."
+  },
+  "password_changed": {
+    "subject": "Twoje hasło w {app} zostało zmienione",
+    "heading": "Twoje hasło zostało zmienione",
+    "body": "Hasło do Twojego konta zostało właśnie zmienione.",
+    "closing": "Jeśli to nie Ty, zaloguj się za pomocą linku wysłanego e-mailem i ustaw nowe hasło."
+  },
+  "code_prompt": "Lub wpisz ten kod:",
+  "token_prompt": "Wklej ten token tam, gdzie zostałeś o niego poproszony:",
+  "mfa": {
+    "subject": "Twój kod weryfikacyjny {app}",
+    "heading": "Twój kod weryfikacyjny",
+    "body": "Wpisz ten kod, aby dokończyć logowanie:",
+    "closing": "Jeśli się nie logujesz, ktoś zna Twoje hasło: zmień je."
+  }
+}

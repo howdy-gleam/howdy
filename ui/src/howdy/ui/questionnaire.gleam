@@ -17,13 +17,13 @@
 //// ]
 ////
 //// // On a page: show the first question, then handle each post.
-//// questionnaire.view(questionnaire.start(questions), [attribute.method("post")])
+//// questionnaire.view(words.english(), questionnaire.start(questions), [attribute.method("post")])
 ////
 //// use fields <- form.read(ctx)
 //// let asked = questionnaire.submit(questions, form.fields(fields))
 //// case questionnaire.is_complete(asked) {
 ////   True -> save(questionnaire.answers(asked))
-////   False -> render(questionnaire.view(asked, [attribute.method("post")]))
+////   False -> render(questionnaire.view(words.english(), asked, [attribute.method("post")]))
 //// }
 //// ```
 ////
@@ -38,6 +38,10 @@
 //// answer is checked again, since earlier ones came back from the form,
 //// and the first that fails is asked again. Back keeps what was typed, and
 //// Skip, offered for questions that are not required, clears it.
+////
+//// `view` takes `words` for its buttons, its progress and the reasons an
+//// answer is not accepted; see `howdy/ui/words`. A `check`'s own message
+//// is shown as it is.
 
 import gleam/dict.{type Dict}
 import gleam/int
@@ -52,6 +56,7 @@ import howdy/ui/input
 import howdy/ui/progress
 import howdy/ui/style.{class}
 import howdy/ui/theme/tokens
+import howdy/ui/words.{type Words}
 import lustre/attribute.{type Attribute}
 import lustre/element.{type Element, text}
 import lustre/element/html
@@ -114,9 +119,19 @@ pub opaque type Questionnaire {
     questions: List(Question),
     step: Int,
     answers: Dict(String, List(String)),
-    error: Option(String),
+    error: Option(Trouble),
     complete: Bool,
   )
+}
+
+/// Why an answer was not accepted, put into words by `view`.
+type Trouble {
+  Unanswered
+  NotAnOption
+  NotFromOptions
+  OffScale
+  NotOneAnswer
+  Rejected(String)
 }
 
 /// The first question, with nothing answered.
@@ -191,18 +206,18 @@ pub fn submit(
 
 /// Whether an answer fits its question: given if required, one of the
 /// options or on the scale, and passing the question's own check.
-fn validate(question: Question, given: List(String)) -> Result(Nil, String) {
+fn validate(question: Question, given: List(String)) -> Result(Nil, Trouble) {
   case question.required, given {
-    True, [] -> Error("Answer this to go on.")
+    True, [] -> Error(Unanswered)
     False, [] -> Ok(Nil)
     _, _ -> {
       use _ <- result.try(fits(question.kind, given))
-      question.check(given)
+      question.check(given) |> result.map_error(Rejected)
     }
   }
 }
 
-fn fits(kind: Kind, given: List(String)) -> Result(Nil, String) {
+fn fits(kind: Kind, given: List(String)) -> Result(Nil, Trouble) {
   let offered = fn(options: List(#(String, String)), value) {
     list.any(options, fn(option) { option.0 == value })
   }
@@ -210,22 +225,22 @@ fn fits(kind: Kind, given: List(String)) -> Result(Nil, String) {
     Single(options), [value] ->
       case offered(options, value) {
         True -> Ok(Nil)
-        False -> Error("Choose one of the options.")
+        False -> Error(NotAnOption)
       }
-    Single(_), _ -> Error("Choose one of the options.")
+    Single(_), _ -> Error(NotAnOption)
     Several(options), values ->
       case list.all(values, offered(options, _)) {
         True -> Ok(Nil)
-        False -> Error("Choose from the options.")
+        False -> Error(NotFromOptions)
       }
     Scale(from:, to:, ..), [value] ->
       case int.parse(value) {
         Ok(n) if n >= from && n <= to -> Ok(Nil)
-        _ -> Error("Choose a number on the scale.")
+        _ -> Error(OffScale)
       }
-    Scale(..), _ -> Error("Choose a number on the scale.")
+    Scale(..), _ -> Error(OffScale)
     Short, [_] | Long, [_] -> Ok(Nil)
-    Short, _ | Long, _ -> Error("Give one answer.")
+    Short, _ | Long, _ -> Error(NotOneAnswer)
   }
 }
 
@@ -281,6 +296,7 @@ pub fn progress(state: Questionnaire) -> #(Int, Int) {
 /// The current question as a form. `attributes` go on the `<form>`: a
 /// `method` and `action` on a page, or a submit handler in a live view.
 pub fn view(
+  words: Words,
   state: Questionnaire,
   attributes: List(Attribute(msg)),
 ) -> Element(msg) {
@@ -313,21 +329,23 @@ pub fn view(
     element.fragment(kept),
     html.div([class(progress_class())], [
       html.span([class(count_class())], [
-        text(
-          "Question " <> int.to_string(number) <> " of " <> int.to_string(count),
-        ),
+        text(words.question_count(number, count)),
       ]),
-      progress.progress(label: "Progress", value: number - 1, max: count),
+      progress.progress(label: words.progress, value: number - 1, max: count),
     ]),
     case current {
-      Ok(question) -> ask(state, question)
+      Ok(question) -> ask(words, state, question)
       Error(Nil) -> element.none()
     },
-    html.div([class(actions_class())], actions(state, current, number, count)),
+    html.div(
+      [class(actions_class())],
+      actions(words, state, current, number, count),
+    ),
   ])
 }
 
 fn actions(
+  words: Words,
   state: Questionnaire,
   current: Result(Question, Nil),
   number: Int,
@@ -335,8 +353,8 @@ fn actions(
 ) -> List(Element(msg)) {
   let act = fn(value) { [attribute.name(action_field), attribute.value(value)] }
   let next_label = case number == count {
-    True -> "Finish"
-    False -> "Next"
+    True -> words.finish
+    False -> words.next
   }
   // Next comes first, so Enter in a text field presses it; the row is
   // reversed to put Back on the left.
@@ -344,7 +362,7 @@ fn actions(
     [button.submit(button.Primary, act("next"), [text(next_label)])],
     case current {
       Ok(question) if !question.required -> [
-        button.submit(button.Ghost, act("skip"), [text("Skip")]),
+        button.submit(button.Ghost, act("skip"), [text(words.skip)]),
       ]
       _ -> []
     },
@@ -353,7 +371,7 @@ fn actions(
         button.submit(
           button.Outline,
           [attribute.attribute("formnovalidate", ""), ..act("back")],
-          [text("Back")],
+          [text(words.back)],
         ),
       ]
       False -> []
@@ -361,7 +379,7 @@ fn actions(
   ])
 }
 
-fn ask(state: Questionnaire, question: Question) -> Element(msg) {
+fn ask(words: Words, state: Questionnaire, question: Question) -> Element(msg) {
   let given = dict.get(state.answers, question.id) |> result.unwrap([])
   let error_id = question.id <> "-error"
   let help_id = question.id <> "-help"
@@ -435,8 +453,8 @@ fn ask(state: Questionnaire, question: Question) -> Element(msg) {
       html.div([class(scale_class())], [
         html.div(
           [class(scale_steps_class()), attribute.role("radiogroup"), ..invalid],
-          list.map(numbers(from, to), fn(value) {
-            let value = int.to_string(value)
+          list.map(numbers(from, to), fn(number) {
+            let value = int.to_string(number)
             html.label([class(scale_step_class())], [
               html.input([
                 attribute.type_("radio"),
@@ -444,7 +462,7 @@ fn ask(state: Questionnaire, question: Question) -> Element(msg) {
                 attribute.value(value),
                 attribute.checked(list.contains(given, value)),
               ]),
-              html.span([], [text(value)]),
+              html.span([], [text(words.number(number))]),
             ])
           }),
         ),
@@ -465,14 +483,25 @@ fn ask(state: Questionnaire, question: Question) -> Element(msg) {
       },
       control,
       case state.error {
-        Some(message) ->
+        Some(trouble) ->
           field.error([attribute.id(error_id), attribute.role("alert")], [
-            text(message),
+            text(describe(words, trouble)),
           ])
         None -> element.none()
       },
     ],
   )
+}
+
+fn describe(words: Words, trouble: Trouble) -> String {
+  case trouble {
+    Unanswered -> words.answer_required
+    NotAnOption -> words.choose_one
+    NotFromOptions -> words.choose_from
+    OffScale -> words.choose_on_scale
+    NotOneAnswer -> words.give_one_answer
+    Rejected(message) -> message
+  }
 }
 
 fn numbers(from: Int, to: Int) -> List(Int) {

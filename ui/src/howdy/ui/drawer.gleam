@@ -4,7 +4,7 @@
 ////
 //// ```gleam
 //// ui.button(Outline, drawer.trigger("filters"), [text("Filters")]),
-//// drawer.drawer("filters", [drawer.snap_points([40, 90])], [
+//// drawer.drawer(words.english(), "filters", [drawer.snap_points([40, 90])], [
 ////   drawer.header([
 ////     drawer.title("filters", [text("Filters")]),
 ////     drawer.description("filters", [text("Narrow the list of orders.")]),
@@ -26,6 +26,7 @@ import gleam/string
 import howdy/ui/dialog
 import howdy/ui/style.{class}
 import howdy/ui/theme/tokens
+import howdy/ui/words.{type Words}
 import lustre/attribute.{type Attribute}
 import lustre/element.{type Element}
 import lustre/element/html
@@ -51,7 +52,9 @@ pub fn snap_points(heights: List(Int)) -> Attribute(msg) {
   )
 }
 
+/// The drawer. `words` name its handle for screen readers.
 pub fn drawer(
+  words: Words,
   id: String,
   attributes: List(Attribute(msg)),
   children: List(Element(msg)),
@@ -74,7 +77,7 @@ pub fn drawer(
           attribute.data("howdy-drawer-handle", ""),
           attribute.role("separator"),
           attribute.aria_orientation("horizontal"),
-          attribute.aria_label("Resize"),
+          attribute.aria_label(words.resize),
           attribute.tabindex(0),
         ],
         [],

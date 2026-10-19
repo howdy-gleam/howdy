@@ -667,7 +667,8 @@ const stillPreferred = matchMedia('(prefers-reduced-motion: reduce)');
 const setPlaying = (carousel, playing) => {
   carousel.toggleAttribute('data-paused', !playing);
   const button = carousel.querySelector('[data-howdy-carousel-play]');
-  button?.setAttribute('aria-label', playing ? 'Pause slides' : 'Play slides');
+  // The words come from the page, in its language.
+  if (button) button.setAttribute('aria-label', playing ? button.dataset.textPause : button.dataset.textPlay);
   // Announce slides only when someone is moving them.
   carousel.querySelector(':scope > [id]')?.setAttribute('aria-live', playing ? 'off' : 'polite');
 };

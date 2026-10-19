@@ -45,7 +45,10 @@ pub fn common_check(password: String) -> service.Result(Nil) {
     || run_of(bare)
   {
     True ->
-      Error(service.Invalid("choose a password that is not common or breached"))
+      Error(service.Coded(
+        "password_common",
+        service.Invalid("choose a password that is not common or breached"),
+      ))
     False -> Ok(Nil)
   }
 }
@@ -133,18 +136,32 @@ fn reverse(value: String) -> String {
 }
 
 pub fn validate(password: String, min_length: Int) -> service.Result(Nil) {
-  case
-    string.byte_size(password) <= policy.password_max_bytes
-    && list.length(string.to_utf_codepoints(password)) >= min_length
-  {
+  use _ <- result.try(
+    case string.byte_size(password) > policy.password_max_bytes {
+      True ->
+        Error(service.Coded(
+          "password_too_long",
+          service.Invalid(
+            "password must contain at most "
+            <> int.to_string(policy.password_max_bytes)
+            <> " UTF-8 bytes",
+          ),
+        ))
+      False -> Ok(Nil)
+    },
+  )
+  case list.length(string.to_utf_codepoints(password)) >= min_length {
     True -> Ok(Nil)
     False ->
-      Error(service.Invalid(
-        "password must contain at least "
-        <> int.to_string(min_length)
-        <> " characters and at most "
-        <> int.to_string(policy.password_max_bytes)
-        <> " UTF-8 bytes",
+      Error(service.Coded(
+        "password_length",
+        service.Invalid(
+          "password must contain at least "
+          <> int.to_string(min_length)
+          <> " characters and at most "
+          <> int.to_string(policy.password_max_bytes)
+          <> " UTF-8 bytes",
+        ),
       ))
   }
 }

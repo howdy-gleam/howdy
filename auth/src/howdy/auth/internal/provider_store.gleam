@@ -164,7 +164,11 @@ pub fn attach(
   use found <- result.try(owner(conn, issuer, subject, scope))
   case found {
     Some(id) if id == user_id -> Ok(Nil)
-    _ -> Error(service.Conflict("provider identity is already linked"))
+    _ ->
+      Error(service.Coded(
+        "provider_linked",
+        service.Conflict("provider identity is already linked"),
+      ))
   }
 }
 

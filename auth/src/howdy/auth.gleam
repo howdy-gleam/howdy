@@ -12,6 +12,7 @@
 
 import howdy/auth/secret
 
+import gleam/http/request.{type Request}
 import gleam/int
 import gleam/json
 import gleam/list
@@ -46,7 +47,8 @@ import howdy/auth/policy.{type Policy}
 import howdy/auth/provider
 import howdy/auth/session_store.{type SessionStore}
 import howdy/auth/user.{type Actor, type Principal, type User}
-import howdy/context.{type Context}
+import howdy/context.{type Body, type Context}
+import howdy/locale.{type Locale, type Negotiator}
 import howdy/migration
 import howdy/rate_limit
 import howdy/service
@@ -100,6 +102,11 @@ pub type Delivery {
     /// when entered with this address. Only for `SignIn`, `Registration` and
     /// `AlreadyRegistered`, and only until three wrong guesses.
     code: Option(secret.Secret),
+    /// The locale to write the email in, as a BCP 47 tag: the recipient's
+    /// own if they chose or registered with one, otherwise the locale of
+    /// the request that caused the email; `None` when neither is known.
+    /// See `with_locales`.
+    locale: Option(String),
   )
 }
 
@@ -222,6 +229,90 @@ pub fn repo(auth: Auth) -> Repo {
 @internal
 pub fn bound_group(auth: Auth) -> Option(String) {
   auth.config.group
+}
+
+// -- Locales -------------------------------------------------------------------
+
+/// Write the bundled pages and emails in the locales `negotiator` supports,
+/// detecting each request's locale the way it says. Without this they are
+/// in English. Translations ship for en, ar, de, es, fr, it, ja, nl, pl, pt
+/// and zh; any other supported locale falls back along its parents, and
+/// then to English.
+///
+/// ```gleam
+/// let locales =
+///   locale.negotiator(["en", "de", "fr"], default: "en")
+///   |> locale.from(auth.locale_source(identity))
+///   |> locale.from_cookie("locale")
+///   |> locale.from_accept_language
+/// let identity = auth.with_locales(identity, locales)
+/// ```
+///
+/// A new account remembers the locale of the request that registered it,
+/// and its emails use that locale from then on; see `set_locale`.
+pub fn with_locales(auth: Auth, negotiator: Negotiator) -> Auth {
+  Auth(Config(..auth.config, locales: negotiator))
+}
+
+/// The negotiator given to `with_locales`.
+pub fn locales(auth: Auth) -> Negotiator {
+  auth.config.locales
+}
+
+/// The locale `with_locales` chooses for a request.
+pub fn request_locale(auth: Auth, ctx: Context(a)) -> Locale {
+  locale.detect(ctx, auth.config.locales)
+}
+
+/// The same configuration, acting for a request in `locale`, a BCP 47 tag.
+/// An account registered through the returned value remembers the locale,
+/// and emails sent through it use the locale unless their recipient has one
+/// of their own. The bundled routes call this for every request; call it
+/// per request in routes of your own.
+pub fn in_locale(auth: Auth, locale: String) -> Auth {
+  Auth(Config(..auth.config, locale: Some(locale)))
+}
+
+/// Set, or with `None` clear, the locale the signed-in user's pages and
+/// emails use. A tag the negotiator from `with_locales` does not support
+/// is refused.
+pub fn set_locale(
+  auth: Auth,
+  principal: Principal,
+  locale tag: Option(String),
+) -> service.Result(Nil) {
+  use tag <- result.try(case tag {
+    None -> Ok(None)
+    Some(tag) ->
+      case locale.parse(tag) {
+        Ok(parsed) ->
+          case list.contains(locale.supported(auth.config.locales), parsed) {
+            True -> Ok(Some(locale.to_string(parsed)))
+            False ->
+              Error(service.Coded(
+                "locale_unsupported",
+                service.Invalid("unsupported locale"),
+              ))
+          }
+        Error(Nil) ->
+          Error(service.Coded(
+            "locale_unsupported",
+            service.Invalid("unsupported locale"),
+          ))
+      }
+  })
+  account_flow.set_locale(auth.config, principal, tag)
+}
+
+/// A source for `locale.from` that answers the signed-in user's own
+/// locale, from their session cookie. Bearer tokens are not read: API
+/// clients say what they want with `accept-language`.
+pub fn locale_source(auth: Auth) -> fn(Request(Body)) -> Option(String) {
+  fn(request) {
+    session_flow.cookie_principal(auth.config, request)
+    |> option.from_result
+    |> option.then(fn(principal: Principal) { principal.user.locale })
+  }
 }
 
 /// Enable password registration and login, hashed with PBKDF2-HMAC-SHA256
@@ -1448,6 +1539,7 @@ fn delivering(
       purpose: purpose(delivery.purpose),
       link: delivery.link,
       code: delivery.code,
+      locale: delivery.locale,
     ))
   }
 }

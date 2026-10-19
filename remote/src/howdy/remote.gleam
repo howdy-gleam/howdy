@@ -62,6 +62,7 @@ import howdy/body
 import howdy/codec as howdy_codec
 import howdy/content.{type Content}
 import howdy/controller.{type Context, type Controller}
+import howdy/problem
 import howdy/service
 import howdy/trace
 import logging
@@ -306,10 +307,12 @@ fn calling_span(
   let outcome = run()
   case outcome {
     Ok(_) -> Nil
-    Error(Failed(service.Internal(_)) as error)
-    | Error(Failed(service.TooManyRequests(_)) as error) ->
-      trace.set_error(describe(error))
-    Error(Failed(_)) -> Nil
+    Error(Failed(failure) as error) ->
+      case service.uncoded(failure) {
+        service.Internal(_) | service.TooManyRequests(_) ->
+          trace.set_error(describe(error))
+        _ -> Nil
+      }
     Error(error) -> trace.set_error(describe(error))
   }
   outcome
@@ -436,6 +439,10 @@ fn error_status(error: String) -> Int {
 // -- Wire format for service errors ----------------------------------------------
 
 fn encode_error(error: service.Error) -> String {
+  error_json(error) |> json.to_string
+}
+
+fn error_json(error: service.Error) -> json.Json {
   let kind = fn(kind) { #("kind", json.string(kind)) }
   let message = fn(message) { #("message", json.string(message)) }
   case error {
@@ -456,7 +463,7 @@ fn encode_error(error: service.Error) -> String {
         json.array(errors, fn(error) {
           json.object([
             #("field", json.string(error.field)),
-            #("message", json.string(error.message)),
+            ..problem.to_json_fields(error.problem)
           ])
         }),
       ),
@@ -465,9 +472,13 @@ fn encode_error(error: service.Error) -> String {
       kind("too_many_requests"),
       #("retry_after", json.int(seconds)),
     ]
+    service.Coded(code:, error:) -> [
+      kind("coded"),
+      #("code", json.string(code)),
+      #("error", error_json(error)),
+    ]
   }
   |> json.object
-  |> json.to_string
 }
 
 fn service_error_decoder() -> Decoder(service.Error) {
@@ -487,15 +498,29 @@ fn service_error_decoder() -> Decoder(service.Error) {
         ["fields"],
         decode.list({
           use field <- decode.field("field", decode.string)
-          use message <- decode.field("message", decode.string)
-          decode.success(service.FieldError(field:, message:))
+          use problem <- decode.then(problem.decoder())
+          decode.success(service.FieldError(field:, problem:))
         }),
       )
       |> decode.map(service.Validation)
     "too_many_requests" ->
       decode.at(["retry_after"], decode.int)
       |> decode.map(service.TooManyRequests)
+    "coded" -> {
+      use code <- decode.field("code", decode.string)
+      use error <- decode.field("error", service_error_decoder())
+      decode.success(service.Coded(code:, error:))
+    }
     _ -> decode.failure(service.Internal(""), "service error")
+  }
+}
+
+fn hide_internal(error: service.Error, name: String) -> service.Error {
+  case error {
+    service.Internal(_) -> service.Internal(name <> " failed remotely")
+    service.Coded(code:, error:) ->
+      service.Coded(code:, error: hide_internal(error, name))
+    _ -> error
   }
 }
 
@@ -503,9 +528,7 @@ fn service_error_decoder() -> Decoder(service.Error) {
 /// `Internal` detail is never sent, so the procedure name stands in.
 fn decode_failure(name: String, error: String) -> Error {
   case json.parse(error, service_error_decoder()) {
-    Ok(service.Internal(_)) ->
-      Failed(service.Internal(name <> " failed remotely"))
-    Ok(error) -> Failed(error)
+    Ok(error) -> Failed(hide_internal(error, name))
     Error(error) -> BadResponse(name <> ": " <> describe_json_error(error))
   }
 }

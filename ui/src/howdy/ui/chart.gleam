@@ -32,9 +32,11 @@
 import gleam/float
 import gleam/int
 import gleam/list
+import gleam/option.{type Option, None, Some}
 import gleam/string
 import howdy/ui/style.{class}
 import howdy/ui/theme/tokens
+import howdy/ui/words.{type Words} as ui_words
 import lustre/attribute
 import lustre/element.{type Element, text}
 import lustre/element/html
@@ -67,7 +69,8 @@ pub opaque type Chart {
     labels: List(String),
     series: List(Series),
     colours: List(Int),
-    format: fn(Float) -> String,
+    format: Option(fn(Float) -> String),
+    words: Words,
   )
 }
 
@@ -152,15 +155,29 @@ fn new(kind: Kind, title: String, labels: List(String), series: List(Series)) {
     labels:,
     series:,
     colours: list.index_map(series, fn(_, index) { index + 1 }),
-    format: format_number,
+    format: None,
+    words: ui_words.english(),
   )
 }
 
 /// How values are written on the axis, in readouts and in the table. The
-/// default writes whole numbers with thousands separators and at most two
-/// decimal places.
+/// default is the words' `decimal`: whole numbers with thousands separators
+/// and at most two decimal places.
 pub fn format(chart: Chart, format: fn(Float) -> String) -> Chart {
-  Chart(..chart, format:)
+  Chart(..chart, format: Some(format))
+}
+
+/// Speak another language: "Show data", "Total", shares and, unless
+/// `format` says otherwise, numbers. English by default.
+pub fn words(chart: Chart, words: Words) -> Chart {
+  Chart(..chart, words:)
+}
+
+fn value_text(chart: Chart, value: Float) -> String {
+  case chart.format {
+    Some(format) -> format(value)
+    None -> chart.words.decimal(value)
+  }
 }
 
 /// Which chart colour, from 1 to 5, each series takes. Use it to keep a
@@ -273,7 +290,7 @@ fn cartesian_view(chart: Chart) -> Element(msg) {
   let values = list.flat_map(chart.series, fn(series) { series.values })
   let scale = scale(values)
   let count = list.length(chart.labels)
-  let tick_labels = list.map(scale.ticks, chart.format)
+  let tick_labels = list.map(scale.ticks, value_text(chart, _))
   let gutter =
     list.fold(tick_labels, 0.0, fn(widest, label) {
       float.max(widest, text_width(label))
@@ -635,7 +652,7 @@ fn column_view(
     <> ": "
     <> string.join(
       list.map(readings, fn(reading) {
-        reading.0 <> " " <> chart.format(reading.1)
+        reading.0 <> " " <> value_text(chart, reading.1)
       }),
       ", ",
     )
@@ -679,7 +696,7 @@ fn column_view(
                 ],
                 [],
               ),
-              html.strong([], [text(chart.format(reading.1))]),
+              html.strong([], [text(value_text(chart, reading.1))]),
               html.span([class(tip_name_class())], [text(reading.0)]),
             ])
           })
@@ -738,11 +755,19 @@ fn part_legend(chart: Chart, values: List(Float)) -> Element(msg) {
     [class(part_legend_class())],
     list.index_map(list.zip(chart.labels, values), fn(pair, index) {
       let #(label, value) = pair
-      let share = case chart.kind, total >. 0.0 {
-        Pie(_), True ->
-          " · " <> int.to_string(float.round(value /. total *. 100.0)) <> "%"
-        Radial(max), _ -> " of " <> chart.format(max)
-        _, _ -> ""
+      let shown = value_text(chart, value)
+      // A ring's value is out of its maximum: the value is in bold and the
+      // rest of the words after it, where the language puts it first.
+      let #(shown, share) = case chart.kind, total >. 0.0 {
+        Pie(_), True -> #(shown, " · " <> chart.words.percent(value /. total))
+        Radial(max), _ -> {
+          let whole = chart.words.out_of(shown, value_text(chart, max))
+          case string.starts_with(whole, shown) {
+            True -> #(shown, string.drop_start(whole, string.length(shown)))
+            False -> #(whole, "")
+          }
+        }
+        _, _ -> #(shown, "")
       }
       html.li([], [
         html.span(
@@ -753,7 +778,7 @@ fn part_legend(chart: Chart, values: List(Float)) -> Element(msg) {
           [],
         ),
         html.span([class(part_name_class())], [text(label)]),
-        html.strong([], [text(chart.format(value))]),
+        html.strong([], [text(shown)]),
         html.span([class(part_name_class())], [text(share)]),
       ])
     }),
@@ -848,8 +873,8 @@ fn pie_drawing(
         False -> slice(at, at +. sweep, inner, outer)
       }
       let share = case total >. 0.0 {
-        True -> int.to_string(float.round(value /. total *. 100.0)) <> "%"
-        False -> "0%"
+        True -> chart.words.percent(value /. total)
+        False -> chart.words.percent(0.0)
       }
       let part =
         svg.g(
@@ -858,7 +883,7 @@ fn pie_drawing(
             attribute.tabindex(0),
             attribute.role("img"),
             attribute.aria_label(
-              label <> ": " <> chart.format(value) <> ", " <> share,
+              label <> ": " <> value_text(chart, value) <> ", " <> share,
             ),
           ],
           [
@@ -879,7 +904,7 @@ fn pie_drawing(
           attribute.attribute("y", "118"),
           attribute.attribute("text-anchor", "middle"),
         ],
-        chart.format(total),
+        value_text(chart, total),
       ),
       svg.text(
         [
@@ -888,7 +913,7 @@ fn pie_drawing(
           attribute.attribute("y", "138"),
           attribute.attribute("text-anchor", "middle"),
         ],
-        "Total",
+        chart.words.total,
       ),
     ]
     False -> []
@@ -925,7 +950,12 @@ fn radial_drawing(
         attribute.tabindex(0),
         attribute.role("img"),
         attribute.aria_label(
-          label <> ": " <> chart.format(value) <> " of " <> chart.format(max),
+          label
+          <> ": "
+          <> chart.words.out_of(
+            value_text(chart, value),
+            value_text(chart, max),
+          ),
         ),
       ],
       [
@@ -1005,7 +1035,7 @@ fn radar_drawing(chart: Chart) -> List(Element(msg)) {
         <> ": "
         <> string.join(
           list.map2(chart.labels, series.values, fn(label, value) {
-            label <> " " <> chart.format(value)
+            label <> " " <> value_text(chart, value)
           }),
           ", ",
         )
@@ -1032,7 +1062,7 @@ fn radar_drawing(chart: Chart) -> List(Element(msg)) {
 /// The numbers as a table, behind "Show data".
 fn data_view(chart: Chart) -> Element(msg) {
   html.details([class(details_class())], [
-    html.summary([class(summary_class())], [text("Show data")]),
+    html.summary([class(summary_class())], [text(chart.words.show_data)]),
     html.div([class(table_scroll_class())], [
       html.table([class(table_class())], [
         html.caption([class(caption_class())], [text(chart.title)]),
@@ -1052,7 +1082,7 @@ fn data_view(chart: Chart) -> Element(msg) {
               ..list.map(chart.series, fn(series) {
                 html.td([], [
                   text(case list.drop(series.values, index) {
-                    [value, ..] -> chart.format(value)
+                    [value, ..] -> value_text(chart, value)
                     [] -> ""
                   }),
                 ])
@@ -1069,29 +1099,7 @@ fn data_view(chart: Chart) -> Element(msg) {
 
 /// Thousands separators and at most two decimal places: 12,500 or 3.25.
 pub fn format_number(value: Float) -> String {
-  let sign = case value <. 0.0 {
-    True -> "-"
-    False -> ""
-  }
-  let hundredths = float.round(float.absolute_value(value) *. 100.0)
-  let whole = hundredths / 100
-  let fraction = hundredths % 100
-  let decimals = case fraction {
-    0 -> ""
-    f if f % 10 == 0 -> "." <> int.to_string(f / 10)
-    f -> "." <> string.pad_start(int.to_string(f), 2, "0")
-  }
-  sign <> group_thousands(int.to_string(whole)) <> decimals
-}
-
-fn group_thousands(digits: String) -> String {
-  case string.length(digits) > 3 {
-    True ->
-      group_thousands(string.drop_end(digits, 3))
-      <> ","
-      <> string.slice(digits, string.length(digits) - 3, 3)
-    False -> digits
-  }
+  ui_words.english_decimal(value)
 }
 
 // -- Styles ------------------------------------------------------------------

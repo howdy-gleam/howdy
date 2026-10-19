@@ -1,0 +1,59 @@
+{
+  "@@locale": "it",
+  "@@x-review": "machine translation, not yet reviewed by a native speaker",
+  "sign_in": {
+    "subject": "Accedi a {app}",
+    "heading": "Accedi a {app}",
+    "body": "Usalo per accedere. Funziona una sola volta e scade a breve.",
+    "action": "Accedi",
+    "closing": "Se non hai chiesto di accedere, puoi ignorare questa email."
+  },
+  "registration": {
+    "subject": "Conferma il tuo account {app}",
+    "heading": "Benvenuto su {app}",
+    "body": "Conferma questo indirizzo per completare la creazione del tuo account.",
+    "action": "Conferma e accedi",
+    "closing": "Se non hai creato un account, puoi ignorare questa email."
+  },
+  "already_registered": {
+    "subject": "Hai già un account {app}",
+    "heading": "Hai già un account",
+    "body": "Qualcuno ha chiesto di registrare questo indirizzo, ma esiste già un account. Usalo invece per accedere.",
+    "action": "Accedi",
+    "closing": "Se non sei stato tu, puoi ignorare questa email. Non è cambiato nulla."
+  },
+  "email_change": {
+    "subject": "Conferma il tuo nuovo indirizzo email",
+    "heading": "Conferma il tuo nuovo indirizzo email",
+    "body": "Conferma questo indirizzo per usarlo d’ora in poi per accedere al tuo account {app}.",
+    "action": "Conferma questo indirizzo",
+    "closing": "Se non l’hai chiesto, puoi ignorare questa email."
+  },
+  "email_change_approval": {
+    "subject": "Approva la modifica dell’email di {app}",
+    "heading": "Approva la modifica dell’email",
+    "body": "Qualcuno che ha effettuato l’accesso al tuo account ha chiesto di spostarlo su un altro indirizzo email. Approvalo mentre hai effettuato l’accesso per procedere.",
+    "action": "Approva la modifica",
+    "closing": "Se non sei stato tu, non approvarla. Accedi, cambia la password ed esci dalle altre sessioni."
+  },
+  "email_changed": {
+    "subject": "Il tuo indirizzo email di {app} è cambiato",
+    "heading": "Il tuo indirizzo email è cambiato",
+    "body": "Il tuo account ora accede con un altro indirizzo email e questo non può più essere usato per recuperarlo.",
+    "closing": "Se non sei stato tu, contatta subito l’assistenza."
+  },
+  "password_changed": {
+    "subject": "La tua password di {app} è cambiata",
+    "heading": "La tua password è cambiata",
+    "body": "La password del tuo account è appena stata cambiata.",
+    "closing": "Se non sei stato tu, accedi con un link inviato via email e imposta una nuova password."
+  },
+  "code_prompt": "Oppure inserisci questo codice:",
+  "token_prompt": "Incolla questo token dove ti è stato chiesto:",
+  "mfa": {
+    "subject": "Il tuo codice di verifica di {app}",
+    "heading": "Il tuo codice di verifica",
+    "body": "Inserisci questo codice per completare l’accesso:",
+    "closing": "Se non stai accedendo, qualcuno conosce la tua password: cambiala."
+  }
+}

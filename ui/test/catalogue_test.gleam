@@ -18,6 +18,7 @@ import howdy/ui/themes/rose
 import howdy/ui/themes/stone
 import howdy/ui/themes/violet
 import howdy/ui/themes/zinc
+import howdy/ui/words
 import lustre/attribute
 import lustre/element.{type Element, text}
 import simplifile
@@ -183,7 +184,7 @@ pub fn presets_are_named_like_the_built_in_themes_test() {
 
 pub fn conversations_are_logs_laid_out_from_the_bottom_test() {
   let html =
-    ui.chat_conversation([attribute.aria_label("Messages")], [
+    ui.chat_conversation(words.english(), [attribute.aria_label("Messages")], [
       ui.chat_note([text("Today")]),
       ui.chat_message(
         chat.Outgoing,
@@ -220,6 +221,7 @@ pub fn attachments_show_their_type_and_upload_test() {
   let uploading =
     render(
       ui.attachment(
+        words: attachment.english(),
         name: "report.pdf",
         detail: "2 MB",
         status: attachment.Uploading(40),
@@ -232,6 +234,7 @@ pub fn attachments_show_their_type_and_upload_test() {
   let done =
     render(
       ui.attachment(
+        words: attachment.english(),
         name: "notes",
         detail: "",
         status: attachment.Done,

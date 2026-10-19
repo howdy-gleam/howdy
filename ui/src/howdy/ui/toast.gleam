@@ -2,7 +2,7 @@
 //// their own.
 ////
 //// ```gleam
-//// toast.region([], [
+//// toast.region(words.english(), [], [
 ////   toast.toast(toast.Info, [], [
 ////     toast.title([text("Saved")]),
 ////     toast.description([text("Your changes are live.")]),
@@ -22,6 +22,9 @@
 //// When a toast fades, its close button is pressed for it, so a live view
 //// hears it the same way as a click and can drop the toast from its model;
 //// `queue` and `view` do this for you.
+////
+//// `words` name the region and, in `view`, the close buttons; see
+//// `howdy/ui/words`.
 
 import gleam/dynamic/decode
 import gleam/int
@@ -30,6 +33,7 @@ import gleam/option.{type Option, None, Some}
 import howdy/flash
 import howdy/ui/style.{class}
 import howdy/ui/theme/tokens
+import howdy/ui/words.{type Words}
 import lustre/attribute.{type Attribute}
 import lustre/element.{type Element, text}
 import lustre/element/html
@@ -52,6 +56,7 @@ pub type Variant {
 /// The corner toasts appear in. Keep it in the page even when it is empty,
 /// so a screen reader is already listening when a toast arrives.
 pub fn region(
+  words: Words,
   attributes: List(Attribute(msg)),
   toasts: List(Element(msg)),
 ) -> Element(msg) {
@@ -59,7 +64,7 @@ pub fn region(
   html.section(
     [
       class(region_class()),
-      attribute.aria_label("Notifications"),
+      attribute.aria_label(words.notifications),
       attribute.aria_live("polite"),
       attribute.data("howdy-toast-region", ""),
       ..attributes
@@ -302,13 +307,14 @@ pub fn items(queue: Queue) -> List(Item) {
 
 /// The queue's toasts in a region. `on_close` gives the attributes of each
 /// toast's close button, such as a click handler that dismisses it; its
-/// `aria-label` is "Dismiss". It is pressed for you when a toast fades.
+/// `aria-label` is the words' `dismiss`. It is pressed for you when a toast fades.
 /// `on_hold` hears a toast's id when the reader starts (`True`) or stops
 /// (`False`) holding it open by pointing at it or focusing inside it; pass
 /// it on to `hold`. `howdy/ui/behaviour` presses a faded toast's close
 /// button and reports holds, so a live view keeping toasts in its model
 /// hears both.
 pub fn view(
+  words: Words,
   queue: Queue,
   on_close on_close: fn(Int) -> List(Attribute(msg)),
   on_hold on_hold: fn(Int, Bool) -> msg,
@@ -318,7 +324,7 @@ pub fn view(
     "section",
     [
       class(region_class()),
-      attribute.aria_label("Notifications"),
+      attribute.aria_label(words.notifications),
       attribute.aria_live("polite"),
       attribute.data("howdy-toast-queue", ""),
     ],
@@ -340,7 +346,7 @@ pub fn view(
             "" -> element.none()
             said -> description([text(said)])
           },
-          close([attribute.aria_label("Dismiss"), ..on_close(item.id)]),
+          close([attribute.aria_label(words.dismiss), ..on_close(item.id)]),
         ]),
       )
     }),

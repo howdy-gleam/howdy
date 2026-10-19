@@ -203,7 +203,7 @@ pub fn email_uniqueness_is_rechecked_and_group_scoped_test() {
   let p = principal(identity, session)
   let proof = change_token(identity, p, mailbox, "taken@example.com")
   let _ = signup(identity, mailbox, "taken@example.com")
-  let assert Error(service.Conflict(_)) =
+  let assert Error(service.Coded(_, service.Conflict(_))) =
     auth.confirm_email_change(identity, p, proof)
   let assert Ok(old) = users.get(identity, session.user.id)
   assert old.email == "ada@example.com"
@@ -283,7 +283,10 @@ pub fn deletion_requires_opt_in_fresh_proof_and_rolls_back_cleanup_failure_test(
       Error(service.Forbidden)
     })
   assert auth.delete_account(failing, p, "wrong@example.com")
-    == Error(service.Invalid("confirm your current email address"))
+    == Error(service.Coded(
+      "email_mismatch",
+      service.Invalid("confirm your current email address"),
+    ))
   assert auth.delete_account(failing, p, "ada@example.com")
     == Error(service.Forbidden)
   assert count(database, "SELECT COUNT(*) FROM app_profiles") == 1
@@ -730,7 +733,10 @@ pub fn email_change_approval_rechecks_state_and_fails_closed_test() {
   let approval = request(identity)
   let _ = signup(identity, mailbox, "new@example.com")
   assert auth.approve_email_change(identity, p, approval)
-    == Error(service.Conflict("email address is unavailable"))
+    == Error(service.Coded(
+      "email_taken",
+      service.Conflict("email address is unavailable"),
+    ))
   assert count(database, "SELECT COUNT(*) FROM howdy_auth_email_changes") == 0
   exec(database, "DELETE FROM howdy_auth_users WHERE email = 'new@example.com'")
 

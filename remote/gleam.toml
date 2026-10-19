@@ -1,5 +1,5 @@
 name = "howdy_remote"
-version = "2.0.0"
+version = "2.1.0"
 gleam = ">= 1.18.0"
 description = "Typed remote procedure calls between Howdy services, over Erlang distribution or HTTP"
 licences = ["Apache-2.0"]

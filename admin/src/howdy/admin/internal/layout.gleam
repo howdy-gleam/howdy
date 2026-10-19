@@ -179,6 +179,7 @@ fn title(error: service.Error) -> String {
     service.Internal(_) -> "Something went wrong"
     service.Validation(_) -> "Invalid input"
     service.TooManyRequests(_) -> "Too many requests"
+    service.Coded(error:, ..) -> title(error)
   }
 }
 

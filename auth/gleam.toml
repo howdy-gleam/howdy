@@ -1,5 +1,5 @@
 name = "howdy_auth"
-version = "2.0.0"
+version = "2.1.0"
 gleam = ">= 1.18.0"
 description = "Optional authentication and role-based authorization for Howdy"
 licences = ["Apache-2.0"]
@@ -17,6 +17,7 @@ gleam_time = ">= 1.8.0 and < 2.0.0"
 gleam_crypto = ">= 1.5.0 and < 2.0.0"
 howdy = { path = ".." }
 howdy_database = { path = "../database" }
+howdy_i18n = { path = "../i18n" }
 howdy_mail = { path = "../mail" }
 smail = ">= 2.0.1 and < 3.0.0"
 logging = ">= 1.3.0 and < 2.0.0"

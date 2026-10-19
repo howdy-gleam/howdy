@@ -413,7 +413,41 @@ plain-text part with the link on a line of its own. Replace one with
 ...})`, which sets the subject and body; the recipient and tag are added.
 A failed send is logged without the token, and the flow reports the
 failure as it would for your own `deliver`. `emails.previews(auth_emails)`
-gives the admin a preview of every email.
+gives the admin a preview of every email, and `emails.previews_in(auth_emails,
+["de", "ja"])` the same in other locales.
+
+### Locales
+
+The starter pages and the ready-made emails are translated into en, ar, de,
+es, fr, it, ja, nl, pl, pt and zh. Every translation but English is machine
+written and waiting for review by a native speaker. Say which locales to
+offer, and how to choose one for a request, with a `howdy/locale` negotiator:
+
+```gleam
+let locales =
+  locale.negotiator(["en", "de", "fr"], default: "en")
+  |> locale.from(auth.locale_source(identity))
+  |> locale.from_cookie("locale")
+  |> locale.from_accept_language
+let identity = auth.with_locales(identity, locales)
+```
+
+Pages set `lang` and `dir` for the chosen locale. A new account remembers the
+locale it registered in (`user.locale`, a nullable column added by migration
+19), and its emails use that from then on; `Delivery.locale` carries it to a
+`deliver` of your own. With more than one locale, the account page lets the
+user choose, through `POST /locale`; `auth.locale_source` reads the choice
+back for the negotiator. The words live in `locales/pages` and
+`locales/emails`; see `howdy/auth/pages` for how to regenerate them after an
+edit.
+
+Every JSON error carries a stable `code` beside its English `error`, so a
+client of your own can show its own words: a failure a person can fix has a
+code of its own, such as `password_incorrect`, `password_length`,
+`email_taken` or `passkey_limit`, and anything else has the code of its
+kind, such as `unauthorized`. The headless functions return the same codes
+as `service.Coded` errors; match on `service.uncoded(error)` to see the kind
+of error inside.
 
 ### Links and codes in the email
 
@@ -1274,6 +1308,11 @@ install or redirect to a login page. Protected routes return JSON 401/403; the
 application decides what to show. The starter pages are deliberately minimal,
 require JavaScript, and display success without choosing an application redirect.
 
+Error bodies carry a stable `code` beside the English `error`, such as
+`{"code":"password_incorrect","error":"current password is incorrect"}`, and
+202 answers carry one beside `message`, so a client can show its own words.
+`howdy/auth/routes.api` lists the codes.
+
 | Endpoint (relative to API mount) | Input | Result |
 | --- | --- | --- |
 | `POST /register` | `{"email":"ada@example.com"}` | 202; sends registration token |
@@ -1286,6 +1325,7 @@ require JavaScript, and display success without choosing an application redirect
 | `POST /password` | Authentication from a fresh email-token session; `{"password":"…"}` | 204; sets or replaces the password, revokes other sessions |
 | `POST /password/change` | Authentication; `{"current":"…","password":"…"}` | 204; replaces the password, revokes other sessions; 400 for a wrong current password |
 | `GET /me` | Cookie or bearer authentication | User JSON |
+| `POST /locale` | Authentication; `{"locale":"de"}`, or `null` to clear | 204; sets the locale pages and emails use for the caller; 400 for one `with_locales` does not offer |
 | `GET /sessions` | Cookie or bearer authentication | The caller's live sessions: `id`, `method`, `created_at`, `last_seen_at`, `expires_at`, `current` |
 | `POST /sessions/revoke` | Cookie or bearer authentication; `{"id":"…"}` | 204; revokes that session if it is the caller's |
 | `POST /logout` | Cookie or bearer authentication; JSON body, e.g. `{}`; `{"all":true}` with multi-session | 204; revokes session. With multi-session the browser falls back to another account, or `all` signs every one out |

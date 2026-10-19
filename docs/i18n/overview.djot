@@ -1,0 +1,250 @@
+# Internationalisation
+
+Howdy answers each request in the reader's language in three steps:
+
+1. `howdy/locale`, in core, works out which locale a request wants, from
+   the URL, a cookie, a saved preference or the browser's
+   `accept-language` header.
+2. `howdy_i18n` turns your message catalogues into a Gleam module with a
+   function for each message, and writes numbers, money, dates and lists
+   the way that locale writes them.
+3. Howdy's own words follow the same locale: the messages for validation
+   problems, the components in [Howdy UI](/docs/ui/components), and the
+   pages and emails of [Howdy Auth](/docs/auth/overview).
+
+## Install
+
+Locale detection is in core. For catalogues and formatting, add
+`howdy_i18n` to `gleam.toml`:
+
+```toml
+howdy_i18n = { git = "https://github.com/mikeyjones/howdy.git", ref = "v2.1.1", path = "i18n" }
+```
+
+`howdy_i18n` does not depend on the rest of Howdy, so the same messages
+also work in code compiled to JavaScript.
+
+## Choosing a locale
+
+A negotiator lists the locales your app supports, and where to look for the
+one a request wants. Sources are tried in the order you add them. The first
+that names a supported locale wins, and the default answers when none does:
+
+```gleam
+import howdy/locale
+
+pub fn locales() -> locale.Negotiator {
+  locale.negotiator(["en", "de", "fr-CA", "ar"], default: "en")
+  |> locale.from_param("locale")
+  |> locale.from_cookie("locale")
+  |> locale.from_accept_language
+}
+
+fn show(ctx: Context) {
+  let l = locale.detect(ctx, locales())
+  controller.html(ctx, page(l))
+}
+```
+
+The sources are:
+
+- `from_param(name)`: a route parameter, for routes under `/:locale`.
+- `from_path_segment()`: the first segment of the path, so `/de/shop` asks
+  for `de`. Middleware runs before routing and cannot see route
+  parameters, so use this one there.
+- `from_query(name)`: a query parameter, such as `?lang=de`.
+- `from_cookie(name)`: a cookie, which `locale.remember` sets.
+- `from(find)`: anything else, such as a signed-in user's saved preference.
+- `from_accept_language()`: the languages the browser asks for, in order
+  of preference.
+
+Matching falls back the way people expect. `de-CH` takes `de` when that is
+all you have, and a bare `en` takes `en-GB` when that is your only English.
+
+### Stamping responses
+
+`locale.middleware` puts a `content-language` header on every response,
+unless the handler set one. It also adds `vary` naming the request headers
+the choice came from, so a shared cache keeps a copy per language:
+
+```gleam
+howdy.new()
+|> howdy.middleware(locale.middleware(locales()))
+```
+
+A custom `from(find)` source can read any header, so the middleware uses
+`vary: *` and shared caches do not reuse its responses.
+
+### A language switcher
+
+Let a visitor pick, then store the choice in the cookie `from_cookie`
+reads:
+
+```gleam
+fn choose(ctx: Context) {
+  use fields <- form.read(ctx)
+  case locale.match(locales(), form.value(fields, "locale")) {
+    Some(chosen) ->
+      controller.status(ctx, 303)
+      |> response.set_header("location", "/")
+      |> locale.remember(locales(), chosen)
+    None -> controller.status(ctx, 400)
+  }
+}
+```
+
+`i18n.language_name("de")` gives each locale's name in its own language,
+"Deutsch", for the options.
+
+### Right to left
+
+`locale.right_to_left(l)` is `True` for Arabic, Hebrew, Persian and other
+languages written right to left. Put it on the page with `<html dir>`, or in
+Howdy UI with `page.direction`, and the components lay themselves out to
+match.
+
+## Translating
+
+Each translator is a locale, with everything needed to write in it:
+
+```gleam
+import howdy/i18n
+
+let t = i18n.new(locale.to_string(l))
+```
+
+Any tag works. One without data of its own uses the nearest locale that has
+some: `es-AR` falls back to Latin American Spanish, then Spanish, and
+finally English.
+
+Write your messages in [catalogues](/docs/i18n/catalogues), one JSON file
+per locale:
+
+```json
+{
+  "cart.items": "{count, plural, =0 {Your cart is empty} one {# item} other {# items}}",
+  "greeting": "Hello, {name}!"
+}
+```
+
+Then generate a module with a function for each message:
+
+```sh
+gleam run -m howdy/i18n/cli -- gen
+```
+
+```gleam
+import my_app/messages
+
+messages.greeting(t, name: "Ada")   // "Hallo, Ada!"
+messages.cart_items(t, count: 3)    // "3 Artikel"
+```
+
+A misspelt message, or a missing or wrongly typed argument, is a compile
+error rather than a blank on the page.
+
+To write a number, a price or a date for the reader, see
+[Formatting](/docs/i18n/formatting).
+
+## Validation messages
+
+The rules in `howdy/validate` and `howdy/form` report a `Problem`, such as
+`TooShort(8)`, rather than a sentence. That leaves the words to be chosen
+later, in the reader's language.
+
+JSON error responses carry each problem's `code` and its details, with an
+English `message`:
+
+```json
+{"field":"password","code":"too_short","message":"must be at least 8 characters","minimum":8}
+```
+
+A page rendered on the server puts problems into words for its locale with
+`problem.message`:
+
+```gleam
+import howdy/problem
+
+let words = problem.translated(l)
+
+case form.error(errors, "password") {
+  Some(found) -> problem.message(found, words)
+  None -> ""
+}
+```
+
+Howdy ships these messages in Arabic, Chinese, Dutch, English, French,
+German, Italian, Japanese, Polish, Portuguese and Spanish. Any other locale
+gets English.
+
+To change a few words, update the record:
+`problem.Messages(..problem.english(), required: "can't be blank")`. Build
+a whole `problem.Messages` to cover another language.
+
+A rule of your own reports
+`problem.Custom("taken", "is already taken")`: a code for clients, and the
+message, which you can translate before you build it.
+
+## Howdy UI
+
+Every string the components show is in one `howdy/ui/words.Words` record.
+`words.translated(t)` gives it in the translator's language. Pass it to
+components as their first argument, or to those built step by step with a
+`words` step:
+
+```gleam
+import howdy/ui/words
+
+let w = words.translated(t)
+ui.pagination(w, current: 3, total: 12, href: page_href)
+data_table.new(columns, rows) |> data_table.words(w)
+calendar.new("due", year: 2026, month: 10) |> calendar.locale(w.calendar)
+```
+
+The calendar takes its month and weekday names, and the day weeks start
+on, from the locale. Set the page's direction with
+`page.direction(direction.of(l))`.
+
+## Howdy Auth
+
+Give auth your negotiator, and its pages, emails and API errors follow it:
+
+```gleam
+auth.new(...)
+|> auth.with_locales(locales())
+```
+
+- The bundled pages set `<html lang dir>` and translate every word, the
+  browser script's included. When you offer more than one locale, the
+  account page has a language selector.
+- Registration stores the visitor's locale on the user, and `POST /locale`
+  changes it. Emails, such as sign-in links and codes, are written in the
+  recipient's language, even when they are sent outside a request.
+- Every JSON error has a stable `code`, such as `password_incorrect`, for
+  your own client to translate.
+- `locale.from(auth.locale_source(identity))` makes a signed-in user's
+  saved language a negotiator source.
+
+## An example
+
+[`examples/i18n`](https://github.com/mikeyjones/howdy/tree/v2/examples/i18n)
+is a small app in English, German, French and Arabic. It has a language
+switcher, URL-prefixed pages, formatted prices and dates, and translated
+validation messages.
+
+## About the built-in translations
+
+Howdy's own words outside English were written by machine translation and
+have not yet been reviewed by native speakers. Each of those catalogues is
+marked `"@@x-review"`, and `check` lists them.
+
+Please send corrections. You can also override any words in your app
+without waiting for a release.
+
+## What is not here yet
+
+- Time zones. Dates and times are written as you give them, so convert to
+  the reader's zone first. Zone names are left out of the longer time
+  formats.
+- Calendars other than the Gregorian one.
+- Compact numbers, such as "1.2K", and units, such as "5 km".

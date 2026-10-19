@@ -40,7 +40,7 @@ pub fn version() -> String {
   }
 }
 
-const fallback_version = "2.0.0"
+const fallback_version = "2.1.0"
 
 @external(erlang, "howdy_ui_cli_ffi", "version")
 fn loaded_version() -> Result(String, Nil)
@@ -774,7 +774,7 @@ fn llms(items: List(Item)) -> String {
       "- `howdy/ui` re-exports the components; each also lives in its own module, and blocks and themes are separate modules.",
       "- `howdy/ui/page` renders a document with the theme, CSS and the behaviour script; `howdy/ui/live` serves Lustre server components over WebSockets.",
       "- Interactive components use native HTML (dialog, popover, details) plus `howdy/ui/behaviour`, which works inside live views. A live view reads a select, combobox or calendar with `live.on_value`.",
-      "- Copies made with `add` depend only on `howdy/ui/style` and tokens; blocks import the copies of the components they use.",
+      "- Copies made with `add` depend only on `howdy/ui/style`, tokens and `howdy/ui/words`; blocks import the copies of the components they use.",
       "- Each JSON file linked below holds the entry's full source.",
       "",
       ..entries

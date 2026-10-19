@@ -1,6 +1,7 @@
 import gleam/dict
 import gleam/dynamic/decode
 import gleam/http
+import gleam/http/response
 import gleam/json
 import gleam/option.{None}
 import howdy
@@ -46,6 +47,39 @@ pub fn respond_error_codes_test() {
   assert status(service.Unauthorized) == 401
   assert status(service.Forbidden) == 403
   assert status(service.Internal("secret detail")) == 500
+}
+
+pub fn every_error_has_a_code_test() {
+  let code_of = fn(error) {
+    service.respond(Error(error), ctx([]), encode)
+    |> testing.json(decode.at(["code"], decode.string))
+  }
+  assert code_of(service.NotFound("user 9")) == Ok("not_found")
+  assert code_of(service.Invalid("bad")) == Ok("invalid")
+  assert code_of(service.TooManyRequests(5)) == Ok("too_many_requests")
+  assert code_of(service.Validation([])) == Ok("validation")
+}
+
+pub fn coded_errors_answer_as_the_error_inside_test() {
+  let taken = service.Coded("email_taken", service.Conflict("already taken"))
+  let res = service.respond(Error(taken), ctx([]), encode)
+  assert res.status == 409
+  assert testing.error(res) == Ok("already taken")
+  assert testing.json(res, decode.at(["code"], decode.string))
+    == Ok("email_taken")
+  assert service.code(taken) == "email_taken"
+  assert service.message(taken) == "already taken"
+  assert service.uncoded(taken) == service.Conflict("already taken")
+  assert service.uncoded(service.Forbidden) == service.Forbidden
+  // A coded rate limit still says when to retry.
+  let res =
+    service.respond(
+      Error(service.Coded("slow_down", service.TooManyRequests(30))),
+      ctx([]),
+      encode,
+    )
+  assert res.status == 429
+  assert response.get_header(res, "retry-after") == Ok("30")
 }
 
 pub fn internal_error_hides_detail_test() {

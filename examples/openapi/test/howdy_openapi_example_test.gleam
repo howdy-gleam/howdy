@@ -1,6 +1,7 @@
 import gleam/json
 import gleam/string
 import gleeunit
+import howdy/problem
 import howdy/service
 import howdy/testing
 import howdy_openapi_example as example
@@ -47,9 +48,9 @@ pub fn rejects_bad_input_test() {
   assert res.status == 422
   assert testing.field_errors(res)
     == Ok([
-      service.FieldError("name", "must not be empty"),
-      service.FieldError("email", "must be a valid email address"),
-      service.FieldError("age", "must be at least 13"),
+      service.FieldError("name", problem.Blank),
+      service.FieldError("email", problem.NotEmail),
+      service.FieldError("age", problem.TooSmall(13)),
     ])
 }
 
