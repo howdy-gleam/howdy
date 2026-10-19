@@ -1,5 +1,5 @@
 name = "howdy_mail"
-version = "2.0.0"
+version = "2.1.0"
 gleam = ">= 1.18.0"
 description = "Email for Howdy apps: smail templates, SMTP and HTTP provider adapters, and a development outbox"
 licences = ["Apache-2.0"]
