@@ -789,21 +789,70 @@ fn write_if_changed(path: String, contents: String) -> Result(Nil, String) {
   }
 }
 
-// Path dependencies are relative to the app; the hidden package lives two
-// directories deeper.
-fn absolute_paths(toml: String, root: String) -> String {
-  let assert [first, ..rest] = string.split(toml, "path = \"")
-  list.fold(rest, first, fn(acc, part) {
-    let part = case string.split_once(part, "\"") {
-      Ok(#("/" <> _, _)) -> part
-      Ok(#(path, after)) ->
-        result.unwrap(filepath.expand(root <> "/" <> path), path)
-        <> "\""
-        <> after
-      Error(Nil) -> part
+// Local path dependencies are relative to the app, and the hidden package
+// lives two directories deeper, so their paths are made absolute. A git
+// dependency's `path` is a directory inside its repository, which Gleam
+// requires to be relative, so it is left alone: on the same line, as in
+// `howdy_ui = { git = "…", path = "ui" }` or a manifest's
+// `source = "git", … path = "ui"`, or in the same `[dependencies.<name>]`
+// table.
+@internal
+pub fn absolute_paths(toml: String, root: String) -> String {
+  string.split(toml, "\n")
+  |> tables
+  |> list.flat_map(fn(table) {
+    let git_table = case table {
+      [header, ..lines] ->
+        string.contains(header, ".") && list.any(lines, is_git_key)
+      [] -> False
     }
-    acc <> "path = \"" <> part
+    list.map(table, fn(line) {
+      case git_table || is_git_dependency(line) {
+        True -> line
+        False -> absolute_path(line, root)
+      }
+    })
   })
+  |> string.join("\n")
+}
+
+// The lines of a TOML file, grouped by the `[table]` header they follow.
+fn tables(lines: List(String)) -> List(List(String)) {
+  list.fold(lines, [], fn(tables, line) {
+    case string.starts_with(string.trim_start(line), "["), tables {
+      True, _ | False, [] -> [[line], ..tables]
+      False, [table, ..rest] -> [[line, ..table], ..rest]
+    }
+  })
+  |> list.map(list.reverse)
+  |> list.reverse
+}
+
+fn is_git_key(line: String) -> Bool {
+  case string.trim_start(line) {
+    "git " <> _ | "git=" <> _ -> True
+    _ -> False
+  }
+}
+
+fn is_git_dependency(line: String) -> Bool {
+  string.contains(line, "git = \"") || string.contains(line, "source = \"git\"")
+}
+
+fn absolute_path(line: String, root: String) -> String {
+  case string.split_once(line, "path = \"") {
+    Ok(#(before, rest)) ->
+      case string.split_once(rest, "\"") {
+        Ok(#("/" <> _, _)) | Error(Nil) -> line
+        Ok(#(path, after)) ->
+          before
+          <> "path = \""
+          <> result.unwrap(filepath.expand(root <> "/" <> path), path)
+          <> "\""
+          <> after
+      }
+    Error(Nil) -> line
+  }
 }
 
 fn explain(output: String) -> String {

@@ -19,9 +19,18 @@ const CHROMIUM = process.env.CHROMIUM || 'chromium';
 const MAIL = join(dirname(fileURLToPath(import.meta.url)), '..', 'tmp', 'mail');
 
 const profile = mkdtempSync(join(tmpdir(), 'howdy-notifications-'));
-const child = spawn(CHROMIUM, ['--headless=new', '--remote-debugging-port=0', '--no-first-run', '--disable-gpu', `--user-data-dir=${profile}`, 'about:blank'], { stdio: 'ignore' });
+const child = spawn(CHROMIUM, ['--headless=new', '--remote-debugging-port=0', '--no-first-run', '--no-default-browser-check', '--disable-gpu', `--user-data-dir=${profile}`, 'about:blank'], { stdio: ['ignore', 'ignore', 'pipe'] });
+let chromiumLog = '';
+child.stderr.on('data', (chunk) => { chromiumLog += chunk; });
+// A cold Chromium on a CI runner can take well over ten seconds to write its
+// port file, so allow a minute, and give up early if it exits instead.
 const portFile = join(profile, 'DevToolsActivePort');
-for (let i = 0; i < 100 && !existsSync(portFile); i++) await sleep(100);
+for (let i = 0; i < 600 && !existsSync(portFile) && child.exitCode === null && child.signalCode === null; i++) await sleep(100);
+if (!existsSync(portFile)) {
+  console.error(`${CHROMIUM} did not start (exit ${child.exitCode ?? child.signalCode ?? 'none, timed out'})\n${chromiumLog}`);
+  child.kill();
+  process.exit(1);
+}
 const [port] = readFileSync(portFile, 'utf8').split('\n');
 const { webSocketDebuggerUrl } = await (await fetch(`http://127.0.0.1:${port}/json/version`)).json();
 
