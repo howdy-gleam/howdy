@@ -799,7 +799,8 @@ pub fn deleting_a_role_takes_its_assignments_with_it_test() {
   let page = get(app, "/_howdy/users/" <> ada)
   assert string.contains(page, "global\tadmin")
   assert !string.contains(page, "org:acme\teditor")
-  assert !string.contains(get(app, "/_howdy/roles"), "editor")
+  // Only the role's link: the page's script mentions rich text editors.
+  assert !string.contains(get(app, "/_howdy/roles"), "name=editor")
 }
 
 pub fn assigns_and_revokes_roles_from_both_sides_test() {
