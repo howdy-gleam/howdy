@@ -43,6 +43,7 @@ pub const packages = [
   #("howdy_openapi", "openapi"),
   #("howdy_flags", "flags"),
   #("howdy_jobs", "jobs"),
+  #("howdy_notifications", "notifications"),
 ]
 
 const releases_path = "releases/releases.json"
@@ -244,8 +245,12 @@ pub fn check(version: String) -> Result(List(#(String, String)), String) {
 
 fn print_table(version: String, versions: List(#(String, String))) -> Nil {
   io.println("Howdy " <> version <> " will release:")
+  let width =
+    list.fold(versions, 0, fn(width, pair) {
+      int.max(width, string.length(pair.0))
+    })
   list.each(versions, fn(pair) {
-    io.println("  " <> string.pad_end(pair.0, 16, " ") <> pair.1)
+    io.println("  " <> string.pad_end(pair.0, width + 1, " ") <> pair.1)
   })
 }
 
