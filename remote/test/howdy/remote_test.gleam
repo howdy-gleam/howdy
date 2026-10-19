@@ -3,7 +3,6 @@ import gleam/dynamic/decode
 import gleam/erlang/process
 import gleam/json
 import gleam/list
-import gleam/option.{None, Some}
 import gleam/otp/actor
 import gleam/string
 import howdy/codec
