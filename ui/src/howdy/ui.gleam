@@ -80,6 +80,7 @@ import howdy/ui/aspect_ratio
 import howdy/ui/attachment
 import howdy/ui/avatar
 import howdy/ui/badge
+import howdy/ui/bell
 import howdy/ui/blocks/app_shell
 import howdy/ui/blocks/sign_in
 import howdy/ui/blocks/sign_up
@@ -181,6 +182,7 @@ pub fn classes() -> List(Class) {
     accordion.classes(),
     select.classes(),
     toast.classes(),
+    bell.classes(),
     sidebar.classes(),
     pagination.classes(),
     calendar.classes(),

@@ -3,6 +3,7 @@ import gleam/list
 import gleam/option.{None, Some}
 import gleam/result
 import gleam/string
+import howdy/flash
 import howdy/ui
 import howdy/ui/calendar.{Date}
 import howdy/ui/chart
@@ -311,6 +312,27 @@ pub fn toasts_live_in_a_polite_region_test() {
   assert string.contains(html, "--howdy-toast-duration:8000ms")
   assert string.contains(html, "data-persistent")
   assert string.contains(html, "data-howdy-toast-close")
+}
+
+pub fn flash_messages_become_toasts_test() {
+  let messages = [
+    flash.Message(flash.Success, "Saved"),
+    flash.Message(flash.Danger, "<b>Failed</b>"),
+  ]
+  let html =
+    toast.region([], toast.flashed(messages))
+    |> render
+  assert string.contains(html, "Saved")
+  // Text, never markup.
+  assert string.contains(html, "&lt;b&gt;Failed&lt;/b&gt;")
+  assert string.contains(html, "data-toast-icon")
+  assert string.contains(html, "aria-label=\"Dismiss\"")
+
+  let queue = toast.push_flashed(toast.queue(), messages, 0)
+  let assert [first, second] = toast.items(queue)
+  assert first.variant == toast.Success
+  assert first.title == "Saved"
+  assert second.variant == toast.Danger
 }
 
 pub fn command_menus_are_comboboxes_over_listboxes_test() {

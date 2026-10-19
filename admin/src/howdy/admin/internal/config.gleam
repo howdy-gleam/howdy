@@ -8,6 +8,7 @@ import howdy/auth.{type Auth}
 import howdy/auth/user
 import howdy/authorization.{type Authorization}
 import howdy/flags.{type Flags}
+import howdy/jobs.{type Runner}
 import howdy/mail.{type Mailer}
 import howdy/mail/outbox.{type Outbox}
 import howdy/mail/preview.{type Preview}
@@ -30,6 +31,7 @@ pub type Config {
     mailer: Option(Mailer),
     recorder: Option(Recorder),
     flags: Option(Flags),
+    jobs: Option(Runner),
     /// The app's OpenAPI documents, found when the admin is mounted.
     api: Option(Api),
     /// Exact request hostnames the pages answer.

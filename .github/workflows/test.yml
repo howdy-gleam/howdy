@@ -312,6 +312,86 @@ jobs:
           HOWDY_FLAGS_TEST_POSTGRES_URL: postgres://howdy_flags_test@localhost/postgres
       - run: gleam format --check src test
 
+  jobs:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: howdy_jobs_test
+          POSTGRES_DB: postgres
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U howdy_jobs_test -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    defaults:
+      run:
+        working-directory: jobs
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cache/gleam
+            jobs/build/packages
+          key: gleam-jobs-${{ hashFiles('**/gleam.toml', '**/manifest.toml') }}
+          restore-keys: gleam-jobs-
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "29"
+          gleam-version: "1.18.1"
+          rebar3-version: "3"
+      - run: $GITHUB_WORKSPACE/scripts/ci-deps.sh
+      - run: gleam test
+      - run: gleam test
+        env:
+          HOWDY_JOBS_TEST_POSTGRES_URL: postgres://howdy_jobs_test@localhost/postgres
+      - run: gleam format --check src test
+
+  notifications:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: howdy_notifications_test
+          POSTGRES_DB: postgres
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U howdy_notifications_test -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    defaults:
+      run:
+        working-directory: notifications
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cache/gleam
+            notifications/build/packages
+          key: gleam-notifications-${{ hashFiles('**/gleam.toml', '**/manifest.toml') }}
+          restore-keys: gleam-notifications-
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "29"
+          gleam-version: "1.18.1"
+          rebar3-version: "3"
+      - run: $GITHUB_WORKSPACE/scripts/ci-deps.sh
+      - run: gleam test
+      - run: gleam test
+        env:
+          HOWDY_NOTIFICATIONS_TEST_POSTGRES_URL: postgres://howdy_notifications_test@localhost/postgres
+      - run: gleam format --check src test
+
   admin:
     runs-on: ubuntu-latest
     services:
@@ -357,7 +437,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        example: [simple, guards, chat, live, remote, admin, openapi, gallery]
+        example: [simple, guards, chat, live, remote, admin, openapi, gallery, notifications]
     defaults:
       run:
         working-directory: examples/${{ matrix.example }}
@@ -382,6 +462,23 @@ jobs:
       - if: matrix.example == 'live'
         run: gleam run -m tasks/css
       - run: gleam format --check src test
+      # Two users in headless Chrome: a notification sent by one reaches the
+      # other's open page, inbox and email.
+      - if: matrix.example == 'notifications'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - if: matrix.example == 'notifications'
+        name: Browser test (CDP)
+        env:
+          CHROMIUM: google-chrome
+        run: |
+          nohup gleam run > /tmp/notifications.log 2>&1 &
+          for i in $(seq 1 60); do
+            curl -sf -o /dev/null http://127.0.0.1:8792/ && break
+            sleep 1
+          done
+          node browser_test/run.mjs || { cat /tmp/notifications.log; exit 1; }
 
   auth:
     runs-on: ubuntu-latest

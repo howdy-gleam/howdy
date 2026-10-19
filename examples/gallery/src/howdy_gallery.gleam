@@ -39,6 +39,7 @@ import howdy/ui/questionnaire
 import howdy/ui/toast
 import howdy/validate
 import howdy_gallery/chat
+import howdy_gallery/inbox
 import howdy_gallery/lab
 import howdy_gallery/orders
 import howdy_gallery/uploads
@@ -131,6 +132,7 @@ pub fn app() -> howdy.App {
     }),
   )
   |> howdy.controller(local.controller(uploads.config()))
+  |> howdy.controller(inbox.controller())
   // The howdy_ui reference, for development.
   |> howdy.controller(gallery.controller(at: "/ui"))
   |> howdy.controller(

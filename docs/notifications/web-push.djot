@@ -1,0 +1,109 @@
+# Web Push
+
+Web Push puts a notification on the user's screen through the browser
+itself, the way a native app's notifications appear, even when no tab of
+your app is open. `howdy/notifications/web_push` sends them for you with
+the open standards every major browser supports, so there is no
+third-party service to sign up for.
+
+## Keys
+
+Push services identify your app by a key pair, called VAPID keys. Make one
+pair, once:
+
+```sh
+gleam run -m howdy/notifications/web_push
+VAPID_PUBLIC_KEY=BO2l…
+VAPID_PRIVATE_KEY=x8Cq…
+```
+
+Keep them in the environment like any other secret. Browsers subscribe
+with the public key, so if the keys change every subscription stops
+working and users have to turn push on again.
+
+## Setting up
+
+```gleam
+import howdy/notifications/web_push
+
+let assert Ok(public) = env.get("VAPID_PUBLIC_KEY")
+let assert Ok(private) = env.get("VAPID_PRIVATE_KEY")
+let assert Ok(keys) = web_push.keys(public:, private:)
+
+let push = web_push.new(notifier, keys, contact: "mailto:ops@example.com")
+let notifier = notifications.with_push(notifier, web_push.deliver(push))
+
+howdy.new()
+|> howdy.controller(notifications.routes(notifier, at: "/notifications", identify:))
+|> howdy.controller(web_push.routes(push, at: "/push", identify:))
+```
+
+`contact` is how a push service can reach whoever runs the app if
+something goes wrong. Push is sent by the same
+[jobs](/docs/notifications/delivery#Sending-them) as email, so a runner
+with `notifications.handle_jobs(notifier)` sends it too.
+
+`web_push.routes` serves what browsers need:
+
+- `GET /push/worker.js`, the service worker that shows each notification
+  and opens its link when clicked
+- `GET /push/key`, the public key
+- `POST /push/subscriptions`, to keep a browser's subscription for the
+  signed-in user
+- `DELETE /push/subscriptions`, to forget one
+
+## Turning it on
+
+Browsers only allow push after the user agrees, and the request must come
+from something the user clicked. Give the bell the routes' path and its
+panel shows a button for it, in browsers that support push:
+
+```gleam
+bell.new(id: "inbox", source: "/notifications")
+|> bell.push(at: "/push")
+|> bell.view
+```
+
+Clicking it asks for permission, registers the service worker, subscribes
+with the browser's push service and saves the subscription. Clicking again
+turns it off. If the user has blocked notifications for the site, the panel
+says so, since only the browser's settings can undo that.
+
+A user turns push on separately in each browser they use. Each kind's
+`push` preference then decides which notifications go to them.
+
+## What is sent
+
+Each notification goes to every browser the user turned push on in. It is
+encrypted for that browser alone (RFC 8291), so the push service in the
+middle cannot read it, and signed with your keys (RFC 8292). The service
+worker shows the title and body, tagged with the notification's ID, and
+opens the link when it is clicked, focusing a tab that is already there.
+
+When a push service says a subscription has gone, because the user turned
+notifications off or the browser was reset, it is deleted. When it asks to
+be tried later, the push job retries the whole notification; browsers show a
+notification once per tag, so the ones that already had it do not show it
+twice.
+
+## Which push services
+
+The app sends to the address a browser's subscription gives, so a
+subscription could name any server. Only the push services of Chrome,
+Edge, Firefox and Safari are accepted, so your app cannot be made to send
+requests anywhere else. `allow_endpoints` widens or replaces the list, for
+a self-hosted push service:
+
+```gleam
+web_push.allow_endpoints(push, fn(endpoint) {
+  web_push.known_push_service(endpoint)
+  || endpoint.host == Some("push.example.com")
+})
+```
+
+## Limits
+
+- Push needs HTTPS, except on `localhost`.
+- Safari on iOS only offers push to web apps added to the home screen.
+- The browser decides how notifications look, and a user can turn them off
+  for your site at any time.

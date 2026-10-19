@@ -56,8 +56,9 @@ the result with the page it showed, and marks what differs.
 On **PostgreSQL**, the grid installs a trigger named `howdy_admin_notify`
 on the table it shows. After any insert, update, delete or truncate, the
 trigger sends the table's name on the `howdy_admin` channel with
-`pg_notify`, and the grid, listening on one extra connection, reloads at
-once. It also checks every 15 seconds, in case a notification was missed
+`pg_notify`, and the grid, listening on one extra connection with
+[`postgres.listen`](/docs/database/overview#Listening-for-changes), reloads
+at once. It also checks every 15 seconds, in case a notification was missed
 while that connection reconnected.
 
 The trigger only notifies, and never touches a row. `howdy/migration`

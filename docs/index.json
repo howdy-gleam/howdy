@@ -82,6 +82,11 @@
           "description": "Read, set and delete cookies, choose safe cookie options, and test handlers that use them."
         },
         {
+          "slug": "flash-messages",
+          "title": "Flash messages",
+          "description": "Show a short message such as \"Settings saved\" on the page after a redirect, with howdy/flash: signed, shown once, and turned into toasts by howdy_ui."
+        },
+        {
           "slug": "forms",
           "title": "Forms",
           "description": "Read JSON bodies, HTML forms and file uploads with howdy/body and howdy/form, validate the input, and report every field error."
@@ -199,6 +204,48 @@
           "slug": "overview",
           "title": "Howdy Storage",
           "description": "Keep files in an S3-compatible bucket, a local folder or memory with the optional howdy_storage package, and let browsers fetch and upload them directly through signed URLs."
+        }
+      ]
+    },
+    {
+      "slug": "jobs",
+      "title": "Jobs",
+      "docs": [
+        {
+          "slug": "overview",
+          "title": "Background jobs",
+          "description": "Queue work in your database inside your own transactions, and have it done outside the request, tried again when it fails."
+        },
+        {
+          "slug": "schedules",
+          "title": "Schedules",
+          "description": "Run jobs on a cron schedule, once per time across every node, and clean up after auth, uploads and old jobs."
+        },
+        {
+          "slug": "production",
+          "title": "Running jobs",
+          "description": "What happens when nodes stop, how jobs spread across them, and how to watch and manage jobs from the admin, the command line and traces."
+        }
+      ]
+    },
+    {
+      "slug": "notifications",
+      "title": "Notifications",
+      "docs": [
+        {
+          "slug": "overview",
+          "title": "Howdy Notifications",
+          "description": "Tell users what happened with the optional howdy_notifications package: an inbox kept until read, pushed live to every open page, with a notification bell, live view subscriptions and per-kind preferences."
+        },
+        {
+          "slug": "delivery",
+          "title": "Email and digests",
+          "description": "Email notifications one by one or in a digest, skip the ones read in the app first, and send and retry them with background jobs."
+        },
+        {
+          "slug": "web-push",
+          "title": "Web Push",
+          "description": "Show notifications through the browser itself, even with the app closed: VAPID keys, a service worker, and turning push on from the bell."
         }
       ]
     },

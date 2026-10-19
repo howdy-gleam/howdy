@@ -19,6 +19,9 @@
 //// `start` links the pool to the calling process. In an app, put it under
 //// the supervisor with `supervised` instead, so a pool that crashes is
 //// restarted rather than taking the caller with it.
+////
+//// `listen` hears `NOTIFY` on a channel, from this node or any other, and
+//// `notify` sends one.
 
 import gleam/bool
 import gleam/dynamic/decode
@@ -277,6 +280,7 @@ pub opaque type Pool {
 /// ```
 pub fn start_pool(config: Config) -> Result(Pool, Error) {
   let name = process.new_name(prefix: "howdy_postgres")
+  remember(name, listen_settings(settings(config, name)))
   case pog.start(settings(config, name)) {
     Error(_) -> Error(StartFailed)
     Ok(started) -> {
@@ -316,6 +320,7 @@ pub fn supervised(
   config: Config,
 ) -> #(Pool, supervision.ChildSpecification(Pool)) {
   let name = process.new_name(prefix: "howdy_postgres")
+  remember(name, listen_settings(settings(config, name)))
   let connection = pog.named_connection(name)
   // Gloo only uses the pid to close a pool, which is the supervisor's job
   // here, so the Repo is built around a process that has already exited.
@@ -443,6 +448,182 @@ pub fn error(error: pog.QueryError) -> service.Error {
     _ -> service.Internal("database operation failed")
   }
 }
+
+// -- Listening ---------------------------------------------------------------
+
+/// A process hearing `NOTIFY` on one channel. See `listen`.
+pub opaque type Listener {
+  Listener(pid: Pid)
+}
+
+pub type ListenError {
+  /// The Repo is not on PostgreSQL.
+  NotPostgres
+  /// The Repo's pool was not opened by this module and its settings could
+  /// not be found inside it. Give them with `listen_via`.
+  SettingsNotFound
+  /// A channel is a plain name: lowercase letters, digits and `_`, not
+  /// starting with a digit, at most 63 characters.
+  InvalidChannel
+}
+
+pub fn listen_error_to_string(error: ListenError) -> String {
+  case error {
+    NotPostgres -> "the database is not PostgreSQL"
+    SettingsNotFound ->
+      "the pool's connection settings could not be found; give them with listen_via"
+    InvalidChannel ->
+      "a channel is lowercase letters, digits and _, not starting with a digit"
+  }
+}
+
+/// Hear `NOTIFY` on `channel`, sent by any connection to the database,
+/// such as another node of the app. `notify` is called with each payload,
+/// in the listener's own process, one at a time; a crash in it is logged
+/// and listening carries on.
+///
+/// ```gleam
+/// let assert Ok(_) =
+///   postgres.listen(db, "orders", fn(id) { process.send(orders, id) })
+/// ```
+///
+/// The listener has a connection of its own, not one of the pool's,
+/// opened with the pool's settings: remembered for a pool this module
+/// opened, and otherwise looked for inside the running pool. It returns
+/// once it is listening, or has tried for five seconds, so a `NOTIFY` sent
+/// after `listen` returns is heard while the server is up.
+///
+/// The listener is linked to the caller and stops when it does. When the
+/// connection is lost it connects and listens again by itself, but what
+/// was sent meanwhile is not heard: check now and then as well, more
+/// slowly, if missing one matters.
+pub fn listen(
+  repo: Repo,
+  channel: String,
+  notify: fn(String) -> Nil,
+) -> Result(Listener, ListenError) {
+  use <- bool.guard(!valid_channel(channel), Error(InvalidChannel))
+  use backend <- result.try(
+    database.backend(repo) |> result.replace_error(NotPostgres),
+  )
+  use <- bool.guard(backend != database.Postgres, Error(NotPostgres))
+  use found <- result.map(
+    settings_for(repo) |> result.replace_error(SettingsNotFound),
+  )
+  Listener(start_listener(found, channel, notify))
+}
+
+/// `listen`, connecting with these settings, such as
+/// `pog.url_config(name, url)`: for a pool this module did not open, whose
+/// settings `listen` cannot find. The pool name in them is not used.
+pub fn listen_via(
+  config: pog.Config,
+  channel: String,
+  notify: fn(String) -> Nil,
+) -> Result(Listener, ListenError) {
+  use <- bool.guard(!valid_channel(channel), Error(InvalidChannel))
+  Ok(Listener(start_listener(listen_settings(config), channel, notify)))
+}
+
+/// Stop listening.
+pub fn stop_listening(listener: Listener) -> Nil {
+  stop_listener(listener.pid)
+}
+
+/// The listener's process, to monitor it or to hand it to a supervisor.
+pub fn listener_pid(listener: Listener) -> Pid {
+  listener.pid
+}
+
+/// Send `payload` to everything listening on `channel`. Inside a
+/// transaction it is sent when the transaction commits, and not at all if
+/// it rolls back. PostgreSQL limits a payload to 8000 bytes.
+pub fn notify(
+  repo: Repo,
+  channel: String,
+  payload: String,
+) -> service.Result(Nil) {
+  use <- bool.guard(
+    !valid_channel(channel),
+    Error(service.Invalid(listen_error_to_string(InvalidChannel))),
+  )
+  // NOTIFY takes no parameters, so the payload is written as a literal.
+  // The channel is quoted, so one that is also a keyword works.
+  database.execute(
+    repo,
+    "NOTIFY \""
+      <> channel
+      <> "\", '"
+      <> string.replace(payload, "'", "''")
+      <> "'",
+    [],
+  )
+}
+
+/// Channels are written into SQL in double quotes, so they are kept to
+/// plain names that need no escaping. Lowercase, because PostgreSQL folds
+/// unquoted names to lowercase and quoted ones are taken as written.
+fn valid_channel(channel: String) -> Bool {
+  let length = string.length(channel)
+  length > 0
+  && length <= 63
+  && !list.contains(
+    ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"],
+    string.slice(channel, 0, 1),
+  )
+  && string.to_utf_codepoints(channel)
+  |> list.all(fn(codepoint) {
+    case string.utf_codepoint_to_int(codepoint) {
+      c if c >= 0x61 && c <= 0x7A -> True
+      c if c >= 0x30 && c <= 0x39 -> True
+      0x5F -> True
+      _ -> False
+    }
+  })
+}
+
+type ListenSettings
+
+fn listen_settings(config: pog.Config) -> ListenSettings {
+  make_settings(
+    config.host,
+    config.port,
+    config.database,
+    config.user,
+    config.password,
+    config.ssl,
+    config.connection_parameters,
+    config.ip_version,
+  )
+}
+
+@external(erlang, "howdy_database_listen", "settings")
+fn make_settings(
+  host: String,
+  port: Int,
+  database: String,
+  user: String,
+  password: Option(String),
+  ssl: pog.Ssl,
+  parameters: List(#(String, String)),
+  ip_version: pog.IpVersion,
+) -> ListenSettings
+
+@external(erlang, "howdy_database_listen", "remember")
+fn remember(name: Name(pog.Message), settings: ListenSettings) -> Nil
+
+@external(erlang, "howdy_database_listen", "settings_for")
+fn settings_for(repo: Repo) -> Result(ListenSettings, Nil)
+
+@external(erlang, "howdy_database_listen", "start")
+fn start_listener(
+  settings: ListenSettings,
+  channel: String,
+  notify: fn(String) -> Nil,
+) -> Pid
+
+@external(erlang, "howdy_database_listen", "stop")
+fn stop_listener(pid: Pid) -> Nil
 
 /// The pool connects in the background and pog gives no signal when it has,
 /// so poll until a query succeeds, up to the configured startup timeout.

@@ -466,3 +466,149 @@ fn replace_database(url: String, name: String) -> String {
   let assert [_, ..rest] = string.split(url, "/") |> list.reverse
   string.join(list.reverse([name, ..rest]), "/")
 }
+
+// -- Listening -----------------------------------------------------------------
+
+pub fn listening_refuses_what_it_cannot_do_test() {
+  let assert Ok(db) = sqlite.start(sqlite.memory())
+  assert postgres.listen(db, "changes", fn(_) { Nil })
+    == Error(postgres.NotPostgres)
+  assert postgres.listen(db, "Changes; DROP", fn(_) { Nil })
+    == Error(postgres.InvalidChannel)
+  assert postgres.listen(db, "9lives", fn(_) { Nil })
+    == Error(postgres.InvalidChannel)
+  assert postgres.notify(db, "bad channel", "x")
+    == Error(
+      service.Invalid(postgres.listen_error_to_string(postgres.InvalidChannel)),
+    )
+}
+
+pub fn a_listener_hears_notify_from_any_connection_test() {
+  use config <- with_postgres
+  let assert Ok(db) = postgres.start(config)
+  let heard = process.new_subject()
+  // Settings remembered for a pool this module opened.
+  let assert Ok(listener) =
+    postgres.listen(db, "howdy_test", fn(payload) {
+      process.send(heard, payload)
+    })
+  let assert Ok(Nil) = postgres.notify(db, "howdy_test", "it's here")
+  assert process.receive(heard, 5000) == Ok("it's here")
+  // Sent inside a transaction, it arrives on commit, and not on rollback.
+  let assert Error(_) =
+    database.transaction(db, fn(conn) {
+      let assert Ok(Nil) = postgres.notify(conn, "howdy_test", "rolled back")
+      Error(service.Invalid("no"))
+    })
+  let assert Ok(Nil) =
+    database.transaction(db, fn(conn) {
+      postgres.notify(conn, "howdy_test", "committed")
+    })
+  assert process.receive(heard, 5000) == Ok("committed")
+  // A notify that crashes is logged, and listening carries on.
+  postgres.stop_listening(listener)
+  let assert Ok(crashing) =
+    postgres.listen(db, "howdy_test", fn(payload) {
+      case payload {
+        "boom" -> panic as "the app's code crashed"
+        _ -> process.send(heard, payload)
+      }
+    })
+  let assert Ok(Nil) = postgres.notify(db, "howdy_test", "boom")
+  let assert Ok(Nil) = postgres.notify(db, "howdy_test", "after")
+  assert process.receive(heard, 5000) == Ok("after")
+  postgres.stop_listening(crashing)
+  let assert Ok(_) = repo.close(db)
+  Nil
+}
+
+pub fn a_listener_finds_the_settings_of_a_pool_opened_elsewhere_test() {
+  use config <- with_postgres
+  let #(host, port, name, user, password, _, _) = postgres.inspect(config)
+  let settings =
+    pog.default_config(process.new_name(prefix: "howdy_database_test"))
+    |> pog.host(host)
+    |> pog.port(port)
+    |> pog.database(name)
+    |> pog.user(user)
+    |> pog.password(password)
+  let assert Ok(started) = pog.start(settings)
+  let db = postgres.repo(postgres.from_pog(started))
+  let heard = process.new_subject()
+  let notify = fn(payload) { process.send(heard, payload) }
+  // Found inside pgo, and given by the app.
+  let assert Ok(found) = postgres.listen(db, "howdy_test_elsewhere", notify)
+  let assert Ok(given) =
+    postgres.listen_via(settings, "howdy_test_elsewhere", notify)
+  let assert Ok(Nil) = postgres.notify(db, "howdy_test_elsewhere", "both")
+  assert process.receive(heard, 5000) == Ok("both")
+  assert process.receive(heard, 5000) == Ok("both")
+  postgres.stop_listening(found)
+  postgres.stop_listening(given)
+}
+
+pub fn a_listener_stops_with_its_owner_test() {
+  use config <- with_postgres
+  let assert Ok(db) = postgres.start(config)
+  let started = process.new_subject()
+  let owner =
+    process.spawn_unlinked(fn() {
+      let assert Ok(listener) = postgres.listen(db, "howdy_test", fn(_) { Nil })
+      process.send(started, postgres.listener_pid(listener))
+      process.sleep_forever()
+    })
+  let assert Ok(listener) = process.receive(started, 5000)
+  let gone = process.monitor(listener)
+  process.kill(owner)
+  let assert Ok(_) =
+    process.new_selector()
+    |> process.select_specific_monitor(gone, fn(down) { down })
+    |> process.selector_receive(within: 5000)
+  let assert Ok(_) = repo.close(db)
+  Nil
+}
+
+pub fn a_channel_may_be_a_keyword_test() {
+  use config <- with_postgres
+  let assert Ok(db) = postgres.start(config)
+  let heard = process.new_subject()
+  let assert Ok(listener) =
+    postgres.listen(db, "select", fn(payload) { process.send(heard, payload) })
+  let assert Ok(Nil) = postgres.notify(db, "select", "quoted")
+  assert process.receive(heard, 5000) == Ok("quoted")
+  postgres.stop_listening(listener)
+  let assert Ok(_) = repo.close(db)
+  Nil
+}
+
+/// Over TLS, notifications sent one after another all arrive: pgo 0.20.0's
+/// own listener crashed after each one. Needs a server with TLS, named by
+/// `HOWDY_DATABASE_TEST_POSTGRES_TLS_URL` with `?sslmode=require`.
+pub fn a_listener_over_tls_hears_every_notification_test() {
+  case env.get("HOWDY_DATABASE_TEST_POSTGRES_TLS_URL") {
+    Error(Nil) -> Nil
+    Ok(url) -> {
+      let assert Ok(config) = postgres.from_url(url)
+      let assert Ok(db) = postgres.start(config)
+      let heard = process.new_subject()
+      let assert Ok(listener) =
+        postgres.listen(db, "howdy_tls", fn(payload) {
+          process.send(heard, payload)
+        })
+      let sent = ["one", "two", "three", "four"]
+      list.each(sent, fn(payload) {
+        let assert Ok(Nil) = postgres.notify(db, "howdy_tls", payload)
+        process.sleep(50)
+      })
+      let got =
+        list.map(sent, fn(_) {
+          let assert Ok(payload) = process.receive(heard, 5000)
+          payload
+        })
+      assert got == sent
+      postgres.stop_listening(listener)
+      let assert Ok(_) = repo.close(db)
+      Nil
+    }
+  }
+}

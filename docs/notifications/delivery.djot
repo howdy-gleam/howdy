@@ -1,0 +1,110 @@
+# Email and digests
+
+A notification can go out by email as well as to the inbox, one at a time
+or gathered into a digest. Email and push are
+[background jobs](/docs/jobs/overview), queued in the same transaction
+that saves the notification and sent by your app's jobs runner, which
+retries what fails, so a slow or broken mail provider never holds up the
+request that sent the notification.
+
+## Email
+
+Give the notifier a [mailer](/docs/mail/overview), a way to find each
+user's address, and a function that writes the email for a notification:
+
+```gleam
+let notifier =
+  notifications.new(db)
+  |> notifications.with_base_url("https://example.com")
+  |> notifications.with_email(
+    mailer,
+    address: fn(user_id) { users.email_address(db, user_id) },
+    render: fn(n) {
+      mail.message()
+      |> mail.subject(n.title)
+      |> mail.text(n.body <> "\n\n" <> "https://example.com" <> option.unwrap(n.link, "/"))
+    },
+  )
+```
+
+`render` gives the subject and body; the recipient is filled in. An address
+that cannot be found gives up on that email. Kinds whose delivery says
+`EmailNow` are then emailed one by one.
+
+### Only if not read first
+
+Someone already looking at the app does not need an email as well.
+`email_after` waits before sending, and skips the email if the
+notification was read in the meantime:
+
+```gleam
+notifications.email_after(notifier, 120)
+```
+
+## Digests
+
+Kinds whose delivery says `EmailDigest` are gathered into one email per
+user, at most once per period:
+
+```gleam
+notifications.with_digest(notifier, every: 86_400, render: fn(unread) {
+  mail.message()
+  |> mail.subject(int.to_string(list.length(unread)) <> " new notifications")
+  |> mail.template(digest_email(unread))
+})
+```
+
+`render` is given the user's unread digest notifications, oldest first, up
+to a hundred. Ones read in the inbox before the digest goes are left out,
+and a user who has read everything gets no email. Without `with_digest`,
+digest kinds are emailed one at a time.
+
+## Sending them
+
+Teach your app's [jobs runner](/docs/jobs/overview#Doing-jobs) to deliver
+notifications, and run it under your supervision tree, before the server:
+
+```gleam
+let runner =
+  jobs.runner(db)
+  |> jobs.queue("notifications", concurrency: 10)
+  |> notifications.handle_jobs(notifier)
+
+supervisor.new(supervisor.OneForOne)
+|> supervisor.add(jobs.supervised(runner))
+|> supervisor.add(howdy.supervised(app(notifier)))
+|> howdy.start_application(name: "my_app_server")
+```
+
+The jobs go to the `notifications` queue, ten at a time on each node
+unless the runner gives it another concurrency, and show in the
+[admin's Jobs page](/docs/jobs/production#Watching-jobs) with the rest.
+Sending is quick: the runner hears about the jobs as soon as the
+notification is saved. Run the runner on every node and they share the
+work. As with every job, a node that dies mid-send leaves the job for
+another to run again, so a crash can mean a second copy but never a lost
+one.
+
+- An email waits `email_after` seconds, then is sent, unless the
+  notification was read in the meantime: its job is cancelled instead.
+- A digest is one job per user, due when their last digest is a period
+  old. Notifications sent while it waits join it; one sent while it is
+  going out waits for the next.
+- What fails is tried again, with the delay doubling from thirty seconds,
+  five times in all; then it is given up and logged. A mail provider that
+  is down or rate limiting is retried; one that refuses the message, or a
+  user with no address, is not.
+
+## Testing
+
+`howdy/mail/outbox` keeps mail instead of sending it, so a test can read
+what went out:
+
+```gleam
+let box = outbox.start()
+let notifier = notifications.new(db) |> notifications.with_email(mail.mailer(outbox.adapter(box)), ...)
+notifications.draft("security.login", "New sign-in") |> notifications.send(notifier, to: user_id)
+let runner = jobs.runner(db) |> notifications.handle_jobs(notifier)
+let assert Ok(_) = jobs.drain(runner)
+let assert Ok(email) = outbox.latest_to(box, "ana@example.com")
+```

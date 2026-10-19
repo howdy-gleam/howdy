@@ -27,6 +27,7 @@ import gleam/dynamic/decode
 import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
+import howdy/flash
 import howdy/ui/style.{class}
 import howdy/ui/theme/tokens
 import lustre/attribute.{type Attribute}
@@ -60,6 +61,7 @@ pub fn region(
       class(region_class()),
       attribute.aria_label("Notifications"),
       attribute.aria_live("polite"),
+      attribute.data("howdy-toast-region", ""),
       ..attributes
     ],
     toasts,
@@ -103,6 +105,42 @@ pub fn toast(
     ],
     list.append(icon, children),
   )
+}
+
+/// A toast for each flash message, to put in a `region`. They fade like
+/// any other toast, and each has a close button.
+///
+/// ```gleam
+/// use messages <- flash.take(ctx, flash)
+/// page.new("Settings")
+/// |> page.body([toast.region([], toast.flashed(messages)), ..])
+/// ```
+pub fn flashed(messages: List(flash.Message)) -> List(Element(msg)) {
+  list.map(messages, fn(message) {
+    toast(flash_variant(message.level), [], [
+      title([text(message.text)]),
+      close([attribute.aria_label("Dismiss")]),
+    ])
+  })
+}
+
+/// Push each flash message onto a live view's queue, oldest first.
+pub fn push_flashed(
+  queue: Queue,
+  messages: List(flash.Message),
+  now: Int,
+) -> Queue {
+  list.fold(messages, queue, fn(queue, message) {
+    push(queue, flash_variant(message.level), message.text, "", now).0
+  })
+}
+
+fn flash_variant(level: flash.Level) -> Variant {
+  case level {
+    flash.Info -> Info
+    flash.Success -> Success
+    flash.Danger -> Danger
+  }
 }
 
 // -- Queue -------------------------------------------------------------------

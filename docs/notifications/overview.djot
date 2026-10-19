@@ -1,0 +1,200 @@
+# Howdy Notifications
+
+`howdy_notifications` is an optional package for telling people that
+something happened: a comment on their post, a report that finished, a
+sign-in from a new device. Each notification is:
+
+- kept in an inbox in your database until it is read
+- pushed straight away to every page the recipient has open, in any tab
+- emailed too, straight away or in a digest, if the kind calls for it
+- shown by the browser itself with [Web Push](/docs/notifications/web-push),
+  even when the app is closed
+
+For feedback on what the user just did, such as "Settings saved" after a
+form post, use [flash messages](/docs/controllers/flash-messages) instead.
+
+## Install
+
+Add the package to `gleam.toml`, next to `howdy`:
+
+```toml
+howdy_notifications = { git = "https://github.com/mikeyjones/howdy.git", ref = "v2.1.1", path = "notifications" }
+```
+
+It keeps its tables in your app's database, through
+[`howdy_database`](/docs/database/overview), on PostgreSQL or SQLite, and
+sends email and push as [background jobs](/docs/jobs/overview), so it
+brings in `howdy_jobs` too. Apply both packages' migrations with your own
+when you deploy:
+
+```gleam
+import howdy/jobs
+import howdy/migration
+import howdy/notifications
+
+migration.run(db, [jobs.schema(), notifications.schema(), my_app.schema()])
+```
+
+## Sending
+
+Make one `Notifier` when the app starts and keep it:
+
+```gleam
+let notifier = notifications.new(db)
+```
+
+Then send from wherever something happens, once the change it is about has
+been committed:
+
+```gleam
+notifications.draft("comment.created", "Ana commented on your post")
+|> notifications.body("Looks good to me!")
+|> notifications.link("/posts/42#comment-7")
+|> notifications.data([#("post_id", "42")])
+|> notifications.send(notifier, to: post.author_id)
+```
+
+The kind, here `comment.created`, is yours to choose: it is what users set
+preferences for. The recipient is a user ID as a string, such as a
+`howdy_auth` user's `id`. `send_to_each` sends the same notification to a
+list of users.
+
+The notification is saved first, then announced. Saving is what counts: a
+page that was closed or offline reads the inbox when it next connects, so
+nothing is missed.
+
+## The inbox
+
+The functions behind any inbox page:
+
+- `notifications.list(notifier, user, notifications.page())` gives the
+  newest twenty, newest first. `page() |> limit(50) |> before(id)` gives
+  the next page, and `unread_only` only those not yet read.
+- `notifications.unread_count(notifier, user)` gives the number for a badge.
+- `mark_read`, `mark_unread`, `mark_all_read` and `delete` change it. A user
+  can only see and change their own: anyone else's is `NotFound`.
+
+`notifications.routes` serves all of this over HTTP, for the bell below or
+a page of your own:
+
+```gleam
+howdy.new()
+|> howdy.controller(
+  notifications.routes(notifier, at: "/notifications", identify: fn(ctx) {
+    auth.required(auth)(ctx) |> result.map(fn(principal) { principal.user.id })
+  }),
+)
+```
+
+`identify` names the signed-in user, or refuses the request. Writes come
+from the user's browser with their cookie, so it must also refuse
+cross-site requests; `auth.required` does. The routes are:
+
+- `GET /notifications` lists the inbox as
+  `{"notifications": [...], "unread": 3}`, taking `limit`, `before` and
+  `unread=true` in the query
+- `GET /notifications/events`, a stream of [server-sent events](/docs/controllers/server-sent-events)
+- `POST /notifications/read` marks every notification read
+- `POST /notifications/:id/read` and `POST /notifications/:id/unread`
+- `DELETE /notifications/:id`
+
+Writes answer `{"unread": 2}`. They also work as plain HTML forms: add
+`?next=/inbox` to the action, and the answer is a redirect back there.
+
+## Live
+
+The event stream opens with the unread count, then sends each new
+notification as it arrives and the count whenever it changes, from this tab
+or any other:
+
+```text
+event: unread
+data: {"count":3}
+
+event: notification
+data: {"id":"…","kind":"comment.created","title":"Ana commented on your post",…}
+```
+
+Announcements go through the same `pg` groups as
+[channels](/docs/controllers/websockets), so they reach the recipient's
+pages on every node of a connected cluster.
+
+### The bell
+
+`howdy_ui`'s [bell](/components/bell) is a button with the unread count,
+whose panel lists the newest notifications. It follows the event stream by
+itself, so the count changes and a toast appears as notifications arrive:
+
+```gleam
+bell.new(id: "inbox", source: "/notifications")
+|> bell.unread(unread_count)
+|> bell.inbox("/inbox")
+|> bell.view
+```
+
+Give it the unread count as the page is drawn, so it is right before the
+stream connects, and put it in the page itself, such as the header, rather
+than in a live view. Opening the panel reads the list; clicking a
+notification marks it read on the way to its link.
+
+Each open tab with a bell holds a connection open. Browsers allow six
+connections to a site at once over HTTP/1.1, so serve the app over HTTP/2,
+as howdy does with TLS, if people keep many tabs open.
+
+### In a live view
+
+A live view, or any other process, can subscribe to a user's inbox and
+hear `Received(notification)` and `Unread(count)` events:
+
+```gleam
+fn init(user_id: String) {
+  #(model, server_component.select(fn(_dispatch, subject) {
+    notifications.subscribe(user_id, subject)
+    process.new_selector() |> process.select_map(subject, Notified)
+  }))
+}
+```
+
+The subscription ends when the live view does.
+
+## Preferences
+
+Each user chooses how each kind reaches them: in the inbox, by email
+(straight away or in a digest), and by push. The app sets the defaults:
+
+```gleam
+notifications.with_defaults(notifier, fn(kind) {
+  case kind {
+    "security." <> _ -> Delivery(..default_delivery, email: EmailNow)
+    "comment.created" -> Delivery(..default_delivery, email: EmailDigest)
+    _ -> default_delivery
+  }
+})
+```
+
+`default_delivery` is the inbox and push, with no email. A user's choice
+overrides it, for one kind or for every kind:
+
+```gleam
+notifications.set_preference(notifier, user_id, "comment.created", notifications.muted)
+notifications.set_preference(notifier, user_id, notifications.every_kind,
+  Delivery(inbox: True, email: EmailDigest, push: False))
+```
+
+`preferences` lists what a user chose, for a settings page, and
+`clear_preference` goes back to the default. A muted kind is not saved at
+all.
+
+## Deleting accounts
+
+`notifications.delete_user(conn, user_id)` removes everything kept for a
+user. Give it `auth.with_account_deletion`'s transaction, so it goes with
+the account. `prune(notifier, read_before:)` deletes read notifications
+older than a time, to keep the table small.
+
+## Next
+
+[Email and digests](/docs/notifications/delivery) covers the other ways
+out and the jobs that send them, and [Web Push](/docs/notifications/web-push)
+the browser's own notifications. `examples/notifications` puts it all
+together, with a flash message after each send.

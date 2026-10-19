@@ -12,6 +12,8 @@ reaches a deployment. Depending on what you give it, it lets you:
   email templates
 - [follow each request](/docs/admin/telemetry) as a timeline of its
   queries, calls, emails and logs
+- [watch background jobs](/docs/jobs/production) as they are queued, run
+  and fail, and retry or cancel them
 
 ## Install
 
@@ -78,6 +80,10 @@ has:
 - `admin.mail(box)` shows what a `howdy/mail/outbox` keeps, and
   `admin.mail_previews(previews, send_with: mailer)` shows your email
   templates. See [Outbox and previews](/docs/mail/development).
+- `admin.jobs(runner)` shows the jobs of a
+  [Howdy Jobs](/docs/jobs/overview) runner: each queue's jobs by state,
+  its schedules, and each job with its errors. See
+  [Watching jobs](/docs/jobs/production).
 
 The first page lists what was registered, and the sidebar links to each
 part. A part that was not registered is not mounted at all.

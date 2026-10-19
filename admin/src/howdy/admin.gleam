@@ -38,6 +38,9 @@
 //// - `flags`: the feature flags of a `howdy/flags`: their kill switches,
 ////   who they are allowed or blocked for, their history with undo, and the
 ////   groups rules can name. Rollouts are shown, not set.
+//// - `jobs`: the background jobs of a `howdy/jobs` runner: each queue's
+////   jobs by state, pausing queues, the schedules it keeps, and each job
+////   with its errors, to retry, cancel or delete.
 ////
 //// Some things need no registering, because `mount` can see them in the
 //// app:
@@ -72,6 +75,7 @@ import howdy/admin/internal/api as api_pages
 import howdy/admin/internal/config.{type Config, Config}
 import howdy/admin/internal/data
 import howdy/admin/internal/flags as flag_pages
+import howdy/admin/internal/jobs as job_pages
 import howdy/admin/internal/mail as mail_pages
 import howdy/admin/internal/notify
 import howdy/admin/internal/overview
@@ -82,6 +86,7 @@ import howdy/authorization.{type Authorization}
 import howdy/content
 import howdy/controller.{type Controller}
 import howdy/flags.{type Flags}
+import howdy/jobs.{type Runner}
 import howdy/mail.{type Mailer}
 import howdy/mail/outbox.{type Outbox}
 import howdy/mail/preview.{type Preview}
@@ -108,6 +113,7 @@ pub fn new() -> Admin {
     mailer: None,
     recorder: None,
     flags: None,
+    jobs: None,
     api: None,
     hosts: [
       "localhost",
@@ -121,9 +127,10 @@ pub fn new() -> Admin {
 /// How the grid's listening connection reaches PostgreSQL, so it hears
 /// about changes through `NOTIFY` rather than polling. Give the same
 /// settings the app's pool uses, such as `pog.url_config(name, url)`; the
-/// pool name in them is not used. Without this the admin looks for the
-/// settings inside the running pool, which depends on pgo's internals and
-/// falls back to polling when it cannot find them. Does nothing on SQLite.
+/// pool name in them is not used. Only needed for a pool the app did not
+/// open with `howdy/database/postgres`, whose settings
+/// `postgres.listen` cannot find: without them the grid polls. Does
+/// nothing on SQLite.
 pub fn notify_via(admin: Admin, config: pog.Config) -> Admin {
   Admin(Config(..admin.config, listen: Some(config)))
 }
@@ -216,6 +223,14 @@ pub fn flags(admin: Admin, features: Flags) -> Admin {
   Admin(Config(..admin.config, flags: Some(features)))
 }
 
+/// Show and manage the jobs of this runner, in the database it uses: each
+/// queue's jobs by state, pausing queues, the runner's schedules, and each
+/// job with its errors, to retry, cancel or delete. The runner need not be
+/// running in this process.
+pub fn jobs(admin: Admin, runner: Runner) -> Admin {
+  Admin(Config(..admin.config, jobs: Some(runner)))
+}
+
 /// Exact request hostnames (without port) the pages answer, replacing the
 /// loopback names. Anyone who can reach an allowed host owns your data.
 pub fn allow_hosts(admin: Admin, hosts: List(String)) -> Admin {
@@ -274,6 +289,10 @@ pub fn controllers(admin: Admin) -> List(Controller) {
     },
     case config.flags {
       Some(features) -> [flag_pages.controller(config, features)]
+      None -> []
+    },
+    case config.jobs {
+      Some(runner) -> [job_pages.controller(config, runner)]
       None -> []
     },
     case config.api {
@@ -411,6 +430,11 @@ pub fn has_telemetry(admin: Admin) -> Bool {
 /// Whether feature flags were registered.
 pub fn has_flags(admin: Admin) -> Bool {
   option.is_some(admin.config.flags)
+}
+
+/// Whether a jobs runner was registered.
+pub fn has_jobs(admin: Admin) -> Bool {
+  option.is_some(admin.config.jobs)
 }
 
 /// Whether auth was registered.

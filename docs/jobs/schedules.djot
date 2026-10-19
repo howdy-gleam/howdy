@@ -1,0 +1,152 @@
+# Schedules
+
+A runner can queue a job whenever a schedule comes round, written in
+cron's notation:
+
+```gleam
+import howdy/jobs
+import howdy/jobs/cron
+
+pub fn nightly_cleanup() -> jobs.Job(Nil) {
+  jobs.without_args("nightly_cleanup")
+}
+
+pub fn runner(db: Repo) -> jobs.Runner {
+  let assert Ok(nightly) = cron.parse("0 3 * * *")
+  jobs.runner(db)
+  |> jobs.handle(nightly_cleanup(), fn(_, _) { clean_up(db) })
+  |> jobs.every(nightly, run: nightly_cleanup(), with: Nil)
+}
+```
+
+`jobs.every` queues the job with those arguments each time the schedule
+comes round, and the job then runs like any other: on its queue, retried
+when it fails, and shown in the admin. A schedule needs a handler for its
+job on the same runner, or the runner does not start.
+
+## Once, however many nodes
+
+Every node running the runner keeps its schedules, and each time is still
+queued once. The time a schedule last queued a job is kept in the
+database, and the node that moves it on is the node that queues the job,
+in the same transaction. Another node arriving a moment later finds it
+done.
+
+When no node is running at a time it should have come round, such as
+during a deploy, the job is queued when one starts: once, however many
+times were missed. A schedule new to the database starts from its next
+time, so adding one does not run it at once.
+
+## Writing a schedule
+
+Five fields: minute, hour, day of the month, month, and day of the week,
+in UTC.
+
+- `*` is every value; `*/15` every fifteenth from the first
+- `9-17` is a range; `0-30/10` steps through one
+- `1,15` is a list of any of these
+- months may be `jan` to `dec`, and days of the week `sun` to `sat`, where
+  `0` and `7` are both Sunday
+- `@hourly`, `@daily` (or `@midnight`), `@weekly`, `@monthly` and
+  `@yearly` (or `@annually`) stand for the usual schedules
+
+Some examples:
+
+- `0 3 * * *`: three in the morning, every day
+- `*/15 9-17 * * mon-fri`: every quarter of an hour in working hours
+- `0 8 * * mon`: eight on Monday mornings
+- `0 0 1 * *`: midnight at the start of each month
+
+As in most crons, when both the day of the month and the day of the week
+are restricted, a day matching either counts: `0 0 1 * mon` runs on the
+first of the month and on every Monday.
+
+`cron.parse` says what is wrong with a schedule it cannot read, and
+refuses one that never comes round, such as `0 0 30 2 *`.
+`cron.next(schedule, after: unix_milliseconds)` gives the next time after
+another, for checking a schedule says what you meant.
+
+## Keeping things tidy
+
+Several Howdy packages leave behind rows or files that are no longer
+needed, and give you a function to clear them. Schedules are where to call
+them.
+
+### Expired sign-in data
+
+[Howdy Auth](/docs/auth/overview) clears expired tokens and sessions as it
+goes, a few at a time. `auth.prune_expired` clears whatever has built up,
+and `auth.prune_events` deletes audit events older than a time you choose:
+
+```gleam
+let prune_auth = jobs.without_args("auth.prune")
+
+runner
+|> jobs.handle(prune_auth, fn(_, _) {
+  let #(now, _) =
+    timestamp.to_unix_seconds_and_nanoseconds(timestamp.system_time())
+  let a_year_ago = now - 365 * 86_400
+  case
+    auth.prune_expired(identity)
+    |> result.try(fn(_) { auth.prune_events(identity, before: a_year_ago) })
+  {
+    Ok(Nil) -> jobs.Done
+    Error(error) -> jobs.Retry(service.message(error))
+  }
+})
+|> jobs.every(nightly, run: prune_auth, with: Nil)
+```
+
+### Uploads nobody finished
+
+A [direct upload](/docs/storage/overview#Direct-uploads) that the browser
+sent but never confirmed leaves a file nothing refers to.
+`storage.delete_unused` deletes those under a prefix that are older than a
+time you give, asking about each:
+
+```gleam
+let sweep_uploads = jobs.without_args("storage.sweep_uploads")
+
+runner
+|> jobs.handle(sweep_uploads, fn(_, _) {
+  let day_ago = timestamp.add(timestamp.system_time(), duration.hours(-24))
+  case
+    storage.delete_unused(files, prefix: "uploads/", before: day_ago,
+      in_use: fn(key) { documents.refers_to(db, key) |> result.unwrap(True) },
+    )
+  {
+    Ok(_) -> jobs.Done
+    Error(error) -> jobs.Retry(storage.error_to_string(error))
+  }
+})
+|> jobs.every(hourly, run: sweep_uploads, with: Nil)
+```
+
+### Finished jobs
+
+Runners delete jobs that finished more than a week ago themselves.
+`jobs.keep_finished_for(runner, milliseconds)` changes how long, and
+`jobs.prune(repo, older_than:)` does it on demand.
+
+## Fanning out
+
+A scheduled job can queue others: one job a week that queues a digest for
+each user spreads the sending across the queue and its nodes, and a
+failure for one user is retried without sending everyone's again.
+
+```gleam
+|> jobs.handle(weekly_digests(), fn(_, _) {
+  let queued = {
+    use conn <- database.transaction(db)
+    use owners <- result.try(users_with_notes(conn))
+    list.map(owners, fn(owner) {
+      jobs.new(digest(), owner) |> jobs.unique("digest:" <> owner)
+    })
+    |> jobs.insert_all(into: conn)
+  }
+  case queued {
+    Ok(_) -> jobs.Done
+    Error(error) -> jobs.Retry(service.message(error))
+  }
+})
+```

@@ -58,9 +58,6 @@ fn notes() -> migration.Package {
 @external(erlang, "howdy_admin_test_ffi", "getenv")
 fn getenv(name: String) -> Result(String, Nil)
 
-@external(erlang, "howdy_admin_test_ffi", "links")
-fn links() -> List(process.Pid)
-
 /// The whole suite runs on PostgreSQL instead when
 /// HOWDY_ADMIN_TEST_POSTGRES_URL names a server whose database it may
 /// empty; otherwise on an in-memory SQLite database.
@@ -453,9 +450,8 @@ pub fn postgres_announces_changes_and_sqlite_does_not_test() {
       assert notify.install(db, table) != Ok(Nil)
       assert notify.uninstall(db) == Ok(Nil)
       assert admin.remove_notify_triggers(db) == Ok(Nil)
-      // Without a pool to look inside, subscribing fails softly.
-      let assert Error(Nil) =
-        notify.subscribe(db, None, process.self(), fn(_) { Nil }, fn() { Nil })
+      // Not on PostgreSQL, subscribing fails softly.
+      let assert Error(Nil) = notify.subscribe(db, None, fn(_) { Nil })
       Nil
     }
     True -> {
@@ -479,19 +475,19 @@ pub fn postgres_announces_changes_and_sqlite_does_not_test() {
       // Each pass ends by removing the triggers, so put them back first.
       let assert Ok(Nil) = notify.install(db, table)
       let heard = process.new_subject()
-      let owner = process.spawn_unlinked(fn() { process.sleep(30_000) })
-      let before = links()
-      let assert Ok(Nil) =
-        notify.subscribe(
-          db,
-          settings,
-          owner,
-          fn(name) { process.send(heard, name) },
-          fn() { Nil },
-        )
-      // The listener is linked to the caller, so it is the one new link.
-      let assert [listener] =
-        list.filter(links(), fn(pid) { !list.contains(before, pid) })
+      let started = process.new_subject()
+      // The listener is linked to whoever subscribes: here a process of the
+      // test's own, so it can be seen to stop with it.
+      let owner =
+        process.spawn_unlinked(fn() {
+          let assert Ok(listener) =
+            notify.subscribe(db, settings, fn(name) {
+              process.send(heard, name)
+            })
+          process.send(started, postgres.listener_pid(listener))
+          process.sleep(30_000)
+        })
+      let assert Ok(listener) = process.receive(started, 5000)
       let gone = process.monitor(listener)
       let assert Ok(_) =
         repo.execute(db, "INSERT INTO notes_notes (title) VALUES ('hello')", [])
@@ -635,6 +631,7 @@ pub fn the_live_grid_polls_on_its_own_clock_test() {
       mailer: None,
       recorder: None,
       flags: None,
+      jobs: None,
       api: None,
       hosts: ["localhost"],
       listen: None,
