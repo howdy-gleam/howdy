@@ -4,10 +4,12 @@
 %%
 %% - Data arriving on a TLS socket re-arms it with `ssl:setopts` rather than
 %%   `inet:setopts`, which crashes the connection after every notification.
+%%   Sent upstream as https://github.com/erleans/pgo/pull/136.
 %% - Channel names are quoted in LISTEN and UNLISTEN, so a channel that is
 %%   also an SQL keyword, such as `select`, works. Callers pass plain names.
+%%   pgo's main branch escapes them since erleans/pgo#119, not yet released.
 %%
-%% Remove it once a pgo release fixes both.
+%% Remove it once a pgo release has both, and raise pog's floor to match.
 -module(howdy_database_notifications).
 
 -behaviour(gen_statem).
