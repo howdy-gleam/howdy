@@ -108,9 +108,58 @@ pub type Words {
     give_one_answer: String,
     /// A label for a spinner.
     loading: String,
+    /// Notification bells: the unread count, which may contain `{count}`,
+    /// the buttons, what an empty or failed inbox says, and the browser
+    /// notification switch. The bell's name is `notifications`.
+    unread: String,
+    mark_all_read: String,
+    mark_read: String,
+    mark_unread: String,
+    caught_up: String,
+    see_all_notifications: String,
+    notifications_failed: String,
+    push_on: String,
+    push_off: String,
+    push_blocked: String,
     calendar: calendar.Locale,
     uploader: uploader.Words,
     attachment: attachment.Words,
+    rich_text: RichTextWords,
+  )
+}
+
+/// What a rich text editor says. `heading` may contain `{level}`, and
+/// `too_large` `{limit}`.
+pub type RichTextWords {
+  RichTextWords(
+    toolbar: String,
+    bold: String,
+    italic: String,
+    strike: String,
+    code: String,
+    link: String,
+    heading: String,
+    quote: String,
+    bullet_list: String,
+    numbered_list: String,
+    code_block: String,
+    divider: String,
+    attach: String,
+    undo: String,
+    redo: String,
+    link_address: String,
+    link_apply: String,
+    link_remove: String,
+    bad_link: String,
+    no_matches: String,
+    remove: String,
+    uploading: String,
+    too_large: String,
+    wrong_type: String,
+    failed: String,
+    wait: String,
+    missing: String,
+    unavailable: String,
   )
 }
 
@@ -163,9 +212,49 @@ pub fn english() -> Words {
     choose_on_scale: "Choose a number on the scale.",
     give_one_answer: "Give one answer.",
     loading: "Loading",
+    unread: "{count} unread",
+    mark_all_read: "Mark all as read",
+    mark_read: "Mark as read",
+    mark_unread: "Mark as unread",
+    caught_up: "You're all caught up.",
+    see_all_notifications: "See all notifications",
+    notifications_failed: "Notifications could not be loaded.",
+    push_on: "Turn on browser notifications",
+    push_off: "Turn off browser notifications",
+    push_blocked: "Browser notifications are blocked in this browser's settings.",
     calendar: calendar.english(),
     uploader: uploader.english(),
     attachment: attachment.english(),
+    rich_text: RichTextWords(
+      toolbar: "Formatting",
+      bold: "Bold",
+      italic: "Italic",
+      strike: "Strikethrough",
+      code: "Code",
+      link: "Link",
+      heading: "Heading {level}",
+      quote: "Quote",
+      bullet_list: "Bulleted list",
+      numbered_list: "Numbered list",
+      code_block: "Code block",
+      divider: "Divider",
+      attach: "Attach files",
+      undo: "Undo",
+      redo: "Redo",
+      link_address: "Link address",
+      link_apply: "Apply",
+      link_remove: "Remove link",
+      bad_link: "Enter a web address, such as https://example.com.",
+      no_matches: "No matches",
+      remove: "Remove",
+      uploading: "Uploading",
+      too_large: "Too large: the limit is {limit}.",
+      wrong_type: "This type of file is not accepted.",
+      failed: "The file could not be uploaded.",
+      wait: "Wait for the files to finish uploading.",
+      missing: "Write something.",
+      unavailable: "The editor could not load. Reload the page to try again.",
+    ),
   )
 }
 
@@ -216,12 +305,24 @@ pub fn translated(translator t: Translator) -> Words {
     choose_on_scale: messages.choose_on_scale(t),
     give_one_answer: messages.give_one_answer(t),
     loading: messages.loading(t),
+    // The bell fills the count in itself.
+    unread: messages.bell_unread(t, count: "{count}"),
+    mark_all_read: messages.bell_mark_all_read(t),
+    mark_read: messages.bell_mark_read(t),
+    mark_unread: messages.bell_mark_unread(t),
+    caught_up: messages.bell_caught_up(t),
+    see_all_notifications: messages.bell_see_all(t),
+    notifications_failed: messages.bell_failed(t),
+    push_on: messages.bell_push_on(t),
+    push_off: messages.bell_push_off(t),
+    push_blocked: messages.bell_push_blocked(t),
     calendar: calendar_words(t),
     uploader: uploader_words(t),
     attachment: attachment.Words(
       uploading: fn(name) { messages.uploading_file(t, name:) },
       processing: messages.processing(t),
     ),
+    rich_text: rich_text_words(t),
   )
 }
 
@@ -267,6 +368,40 @@ fn uploader_words(t: Translator) -> uploader.Words {
     failed: messages.uploader_failed(t),
     wait: messages.uploader_wait(t),
     missing: messages.uploader_missing(t),
+  )
+}
+
+fn rich_text_words(t: Translator) -> RichTextWords {
+  RichTextWords(
+    // The editor fills these placeholders in itself.
+    toolbar: messages.editor_toolbar(t),
+    bold: messages.editor_bold(t),
+    italic: messages.editor_italic(t),
+    strike: messages.editor_strike(t),
+    code: messages.editor_code(t),
+    link: messages.editor_link(t),
+    heading: messages.editor_heading(t, level: "{level}"),
+    quote: messages.editor_quote(t),
+    bullet_list: messages.editor_bullet_list(t),
+    numbered_list: messages.editor_numbered_list(t),
+    code_block: messages.editor_code_block(t),
+    divider: messages.editor_divider(t),
+    attach: messages.editor_attach(t),
+    undo: messages.editor_undo(t),
+    redo: messages.editor_redo(t),
+    link_address: messages.editor_link_address(t),
+    link_apply: messages.editor_link_apply(t),
+    link_remove: messages.editor_link_remove(t),
+    bad_link: messages.editor_bad_link(t),
+    no_matches: messages.editor_no_matches(t),
+    remove: messages.editor_remove(t),
+    uploading: messages.editor_uploading(t),
+    too_large: messages.editor_too_large(t, limit: "{limit}"),
+    wrong_type: messages.editor_wrong_type(t),
+    failed: messages.editor_failed(t),
+    wait: messages.editor_wait(t),
+    missing: messages.editor_missing(t),
+    unavailable: messages.editor_unavailable(t),
   )
 }
 

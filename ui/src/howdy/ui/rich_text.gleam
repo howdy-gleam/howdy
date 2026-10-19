@@ -60,6 +60,7 @@ import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/string
 import howdy/form.{type Form}
+import howdy/problem.{type Problem}
 import howdy/ui/attachment as card
 import howdy/ui/button
 import howdy/ui/command
@@ -71,6 +72,7 @@ import howdy/ui/theme/tokens
 import howdy/ui/tooltip
 import howdy/ui/typography
 import howdy/ui/uploader
+import howdy/ui/words.{type RichTextWords, type Words} as ui_words
 import howdy/validate.{type Rule}
 import lustre/attribute.{type Attribute}
 import lustre/element.{type Element, text}
@@ -102,74 +104,6 @@ pub type Tool {
   Redo
 }
 
-/// What the editor says. `heading` may contain `{level}`, and `too_large`
-/// `{limit}`.
-pub type Words {
-  Words(
-    toolbar: String,
-    bold: String,
-    italic: String,
-    strike: String,
-    code: String,
-    link: String,
-    heading: String,
-    quote: String,
-    bullet_list: String,
-    numbered_list: String,
-    code_block: String,
-    divider: String,
-    attach: String,
-    undo: String,
-    redo: String,
-    link_address: String,
-    link_apply: String,
-    link_remove: String,
-    bad_link: String,
-    no_matches: String,
-    remove: String,
-    uploading: String,
-    too_large: String,
-    wrong_type: String,
-    failed: String,
-    wait: String,
-    missing: String,
-    unavailable: String,
-  )
-}
-
-pub fn english() -> Words {
-  Words(
-    toolbar: "Formatting",
-    bold: "Bold",
-    italic: "Italic",
-    strike: "Strikethrough",
-    code: "Code",
-    link: "Link",
-    heading: "Heading {level}",
-    quote: "Quote",
-    bullet_list: "Bulleted list",
-    numbered_list: "Numbered list",
-    code_block: "Code block",
-    divider: "Divider",
-    attach: "Attach files",
-    undo: "Undo",
-    redo: "Redo",
-    link_address: "Link address",
-    link_apply: "Apply",
-    link_remove: "Remove link",
-    bad_link: "Enter a web address, such as https://example.com.",
-    no_matches: "No matches",
-    remove: "Remove",
-    uploading: "Uploading",
-    too_large: "Too large: the limit is {limit}.",
-    wrong_type: "This type of file is not accepted.",
-    failed: "The file could not be uploaded.",
-    wait: "Wait for the files to finish uploading.",
-    missing: "Write something.",
-    unavailable: "The editor could not load. Reload the page to try again.",
-  )
-}
-
 type Source {
   Source(trigger: String, kind: String, search: String)
 }
@@ -196,7 +130,7 @@ pub opaque type Editor {
     required: Bool,
     disabled: Bool,
     invalid: Bool,
-    words: Words,
+    words: RichTextWords,
   )
 }
 
@@ -213,7 +147,7 @@ pub fn new(name name: String) -> Editor {
     required: False,
     disabled: False,
     invalid: False,
-    words: english(),
+    words: ui_words.english().rich_text,
   )
 }
 
@@ -324,9 +258,10 @@ pub fn id(editor: Editor, id: String) -> Editor {
   Editor(..editor, id: Some(id))
 }
 
-/// Say things in other words, or another language.
+/// Say things in other words, or another language: the editor uses the
+/// words' `rich_text`.
 pub fn words(editor: Editor, words: Words) -> Editor {
-  Editor(..editor, words:)
+  Editor(..editor, words: words.rich_text)
 }
 
 // -- Reading what was posted -------------------------------------------------
@@ -348,30 +283,35 @@ pub fn field(
     Ok(value) ->
       case document.decode(value) {
         Ok(value) -> validate.field(name, value, rules, next)
-        Error(_) -> refuse(name, "is not valid rich text", next)
+        Error(_) ->
+          refuse(
+            name,
+            problem.Custom("not_rich_text", "is not valid rich text"),
+            next,
+          )
       }
-    Error(Nil) -> refuse(name, "is required", next)
+    Error(Nil) -> refuse(name, problem.Required, next)
   }
 }
 
 fn refuse(
   name: String,
-  message: String,
+  problem: Problem,
   next: fn(Document) -> validate.Result(b),
 ) -> validate.Result(b) {
-  validate.field(name, document.empty(), [fn(_) { Error(message) }], next)
+  validate.field(name, document.empty(), [fn(_) { Error(problem) }], next)
 }
 
 /// Refuse a document with no text, mentions, attachments or dividers.
 pub fn not_empty() -> Rule(Document) {
-  validate.custom(fn(value) { !document.is_empty(value) }, "must not be empty")
+  validate.custom(fn(value) { !document.is_empty(value) }, problem.Blank)
 }
 
 /// Refuse a document whose plain text is longer than this many characters.
 pub fn max_length(length: Int) -> Rule(Document) {
   validate.custom(
     fn(value) { string.length(document.to_plain_text(value)) <= length },
-    "must be at most " <> int.to_string(length) <> " characters",
+    problem.TooLong(length),
   )
 }
 
@@ -688,7 +628,7 @@ fn previous_group(buttons: List(#(Int, Tool)), index: Int) -> Int {
   }
 }
 
-fn tool_label(tool: Tool, words: Words) -> String {
+fn tool_label(tool: Tool, words: RichTextWords) -> String {
   case tool {
     Bold -> words.bold
     Italic -> words.italic
@@ -794,7 +734,7 @@ fn icon(paths: List(String)) -> Element(msg) {
   )
 }
 
-fn mention_menu(id: String, words: Words) -> Element(msg) {
+fn mention_menu(id: String, words: RichTextWords) -> Element(msg) {
   html.div(
     [
       class(menu_class()),
@@ -818,7 +758,7 @@ fn mention_menu(id: String, words: Words) -> Element(msg) {
   )
 }
 
-fn link_form(id: String, words: Words) -> Element(msg) {
+fn link_form(id: String, words: RichTextWords) -> Element(msg) {
   html.div(
     [
       class(link_form_class()),

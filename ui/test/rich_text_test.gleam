@@ -7,6 +7,7 @@ import gleam/option.{None, Some}
 import gleam/string
 import howdy
 import howdy/form
+import howdy/problem
 import howdy/service
 import howdy/testing
 import howdy/ui
@@ -350,19 +351,19 @@ pub fn the_form_field_test() {
       Ok(_) -> []
       Error(errors) ->
         list.map(errors, fn(error: service.FieldError) {
-          #(error.field, error.message)
+          #(error.field, error.problem)
         })
     }
   }
   let posted = fn(value) { [#("body", document.to_string(value))] }
   assert validator(form.from_fields(posted(document.from_text("Hello"))))
     == Ok(document.from_text("Hello"))
-  assert errors([]) == [#("body", "is required")]
+  assert errors([]) == [#("body", problem.Required)]
   assert errors([#("body", "<script>")])
-    == [#("body", "is not valid rich text")]
-  assert errors(posted(document.empty())) == [#("body", "must not be empty")]
+    == [#("body", problem.Custom("not_rich_text", "is not valid rich text"))]
+  assert errors(posted(document.empty())) == [#("body", problem.Blank)]
   assert errors(posted(document.from_text("Far too long a note")))
-    == [#("body", "must be at most 10 characters")]
+    == [#("body", problem.TooLong(10))]
 }
 
 pub fn suggestions_test() {

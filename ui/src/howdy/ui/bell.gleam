@@ -26,6 +26,9 @@
 //// Toasts go in the page's toast region, `toast.region`, or one the bell
 //// adds when the page has none.
 ////
+//// The bell speaks English unless given other words with `words`; see
+//// `howdy/ui/words`.
+////
 //// A browser keeps one connection open for each tab with a bell. Over
 //// HTTP/1.1 browsers allow six connections to a site at once, so serve
 //// the app over HTTP/2, as `howdy` does with TLS, if people keep many
@@ -40,45 +43,13 @@ import howdy/ui/popover
 import howdy/ui/style.{anchor_name, class}
 import howdy/ui/theme/tokens
 import howdy/ui/toast
+import howdy/ui/words.{type Words} as ui_words
 import lustre/attribute.{type Attribute}
 import lustre/element.{type Element, text}
 import lustre/element/html
 import lustre/element/svg
 import sketch/css.{type Class}
 import sketch/css/length.{rem}
-
-/// What the bell says. `unread` may contain `{count}`.
-pub type Words {
-  Words(
-    title: String,
-    unread: String,
-    mark_all_read: String,
-    mark_read: String,
-    mark_unread: String,
-    empty: String,
-    see_all: String,
-    failed: String,
-    push_on: String,
-    push_off: String,
-    push_blocked: String,
-  )
-}
-
-pub fn english() -> Words {
-  Words(
-    title: "Notifications",
-    unread: "{count} unread",
-    mark_all_read: "Mark all as read",
-    mark_read: "Mark as read",
-    mark_unread: "Mark as unread",
-    empty: "You're all caught up.",
-    see_all: "See all notifications",
-    failed: "Notifications could not be loaded.",
-    push_on: "Turn on browser notifications",
-    push_off: "Turn off browser notifications",
-    push_blocked: "Browser notifications are blocked in this browser's settings.",
-  )
-}
 
 /// A bell under construction.
 pub opaque type Bell {
@@ -102,7 +73,7 @@ pub fn new(id id: String, source source: String) -> Bell {
     inbox: None,
     push: None,
     toasts: True,
-    words: english(),
+    words: ui_words.english(),
   )
 }
 
@@ -128,7 +99,9 @@ pub fn without_toasts(bell: Bell) -> Bell {
   Bell(..bell, toasts: False)
 }
 
-/// Say things in other words, or another language.
+/// Say things in other words, or another language: the bell uses the
+/// `notifications`, `unread`, `mark_*`, `caught_up`, `see_all_notifications`,
+/// `notifications_failed`, `push_*` and `dismiss` words.
 pub fn words(bell: Bell, words: Words) -> Bell {
   Bell(..bell, words:)
 }
@@ -136,8 +109,8 @@ pub fn words(bell: Bell, words: Words) -> Bell {
 /// The words for this many unread notifications.
 pub fn unread_label(words: Words, count: Int) -> String {
   case count {
-    0 -> words.title
-    _ -> words.title <> ", " <> replace_count(words.unread, count)
+    0 -> words.notifications
+    _ -> words.notifications <> ", " <> replace_count(words.unread, count)
   }
 }
 
@@ -170,7 +143,7 @@ pub fn view(bell: Bell) -> Element(msg) {
   let footer = case bell.inbox {
     Some(href) -> [
       html.a([class(footer_class()), attribute.href(href)], [
-        text(words.see_all),
+        text(words.see_all_notifications),
       ]),
     ]
     None -> []
@@ -185,10 +158,10 @@ pub fn view(bell: Bell) -> Element(msg) {
         True -> "true"
         False -> "false"
       }),
-      attribute.data("text-title", words.title),
+      attribute.data("text-title", words.notifications),
       attribute.data("text-unread", words.unread),
-      attribute.data("text-failed", words.failed),
-      attribute.data("text-empty", words.empty),
+      attribute.data("text-failed", words.notifications_failed),
+      attribute.data("text-empty", words.caught_up),
       attribute.data("text-mark-read", words.mark_read),
       attribute.data("text-mark-unread", words.mark_unread),
       attribute.data("text-push-on", words.push_on),
@@ -229,12 +202,12 @@ pub fn view(bell: Bell) -> Element(msg) {
           attribute.popover("auto"),
           attribute.data("howdy-anchored", anchor_name(bell.id)),
           attribute.role("dialog"),
-          attribute.aria_label(words.title),
+          attribute.aria_label(words.notifications),
           attribute.data("howdy-bell-panel", ""),
         ],
         [
           html.div([class(header_class())], [
-            html.span([class(heading_class())], [text(words.title)]),
+            html.span([class(heading_class())], [text(words.notifications)]),
             html.button(
               [
                 class(button.sized_class(Ghost, Small)),
@@ -248,7 +221,7 @@ pub fn view(bell: Bell) -> Element(msg) {
             [
               class(list_class()),
               attribute.data("howdy-bell-list", ""),
-              attribute.aria_label(words.title),
+              attribute.aria_label(words.notifications),
             ],
             [],
           ),
@@ -258,7 +231,7 @@ pub fn view(bell: Bell) -> Element(msg) {
               attribute.data("howdy-bell-empty", ""),
               attribute.hidden(True),
             ],
-            [text(words.empty)],
+            [text(words.caught_up)],
           ),
           ..list.append(push, footer)
         ],
@@ -271,11 +244,11 @@ pub fn view(bell: Bell) -> Element(msg) {
           toast.description(
             [attribute.data("howdy-bell-toast-body", "")] |> span,
           ),
-          toast.close([attribute.aria_label("Dismiss")]),
+          toast.close([attribute.aria_label(words.dismiss)]),
         ]),
       ]),
       html.template([attribute.data("howdy-bell-region", "")], [
-        toast.region([], []),
+        toast.region(words, [], []),
       ]),
     ],
   )

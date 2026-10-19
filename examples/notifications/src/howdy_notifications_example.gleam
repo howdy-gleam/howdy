@@ -52,6 +52,7 @@ import howdy/ui/live
 import howdy/ui/page
 import howdy/ui/theme
 import howdy/ui/toast
+import howdy/ui/words
 import howdy_notifications_example/feed
 import lustre/attribute
 import lustre/element.{type Element, text}
@@ -452,7 +453,7 @@ fn layout(
   |> page.live
   |> page.body([
     ui.container([], [ui.stack([], list.append(header, body))]),
-    toast.region([], toast.flashed(messages)),
+    toast.region(words.english(), [], toast.flashed(words.english(), messages)),
   ])
   |> page.respond(ctx)
 }

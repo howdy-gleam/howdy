@@ -283,7 +283,7 @@ controller.status(ctx, 303)
 
 // ...and the page it lands on shows it once, as toasts with howdy_ui.
 use messages <- flash.take(ctx, flash)
-toast.region([], toast.flashed(messages))
+toast.region(words, [], toast.flashed(words, messages))
 ```
 
 ## Authentication and authorization

@@ -324,7 +324,7 @@ pub fn flash_messages_become_toasts_test() {
     flash.Message(flash.Danger, "<b>Failed</b>"),
   ]
   let html =
-    toast.region([], toast.flashed(messages))
+    toast.region(words.english(), [], toast.flashed(words.english(), messages))
     |> render
   assert string.contains(html, "Saved")
   // Text, never markup.

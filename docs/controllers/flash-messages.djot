@@ -45,17 +45,19 @@ response, so a refresh does not show them again:
 ```gleam
 fn settings_page(ctx: Context, flash: flash.Flash) {
   use messages <- flash.take(ctx, flash)
+  let w = words.english()
   page.new("Settings")
   |> page.body([
     settings_form(),
-    toast.region([], toast.flashed(messages)),
+    toast.region(w, [], toast.flashed(w, messages)),
   ])
   |> page.respond(ctx)
 }
 ```
 
 `toast.flashed` from `howdy_ui` turns each message into a toast that fades
-on its own; the text is always shown as text, never as HTML. A page that
+on its own, with a close button labelled in the page's
+[words](/docs/i18n/overview); the text is always shown as text, never as HTML. A page that
 redirects again without showing anything should not take the messages: they
 stay in the cookie for the page after.
 

@@ -84,6 +84,321 @@ pub fn back(translator: Translator) -> String {
   }
 }
 
+/// bell_caught_up: You're all caught up.
+pub fn bell_caught_up(translator: Translator) -> String {
+  case
+    i18n.pick(translator, [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "it",
+      "ja",
+      "nl",
+      "pl",
+      "pt",
+      "zh",
+      "en",
+    ])
+  {
+    "ar" -> "لا جديد لديك."
+    "de" -> "Sie sind auf dem neuesten Stand."
+    "es" -> "Estás al día."
+    "fr" -> "Vous êtes à jour."
+    "it" -> "Sei in pari."
+    "ja" -> "すべて確認済みです。"
+    "nl" -> "Je bent helemaal bij."
+    "pl" -> "Wszystko przeczytane."
+    "pt" -> "Está tudo em dia."
+    "zh" -> "已全部看完。"
+    _ -> "You're all caught up."
+  }
+}
+
+/// bell_failed: Notifications could not be loaded.
+pub fn bell_failed(translator: Translator) -> String {
+  case
+    i18n.pick(translator, [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "it",
+      "ja",
+      "nl",
+      "pl",
+      "pt",
+      "zh",
+      "en",
+    ])
+  {
+    "ar" -> "تعذّر تحميل الإشعارات."
+    "de" -> "Benachrichtigungen konnten nicht geladen werden."
+    "es" -> "No se pudieron cargar las notificaciones."
+    "fr" -> "Impossible de charger les notifications."
+    "it" -> "Impossibile caricare le notifiche."
+    "ja" -> "通知を読み込めませんでした。"
+    "nl" -> "Meldingen konden niet worden geladen."
+    "pl" -> "Nie udało się wczytać powiadomień."
+    "pt" -> "Não foi possível carregar as notificações."
+    "zh" -> "无法加载通知。"
+    _ -> "Notifications could not be loaded."
+  }
+}
+
+/// bell_mark_all_read: Mark all as read
+pub fn bell_mark_all_read(translator: Translator) -> String {
+  case
+    i18n.pick(translator, [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "it",
+      "ja",
+      "nl",
+      "pl",
+      "pt",
+      "zh",
+      "en",
+    ])
+  {
+    "ar" -> "تعليم الكل كمقروء"
+    "de" -> "Alle als gelesen markieren"
+    "es" -> "Marcar todo como leído"
+    "fr" -> "Tout marquer comme lu"
+    "it" -> "Segna tutte come lette"
+    "ja" -> "すべて既読にする"
+    "nl" -> "Alles als gelezen markeren"
+    "pl" -> "Oznacz wszystkie jako przeczytane"
+    "pt" -> "Marcar todas como lidas"
+    "zh" -> "全部标为已读"
+    _ -> "Mark all as read"
+  }
+}
+
+/// bell_mark_read: Mark as read
+pub fn bell_mark_read(translator: Translator) -> String {
+  case
+    i18n.pick(translator, [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "it",
+      "ja",
+      "nl",
+      "pl",
+      "pt",
+      "zh",
+      "en",
+    ])
+  {
+    "ar" -> "تعليم كمقروء"
+    "de" -> "Als gelesen markieren"
+    "es" -> "Marcar como leído"
+    "fr" -> "Marquer comme lu"
+    "it" -> "Segna come letta"
+    "ja" -> "既読にする"
+    "nl" -> "Als gelezen markeren"
+    "pl" -> "Oznacz jako przeczytane"
+    "pt" -> "Marcar como lida"
+    "zh" -> "标为已读"
+    _ -> "Mark as read"
+  }
+}
+
+/// bell_mark_unread: Mark as unread
+pub fn bell_mark_unread(translator: Translator) -> String {
+  case
+    i18n.pick(translator, [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "it",
+      "ja",
+      "nl",
+      "pl",
+      "pt",
+      "zh",
+      "en",
+    ])
+  {
+    "ar" -> "تعليم كغير مقروء"
+    "de" -> "Als ungelesen markieren"
+    "es" -> "Marcar como no leído"
+    "fr" -> "Marquer comme non lu"
+    "it" -> "Segna come da leggere"
+    "ja" -> "未読にする"
+    "nl" -> "Als ongelezen markeren"
+    "pl" -> "Oznacz jako nieprzeczytane"
+    "pt" -> "Marcar como não lida"
+    "zh" -> "标为未读"
+    _ -> "Mark as unread"
+  }
+}
+
+/// bell_push_blocked: Browser notifications are blocked in this browser's settings.
+pub fn bell_push_blocked(translator: Translator) -> String {
+  case
+    i18n.pick(translator, [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "it",
+      "ja",
+      "nl",
+      "pl",
+      "pt",
+      "zh",
+      "en",
+    ])
+  {
+    "ar" -> "إشعارات المتصفح محظورة في إعدادات هذا المتصفح."
+    "de" ->
+      "Browser-Benachrichtigungen sind in den Einstellungen dieses Browsers blockiert."
+    "es" ->
+      "Las notificaciones están bloqueadas en la configuración de este navegador."
+    "fr" ->
+      "Les notifications sont bloquées dans les paramètres de ce navigateur."
+    "it" -> "Le notifiche sono bloccate nelle impostazioni di questo browser."
+    "ja" -> "このブラウザーの設定で通知がブロックされています。"
+    "nl" ->
+      "Browsermeldingen zijn geblokkeerd in de instellingen van deze browser."
+    "pl" -> "Powiadomienia są zablokowane w ustawieniach tej przeglądarki."
+    "pt" ->
+      "As notificações estão bloqueadas nas configurações deste navegador."
+    "zh" -> "此浏览器的设置已阻止通知。"
+    _ -> "Browser notifications are blocked in this browser's settings."
+  }
+}
+
+/// bell_push_off: Turn off browser notifications
+pub fn bell_push_off(translator: Translator) -> String {
+  case
+    i18n.pick(translator, [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "it",
+      "ja",
+      "nl",
+      "pl",
+      "pt",
+      "zh",
+      "en",
+    ])
+  {
+    "ar" -> "إيقاف إشعارات المتصفح"
+    "de" -> "Browser-Benachrichtigungen ausschalten"
+    "es" -> "Desactivar las notificaciones del navegador"
+    "fr" -> "Désactiver les notifications du navigateur"
+    "it" -> "Disattiva le notifiche del browser"
+    "ja" -> "ブラウザー通知をオフにする"
+    "nl" -> "Browsermeldingen uitschakelen"
+    "pl" -> "Wyłącz powiadomienia przeglądarki"
+    "pt" -> "Desativar as notificações do navegador"
+    "zh" -> "关闭浏览器通知"
+    _ -> "Turn off browser notifications"
+  }
+}
+
+/// bell_push_on: Turn on browser notifications
+pub fn bell_push_on(translator: Translator) -> String {
+  case
+    i18n.pick(translator, [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "it",
+      "ja",
+      "nl",
+      "pl",
+      "pt",
+      "zh",
+      "en",
+    ])
+  {
+    "ar" -> "تشغيل إشعارات المتصفح"
+    "de" -> "Browser-Benachrichtigungen einschalten"
+    "es" -> "Activar las notificaciones del navegador"
+    "fr" -> "Activer les notifications du navigateur"
+    "it" -> "Attiva le notifiche del browser"
+    "ja" -> "ブラウザー通知をオンにする"
+    "nl" -> "Browsermeldingen inschakelen"
+    "pl" -> "Włącz powiadomienia przeglądarki"
+    "pt" -> "Ativar as notificações do navegador"
+    "zh" -> "开启浏览器通知"
+    _ -> "Turn on browser notifications"
+  }
+}
+
+/// bell_see_all: See all notifications
+pub fn bell_see_all(translator: Translator) -> String {
+  case
+    i18n.pick(translator, [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "it",
+      "ja",
+      "nl",
+      "pl",
+      "pt",
+      "zh",
+      "en",
+    ])
+  {
+    "ar" -> "عرض كل الإشعارات"
+    "de" -> "Alle Benachrichtigungen ansehen"
+    "es" -> "Ver todas las notificaciones"
+    "fr" -> "Voir toutes les notifications"
+    "it" -> "Vedi tutte le notifiche"
+    "ja" -> "すべての通知を見る"
+    "nl" -> "Alle meldingen bekijken"
+    "pl" -> "Zobacz wszystkie powiadomienia"
+    "pt" -> "Ver todas as notificações"
+    "zh" -> "查看所有通知"
+    _ -> "See all notifications"
+  }
+}
+
+/// bell_unread: {count} unread
+pub fn bell_unread(translator: Translator, count count: String) -> String {
+  case
+    i18n.pick(translator, [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "it",
+      "ja",
+      "nl",
+      "pl",
+      "pt",
+      "zh",
+      "en",
+    ])
+  {
+    "ar" -> count <> " غير مقروءة"
+    "de" -> count <> " ungelesen"
+    "es" -> count <> " sin leer"
+    "fr" -> count <> " non lues"
+    "it" -> count <> " da leggere"
+    "ja" -> "未読 " <> count <> " 件"
+    "nl" -> count <> " ongelezen"
+    "pl" -> "Nieprzeczytane: " <> count
+    "pt" -> count <> " não lidas"
+    "zh" -> count <> " 条未读"
+    _ -> count <> " unread"
+  }
+}
+
 /// breadcrumb: Breadcrumb
 pub fn breadcrumb(translator: Translator) -> String {
   case
@@ -422,6 +737,879 @@ pub fn dismiss(translator: Translator) -> String {
     "pt" -> "Fechar"
     "zh" -> "关闭"
     _ -> "Dismiss"
+  }
+}
+
+/// editor_attach: Attach files
+pub fn editor_attach(translator: Translator) -> String {
+  case
+    i18n.pick(translator, [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "it",
+      "ja",
+      "nl",
+      "pl",
+      "pt",
+      "zh",
+      "en",
+    ])
+  {
+    "ar" -> "إرفاق ملفات"
+    "de" -> "Dateien anhängen"
+    "es" -> "Adjuntar archivos"
+    "fr" -> "Joindre des fichiers"
+    "it" -> "Allega file"
+    "ja" -> "ファイルを添付"
+    "nl" -> "Bestanden bijvoegen"
+    "pl" -> "Załącz pliki"
+    "pt" -> "Anexar arquivos"
+    "zh" -> "附加文件"
+    _ -> "Attach files"
+  }
+}
+
+/// editor_bad_link: Enter a web address, such as https://example.com.
+pub fn editor_bad_link(translator: Translator) -> String {
+  case
+    i18n.pick(translator, [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "it",
+      "ja",
+      "nl",
+      "pl",
+      "pt",
+      "zh",
+      "en",
+    ])
+  {
+    "ar" -> "أدخل عنوان ويب، مثل https://example.com."
+    "de" -> "Geben Sie eine Webadresse ein, z. B. https://example.com."
+    "es" -> "Introduce una dirección web, como https://example.com."
+    "fr" -> "Saisissez une adresse web, comme https://example.com."
+    "it" -> "Inserisci un indirizzo web, come https://example.com."
+    "ja" -> "https://example.com のようなウェブアドレスを入力してください。"
+    "nl" -> "Voer een webadres in, zoals https://example.com."
+    "pl" -> "Wpisz adres internetowy, np. https://example.com."
+    "pt" -> "Digite um endereço web, como https://example.com."
+    "zh" -> "请输入网址，例如 https://example.com。"
+    _ -> "Enter a web address, such as https://example.com."
+  }
+}
+
+/// editor_bold: Bold
+pub fn editor_bold(translator: Translator) -> String {
+  case
+    i18n.pick(translator, [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "it",
+      "ja",
+      "nl",
+      "pl",
+      "pt",
+      "zh",
+      "en",
+    ])
+  {
+    "ar" -> "غامق"
+    "de" -> "Fett"
+    "es" -> "Negrita"
+    "fr" -> "Gras"
+    "it" -> "Grassetto"
+    "ja" -> "太字"
+    "nl" -> "Vet"
+    "pl" -> "Pogrubienie"
+    "pt" -> "Negrito"
+    "zh" -> "粗体"
+    _ -> "Bold"
+  }
+}
+
+/// editor_bullet_list: Bulleted list
+pub fn editor_bullet_list(translator: Translator) -> String {
+  case
+    i18n.pick(translator, [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "it",
+      "ja",
+      "nl",
+      "pl",
+      "pt",
+      "zh",
+      "en",
+    ])
+  {
+    "ar" -> "قائمة نقطية"
+    "de" -> "Aufzählung"
+    "es" -> "Lista con viñetas"
+    "fr" -> "Liste à puces"
+    "it" -> "Elenco puntato"
+    "ja" -> "箇条書き"
+    "nl" -> "Lijst met opsommingstekens"
+    "pl" -> "Lista punktowana"
+    "pt" -> "Lista com marcadores"
+    "zh" -> "项目符号列表"
+    _ -> "Bulleted list"
+  }
+}
+
+/// editor_code: Code
+pub fn editor_code(translator: Translator) -> String {
+  case
+    i18n.pick(translator, [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "it",
+      "ja",
+      "nl",
+      "pl",
+      "pt",
+      "zh",
+      "en",
+    ])
+  {
+    "ar" -> "رمز"
+    "de" -> "Code"
+    "es" -> "Código"
+    "fr" -> "Code"
+    "it" -> "Codice"
+    "ja" -> "コード"
+    "nl" -> "Code"
+    "pl" -> "Kod"
+    "pt" -> "Código"
+    "zh" -> "代码"
+    _ -> "Code"
+  }
+}
+
+/// editor_code_block: Code block
+pub fn editor_code_block(translator: Translator) -> String {
+  case
+    i18n.pick(translator, [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "it",
+      "ja",
+      "nl",
+      "pl",
+      "pt",
+      "zh",
+      "en",
+    ])
+  {
+    "ar" -> "كتلة رمز"
+    "de" -> "Codeblock"
+    "es" -> "Bloque de código"
+    "fr" -> "Bloc de code"
+    "it" -> "Blocco di codice"
+    "ja" -> "コードブロック"
+    "nl" -> "Codeblok"
+    "pl" -> "Blok kodu"
+    "pt" -> "Bloco de código"
+    "zh" -> "代码块"
+    _ -> "Code block"
+  }
+}
+
+/// editor_divider: Divider
+pub fn editor_divider(translator: Translator) -> String {
+  case
+    i18n.pick(translator, [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "it",
+      "ja",
+      "nl",
+      "pl",
+      "pt",
+      "zh",
+      "en",
+    ])
+  {
+    "ar" -> "فاصل"
+    "de" -> "Trennlinie"
+    "es" -> "Separador"
+    "fr" -> "Séparateur"
+    "it" -> "Separatore"
+    "ja" -> "区切り線"
+    "nl" -> "Scheidingslijn"
+    "pl" -> "Linia oddzielająca"
+    "pt" -> "Divisor"
+    "zh" -> "分隔线"
+    _ -> "Divider"
+  }
+}
+
+/// editor_failed: The file could not be uploaded.
+pub fn editor_failed(translator: Translator) -> String {
+  case
+    i18n.pick(translator, [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "it",
+      "ja",
+      "nl",
+      "pl",
+      "pt",
+      "zh",
+      "en",
+    ])
+  {
+    "ar" -> "تعذّر رفع الملف."
+    "de" -> "Die Datei konnte nicht hochgeladen werden."
+    "es" -> "No se pudo subir el archivo."
+    "fr" -> "Le fichier n’a pas pu être envoyé."
+    "it" -> "Impossibile caricare il file."
+    "ja" -> "ファイルをアップロードできませんでした。"
+    "nl" -> "Het bestand kon niet worden geüpload."
+    "pl" -> "Nie udało się przesłać pliku."
+    "pt" -> "Não foi possível enviar o arquivo."
+    "zh" -> "无法上传文件。"
+    _ -> "The file could not be uploaded."
+  }
+}
+
+/// editor_heading: Heading {level}
+pub fn editor_heading(translator: Translator, level level: String) -> String {
+  case
+    i18n.pick(translator, [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "it",
+      "ja",
+      "nl",
+      "pl",
+      "pt",
+      "zh",
+      "en",
+    ])
+  {
+    "ar" -> "عنوان " <> level
+    "de" -> "Überschrift " <> level
+    "es" -> "Encabezado " <> level
+    "fr" -> "Titre " <> level
+    "it" -> "Titolo " <> level
+    "ja" -> "見出し " <> level
+    "nl" -> "Kop " <> level
+    "pl" -> "Nagłówek " <> level
+    "pt" -> "Título " <> level
+    "zh" -> "标题 " <> level
+    _ -> "Heading " <> level
+  }
+}
+
+/// editor_italic: Italic
+pub fn editor_italic(translator: Translator) -> String {
+  case
+    i18n.pick(translator, [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "it",
+      "ja",
+      "nl",
+      "pl",
+      "pt",
+      "zh",
+      "en",
+    ])
+  {
+    "ar" -> "مائل"
+    "de" -> "Kursiv"
+    "es" -> "Cursiva"
+    "fr" -> "Italique"
+    "it" -> "Corsivo"
+    "ja" -> "斜体"
+    "nl" -> "Cursief"
+    "pl" -> "Kursywa"
+    "pt" -> "Itálico"
+    "zh" -> "斜体"
+    _ -> "Italic"
+  }
+}
+
+/// editor_link: Link
+pub fn editor_link(translator: Translator) -> String {
+  case
+    i18n.pick(translator, [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "it",
+      "ja",
+      "nl",
+      "pl",
+      "pt",
+      "zh",
+      "en",
+    ])
+  {
+    "ar" -> "رابط"
+    "de" -> "Link"
+    "es" -> "Enlace"
+    "fr" -> "Lien"
+    "it" -> "Link"
+    "ja" -> "リンク"
+    "nl" -> "Link"
+    "pl" -> "Link"
+    "pt" -> "Link"
+    "zh" -> "链接"
+    _ -> "Link"
+  }
+}
+
+/// editor_link_address: Link address
+pub fn editor_link_address(translator: Translator) -> String {
+  case
+    i18n.pick(translator, [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "it",
+      "ja",
+      "nl",
+      "pl",
+      "pt",
+      "zh",
+      "en",
+    ])
+  {
+    "ar" -> "عنوان الرابط"
+    "de" -> "Linkadresse"
+    "es" -> "Dirección del enlace"
+    "fr" -> "Adresse du lien"
+    "it" -> "Indirizzo del link"
+    "ja" -> "リンク先のアドレス"
+    "nl" -> "Linkadres"
+    "pl" -> "Adres linku"
+    "pt" -> "Endereço do link"
+    "zh" -> "链接地址"
+    _ -> "Link address"
+  }
+}
+
+/// editor_link_apply: Apply
+pub fn editor_link_apply(translator: Translator) -> String {
+  case
+    i18n.pick(translator, [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "it",
+      "ja",
+      "nl",
+      "pl",
+      "pt",
+      "zh",
+      "en",
+    ])
+  {
+    "ar" -> "تطبيق"
+    "de" -> "Übernehmen"
+    "es" -> "Aplicar"
+    "fr" -> "Appliquer"
+    "it" -> "Applica"
+    "ja" -> "適用"
+    "nl" -> "Toepassen"
+    "pl" -> "Zastosuj"
+    "pt" -> "Aplicar"
+    "zh" -> "应用"
+    _ -> "Apply"
+  }
+}
+
+/// editor_link_remove: Remove link
+pub fn editor_link_remove(translator: Translator) -> String {
+  case
+    i18n.pick(translator, [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "it",
+      "ja",
+      "nl",
+      "pl",
+      "pt",
+      "zh",
+      "en",
+    ])
+  {
+    "ar" -> "إزالة الرابط"
+    "de" -> "Link entfernen"
+    "es" -> "Quitar enlace"
+    "fr" -> "Supprimer le lien"
+    "it" -> "Rimuovi link"
+    "ja" -> "リンクを削除"
+    "nl" -> "Link verwijderen"
+    "pl" -> "Usuń link"
+    "pt" -> "Remover link"
+    "zh" -> "移除链接"
+    _ -> "Remove link"
+  }
+}
+
+/// editor_missing: Write something.
+pub fn editor_missing(translator: Translator) -> String {
+  case
+    i18n.pick(translator, [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "it",
+      "ja",
+      "nl",
+      "pl",
+      "pt",
+      "zh",
+      "en",
+    ])
+  {
+    "ar" -> "اكتب شيئًا."
+    "de" -> "Schreiben Sie etwas."
+    "es" -> "Escribe algo."
+    "fr" -> "Écrivez quelque chose."
+    "it" -> "Scrivi qualcosa."
+    "ja" -> "何か入力してください。"
+    "nl" -> "Schrijf iets."
+    "pl" -> "Napisz coś."
+    "pt" -> "Escreva algo."
+    "zh" -> "请输入内容。"
+    _ -> "Write something."
+  }
+}
+
+/// editor_no_matches: No matches
+pub fn editor_no_matches(translator: Translator) -> String {
+  case
+    i18n.pick(translator, [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "it",
+      "ja",
+      "nl",
+      "pl",
+      "pt",
+      "zh",
+      "en",
+    ])
+  {
+    "ar" -> "لا توجد نتائج"
+    "de" -> "Keine Treffer"
+    "es" -> "Sin coincidencias"
+    "fr" -> "Aucun résultat"
+    "it" -> "Nessun risultato"
+    "ja" -> "一致するものがありません"
+    "nl" -> "Geen resultaten"
+    "pl" -> "Brak wyników"
+    "pt" -> "Nenhum resultado"
+    "zh" -> "没有匹配项"
+    _ -> "No matches"
+  }
+}
+
+/// editor_numbered_list: Numbered list
+pub fn editor_numbered_list(translator: Translator) -> String {
+  case
+    i18n.pick(translator, [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "it",
+      "ja",
+      "nl",
+      "pl",
+      "pt",
+      "zh",
+      "en",
+    ])
+  {
+    "ar" -> "قائمة مرقمة"
+    "de" -> "Nummerierte Liste"
+    "es" -> "Lista numerada"
+    "fr" -> "Liste numérotée"
+    "it" -> "Elenco numerato"
+    "ja" -> "番号付きリスト"
+    "nl" -> "Genummerde lijst"
+    "pl" -> "Lista numerowana"
+    "pt" -> "Lista numerada"
+    "zh" -> "编号列表"
+    _ -> "Numbered list"
+  }
+}
+
+/// editor_quote: Quote
+pub fn editor_quote(translator: Translator) -> String {
+  case
+    i18n.pick(translator, [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "it",
+      "ja",
+      "nl",
+      "pl",
+      "pt",
+      "zh",
+      "en",
+    ])
+  {
+    "ar" -> "اقتباس"
+    "de" -> "Zitat"
+    "es" -> "Cita"
+    "fr" -> "Citation"
+    "it" -> "Citazione"
+    "ja" -> "引用"
+    "nl" -> "Citaat"
+    "pl" -> "Cytat"
+    "pt" -> "Citação"
+    "zh" -> "引用"
+    _ -> "Quote"
+  }
+}
+
+/// editor_redo: Redo
+pub fn editor_redo(translator: Translator) -> String {
+  case
+    i18n.pick(translator, [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "it",
+      "ja",
+      "nl",
+      "pl",
+      "pt",
+      "zh",
+      "en",
+    ])
+  {
+    "ar" -> "إعادة"
+    "de" -> "Wiederholen"
+    "es" -> "Rehacer"
+    "fr" -> "Rétablir"
+    "it" -> "Ripeti"
+    "ja" -> "やり直す"
+    "nl" -> "Opnieuw"
+    "pl" -> "Ponów"
+    "pt" -> "Refazer"
+    "zh" -> "重做"
+    _ -> "Redo"
+  }
+}
+
+/// editor_remove: Remove
+pub fn editor_remove(translator: Translator) -> String {
+  case
+    i18n.pick(translator, [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "it",
+      "ja",
+      "nl",
+      "pl",
+      "pt",
+      "zh",
+      "en",
+    ])
+  {
+    "ar" -> "إزالة"
+    "de" -> "Entfernen"
+    "es" -> "Quitar"
+    "fr" -> "Retirer"
+    "it" -> "Rimuovi"
+    "ja" -> "削除"
+    "nl" -> "Verwijderen"
+    "pl" -> "Usuń"
+    "pt" -> "Remover"
+    "zh" -> "移除"
+    _ -> "Remove"
+  }
+}
+
+/// editor_strike: Strikethrough
+pub fn editor_strike(translator: Translator) -> String {
+  case
+    i18n.pick(translator, [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "it",
+      "ja",
+      "nl",
+      "pl",
+      "pt",
+      "zh",
+      "en",
+    ])
+  {
+    "ar" -> "يتوسطه خط"
+    "de" -> "Durchgestrichen"
+    "es" -> "Tachado"
+    "fr" -> "Barré"
+    "it" -> "Barrato"
+    "ja" -> "取り消し線"
+    "nl" -> "Doorgehaald"
+    "pl" -> "Przekreślenie"
+    "pt" -> "Tachado"
+    "zh" -> "删除线"
+    _ -> "Strikethrough"
+  }
+}
+
+/// editor_too_large: Too large: the limit is {limit}.
+pub fn editor_too_large(translator: Translator, limit limit: String) -> String {
+  case
+    i18n.pick(translator, [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "it",
+      "ja",
+      "nl",
+      "pl",
+      "pt",
+      "zh",
+      "en",
+    ])
+  {
+    "ar" -> "كبير جدًا: الحد الأقصى هو " <> limit <> "."
+    "de" -> "Zu groß: Die Grenze liegt bei " <> limit <> "."
+    "es" -> "Demasiado grande: el límite es " <> limit <> "."
+    "fr" -> "Trop volumineux : la limite est de " <> limit <> "."
+    "it" -> "Troppo grande: il limite è " <> limit <> "."
+    "ja" -> "大きすぎます。上限は " <> limit <> " です。"
+    "nl" -> "Te groot: de limiet is " <> limit <> "."
+    "pl" -> "Za duży: limit to " <> limit <> "."
+    "pt" -> "Grande demais: o limite é " <> limit <> "."
+    "zh" -> "文件过大：上限为 " <> limit <> "。"
+    _ -> "Too large: the limit is " <> limit <> "."
+  }
+}
+
+/// editor_toolbar: Formatting
+pub fn editor_toolbar(translator: Translator) -> String {
+  case
+    i18n.pick(translator, [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "it",
+      "ja",
+      "nl",
+      "pl",
+      "pt",
+      "zh",
+      "en",
+    ])
+  {
+    "ar" -> "التنسيق"
+    "de" -> "Formatierung"
+    "es" -> "Formato"
+    "fr" -> "Mise en forme"
+    "it" -> "Formattazione"
+    "ja" -> "書式"
+    "nl" -> "Opmaak"
+    "pl" -> "Formatowanie"
+    "pt" -> "Formatação"
+    "zh" -> "格式"
+    _ -> "Formatting"
+  }
+}
+
+/// editor_unavailable: The editor could not load. Reload the page to try again.
+pub fn editor_unavailable(translator: Translator) -> String {
+  case
+    i18n.pick(translator, [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "it",
+      "ja",
+      "nl",
+      "pl",
+      "pt",
+      "zh",
+      "en",
+    ])
+  {
+    "ar" -> "تعذّر تحميل المحرر. أعد تحميل الصفحة للمحاولة مرة أخرى."
+    "de" ->
+      "Der Editor konnte nicht geladen werden. Laden Sie die Seite neu, um es erneut zu versuchen."
+    "es" ->
+      "No se pudo cargar el editor. Recarga la página para volver a intentarlo."
+    "fr" -> "L’éditeur n’a pas pu se charger. Rechargez la page pour réessayer."
+    "it" -> "Impossibile caricare l’editor. Ricarica la pagina per riprovare."
+    "ja" -> "エディターを読み込めませんでした。ページを再読み込みしてもう一度お試しください。"
+    "nl" ->
+      "De editor kon niet worden geladen. Laad de pagina opnieuw om het nog eens te proberen."
+    "pl" ->
+      "Nie udało się wczytać edytora. Odśwież stronę, aby spróbować ponownie."
+    "pt" ->
+      "Não foi possível carregar o editor. Recarregue a página para tentar de novo."
+    "zh" -> "编辑器无法加载。请重新加载页面后重试。"
+    _ -> "The editor could not load. Reload the page to try again."
+  }
+}
+
+/// editor_undo: Undo
+pub fn editor_undo(translator: Translator) -> String {
+  case
+    i18n.pick(translator, [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "it",
+      "ja",
+      "nl",
+      "pl",
+      "pt",
+      "zh",
+      "en",
+    ])
+  {
+    "ar" -> "تراجع"
+    "de" -> "Rückgängig"
+    "es" -> "Deshacer"
+    "fr" -> "Annuler"
+    "it" -> "Annulla"
+    "ja" -> "元に戻す"
+    "nl" -> "Ongedaan maken"
+    "pl" -> "Cofnij"
+    "pt" -> "Desfazer"
+    "zh" -> "撤销"
+    _ -> "Undo"
+  }
+}
+
+/// editor_uploading: Uploading
+pub fn editor_uploading(translator: Translator) -> String {
+  case
+    i18n.pick(translator, [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "it",
+      "ja",
+      "nl",
+      "pl",
+      "pt",
+      "zh",
+      "en",
+    ])
+  {
+    "ar" -> "جارٍ الرفع"
+    "de" -> "Wird hochgeladen"
+    "es" -> "Subiendo"
+    "fr" -> "Envoi en cours"
+    "it" -> "Caricamento"
+    "ja" -> "アップロード中"
+    "nl" -> "Bezig met uploaden"
+    "pl" -> "Przesyłanie"
+    "pt" -> "Enviando"
+    "zh" -> "正在上传"
+    _ -> "Uploading"
+  }
+}
+
+/// editor_wait: Wait for the files to finish uploading.
+pub fn editor_wait(translator: Translator) -> String {
+  case
+    i18n.pick(translator, [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "it",
+      "ja",
+      "nl",
+      "pl",
+      "pt",
+      "zh",
+      "en",
+    ])
+  {
+    "ar" -> "انتظر حتى ينتهي رفع الملفات."
+    "de" -> "Warten Sie, bis die Dateien hochgeladen sind."
+    "es" -> "Espera a que terminen de subirse los archivos."
+    "fr" -> "Attendez la fin de l’envoi des fichiers."
+    "it" -> "Attendi il termine del caricamento dei file."
+    "ja" -> "ファイルのアップロードが終わるまでお待ちください。"
+    "nl" -> "Wacht tot de bestanden zijn geüpload."
+    "pl" -> "Poczekaj, aż pliki zostaną przesłane."
+    "pt" -> "Aguarde o envio dos arquivos terminar."
+    "zh" -> "请等待文件上传完成。"
+    _ -> "Wait for the files to finish uploading."
+  }
+}
+
+/// editor_wrong_type: This type of file is not accepted.
+pub fn editor_wrong_type(translator: Translator) -> String {
+  case
+    i18n.pick(translator, [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "it",
+      "ja",
+      "nl",
+      "pl",
+      "pt",
+      "zh",
+      "en",
+    ])
+  {
+    "ar" -> "هذا النوع من الملفات غير مقبول."
+    "de" -> "Dieser Dateityp wird nicht akzeptiert."
+    "es" -> "No se acepta este tipo de archivo."
+    "fr" -> "Ce type de fichier n’est pas accepté."
+    "it" -> "Questo tipo di file non è accettato."
+    "ja" -> "この種類のファイルは受け付けていません。"
+    "nl" -> "Dit bestandstype wordt niet geaccepteerd."
+    "pl" -> "Ten typ pliku nie jest akceptowany."
+    "pt" -> "Este tipo de arquivo não é aceito."
+    "zh" -> "不接受此类型的文件。"
+    _ -> "This type of file is not accepted."
   }
 }
 

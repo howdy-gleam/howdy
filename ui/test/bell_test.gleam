@@ -1,5 +1,6 @@
 import gleam/string
 import howdy/ui/bell
+import howdy/ui/words
 import lustre/element
 
 fn render(bell: bell.Bell) -> String {
@@ -37,7 +38,11 @@ pub fn an_empty_bell_hides_its_count_test() {
 
 pub fn counts_and_words_test() {
   let words =
-    bell.Words(..bell.english(), title: "Avisos", unread: "{count} sin leer")
+    words.Words(
+      ..words.english(),
+      notifications: "Avisos",
+      unread: "{count} sin leer",
+    )
   assert bell.unread_label(words, 0) == "Avisos"
   assert bell.unread_label(words, 4) == "Avisos, 4 sin leer"
   let html =

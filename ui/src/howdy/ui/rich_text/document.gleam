@@ -872,6 +872,8 @@ pub fn attachment_view(
     _, _ -> {
       let file =
         card.attachment(
+          // A finished attachment says nothing about uploading.
+          words: card.english(),
           name: attachment.name,
           detail: uploader.describe(attachment.name, attachment.size),
           status: card.Done,

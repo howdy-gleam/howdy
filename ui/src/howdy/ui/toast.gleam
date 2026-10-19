@@ -113,18 +113,23 @@ pub fn toast(
 }
 
 /// A toast for each flash message, to put in a `region`. They fade like
-/// any other toast, and each has a close button.
+/// any other toast, and each has a close button, labelled with the words'
+/// `dismiss`.
 ///
 /// ```gleam
 /// use messages <- flash.take(ctx, flash)
+/// let w = words.english()
 /// page.new("Settings")
-/// |> page.body([toast.region([], toast.flashed(messages)), ..])
+/// |> page.body([toast.region(w, [], toast.flashed(w, messages)), ..])
 /// ```
-pub fn flashed(messages: List(flash.Message)) -> List(Element(msg)) {
+pub fn flashed(
+  words: Words,
+  messages: List(flash.Message),
+) -> List(Element(msg)) {
   list.map(messages, fn(message) {
     toast(flash_variant(message.level), [], [
       title([text(message.text)]),
-      close([attribute.aria_label("Dismiss")]),
+      close([attribute.aria_label(words.dismiss)]),
     ])
   })
 }
