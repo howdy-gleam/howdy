@@ -87,7 +87,8 @@ try {
   const email = `api-${Date.now()}@example.com`;
   await fetch(`${BASE}/_howdy/users`, {
     method: 'POST', redirect: 'manual',
-    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    // The admin refuses writes from other origins.
+    headers: { 'content-type': 'application/x-www-form-urlencoded', origin: BASE },
     body: new URLSearchParams({ email }),
   });
 

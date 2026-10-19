@@ -56,6 +56,8 @@ that keep a process running offer a child specification for it:
 - `howdy/mail/outbox`: `outbox.supervised()` and
   `outbox.supervised_in(directory)` return the outbox and the child that
   keeps it
+- `howdy/jobs`: `jobs.supervised(runner)` runs the app's background jobs;
+  when it stops, running jobs get the runner's `shutdown_grace` to finish
 
 ```gleam
 let #(features, keeper) = flags.supervised(flag_config)

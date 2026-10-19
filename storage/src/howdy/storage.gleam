@@ -33,6 +33,7 @@ import gleam/int
 import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
+import gleam/order
 import gleam/result
 import gleam/string
 import gleam/time/timestamp.{type Timestamp}
@@ -368,6 +369,60 @@ pub fn list(
 ) -> Result(Page, Error) {
   use <- traced(storage, "list", prefix, [])
   storage.list(prefix, after, int.clamp(limit, 1, 1000))
+}
+
+/// Delete the objects under `prefix` last changed before `before` that
+/// `in_use` says nothing refers to, and say how many went. For uploads that
+/// were never confirmed: a browser that uploads directly and never says it
+/// is done leaves an object no record points to. Run it now and then, such
+/// as from a scheduled job. `in_use` is asked about each old object; answer
+/// `True` when unsure, such as when the database cannot say, so the object
+/// is kept until next time.
+///
+/// ```gleam
+/// let day_ago = timestamp.add(timestamp.system_time(), duration.hours(-24))
+/// storage.delete_unused(files, prefix: "uploads/", before: day_ago,
+///   in_use: fn(key) { documents.refers_to(db, key) |> result.unwrap(True) },
+/// )
+/// ```
+pub fn delete_unused(
+  storage: Storage,
+  prefix prefix: String,
+  before before: Timestamp,
+  in_use in_use: fn(String) -> Bool,
+) -> Result(Int, Error) {
+  delete_unused_from(storage, prefix, before, in_use, None, 0)
+}
+
+fn delete_unused_from(
+  storage: Storage,
+  prefix: String,
+  before: Timestamp,
+  in_use: fn(String) -> Bool,
+  after: Option(String),
+  deleted: Int,
+) -> Result(Int, Error) {
+  use page <- result.try(list(storage, prefix:, after:, limit: 1000))
+  use deleted <- result.try(
+    list.try_fold(page.objects, deleted, fn(deleted, object) {
+      case
+        timestamp.compare(object.last_modified, before) == order.Lt
+        && !in_use(object.key)
+      {
+        True ->
+          case delete(storage, object.key) {
+            Ok(Nil) | Error(NotFound) -> Ok(deleted + 1)
+            Error(error) -> Error(error)
+          }
+        False -> Ok(deleted)
+      }
+    }),
+  )
+  case page.next {
+    Some(next) ->
+      delete_unused_from(storage, prefix, before, in_use, Some(next), deleted)
+    None -> Ok(deleted)
+  }
 }
 
 // -- URLs --------------------------------------------------------------------

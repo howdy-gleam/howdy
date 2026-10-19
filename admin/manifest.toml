@@ -40,6 +40,7 @@ packages = [
   { name = "howdy_auth", version = "2.0.0", build_tools = ["gleam"], requirements = ["glasslock", "gleam_crypto", "gleam_erlang", "gleam_http", "gleam_httpc", "gleam_json", "gleam_otp", "gleam_stdlib", "gleam_time", "gloo", "howdy", "howdy_database", "howdy_mail", "logging", "smail"], source = "local", path = "../auth" },
   { name = "howdy_database", version = "2.0.0", build_tools = ["gleam"], requirements = ["gleam_crypto", "gleam_erlang", "gleam_json", "gleam_otp", "gleam_stdlib", "gloo", "howdy", "opentelemetry_api", "pog"], source = "local", path = "../database" },
   { name = "howdy_flags", version = "2.0.0", build_tools = ["gleam"], requirements = ["gleam_crypto", "gleam_erlang", "gleam_json", "gleam_otp", "gleam_stdlib", "gleam_time", "gloo", "howdy", "howdy_database", "logging"], source = "local", path = "../flags" },
+  { name = "howdy_jobs", version = "2.0.0", build_tools = ["gleam"], requirements = ["gleam_erlang", "gleam_json", "gleam_otp", "gleam_stdlib", "gleam_time", "gloo", "howdy", "howdy_database", "logging", "pog"], source = "local", path = "../jobs" },
   { name = "howdy_mail", version = "2.0.0", build_tools = ["gleam"], requirements = ["gen_smtp", "gleam_crypto", "gleam_erlang", "gleam_http", "gleam_httpc", "gleam_json", "gleam_otp", "gleam_stdlib", "gleam_time", "howdy", "simplifile", "smail"], source = "local", path = "../mail" },
   { name = "howdy_openapi", version = "2.0.0", build_tools = ["gleam"], requirements = ["gleam_http", "gleam_json", "gleam_stdlib", "howdy"], source = "local", path = "../openapi" },
   { name = "howdy_telemetry", version = "2.0.0", build_tools = ["gleam"], requirements = ["gleam_erlang", "gleam_stdlib", "howdy", "opentelemetry", "opentelemetry_api", "opentelemetry_exporter"], source = "local", path = "../telemetry" },
@@ -83,6 +84,7 @@ howdy = { path = ".." }
 howdy_auth = { path = "../auth" }
 howdy_database = { path = "../database" }
 howdy_flags = { path = "../flags" }
+howdy_jobs = { path = "../jobs" }
 howdy_mail = { path = "../mail" }
 howdy_openapi = { path = "../openapi" }
 howdy_telemetry = { path = "../telemetry" }

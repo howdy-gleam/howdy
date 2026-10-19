@@ -42,14 +42,43 @@
 ////
 //// - let the SMTP adapter try again itself, with `smtp.retries` and
 ////   `smtp.backoff`, which still holds the caller for the whole time; or
-//// - record the message somewhere durable, such as a table of your own,
-////   and send it from a job that runs outside the request, using
-////   `retryable` to decide what to try again. The development `outbox` is
-////   only a sink for reading mail in development and tests, not a queue.
+//// - send it from a background job with
+////   [howdy_jobs](https://hexdocs.pm/howdy_jobs/howdy/jobs.html), queued
+////   in the same transaction as the change the email is about, using
+////   `retryable` to decide what to try again. `message_to_json` and
+////   `message_decoder` store the message as the job's arguments:
+////
+//// ```gleam
+//// pub fn send_email() -> jobs.Job(mail.Message) {
+////   jobs.define("send_email",
+////     encode: mail.message_to_json,
+////     decoder: mail.message_decoder(),
+////   )
+////   |> jobs.on_queue("mail")
+//// }
+////
+//// // Queued: jobs.new(send_email(), message) |> jobs.insert(conn)
+//// // Done, by the app's runner:
+//// jobs.handle(runner, send_email(), fn(message, _) {
+////   case mail.send(mailer, message) {
+////     Ok(_) -> jobs.Done
+////     Error(error) ->
+////       case mail.retryable(error) {
+////         True -> jobs.Retry(mail.error_to_string(error))
+////         False -> jobs.GiveUp(mail.error_to_string(error))
+////       }
+////   }
+//// })
+//// ```
+////
+//// The development `outbox` is only a sink for reading mail in
+//// development and tests, not a queue.
 
 import gleam/bit_array
 import gleam/bool
 import gleam/crypto
+import gleam/dynamic/decode.{type Decoder}
+import gleam/json.{type Json}
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
@@ -289,6 +318,114 @@ pub fn attach(message: Message, attachment: Attachment) -> Message {
 /// or categories receive them, and the development outbox shows them.
 pub fn tag(message: Message, tag: String) -> Message {
   Message(..message, tags: list.append(message.tags, [tag]))
+}
+
+// -- Keeping messages -----------------------------------------------------------
+
+/// The message as JSON, to keep it somewhere durable and send it later,
+/// such as in a background job's arguments. `message_decoder` reads it
+/// back. Attachments are included, base64-encoded, which makes the JSON a
+/// third larger than the files: for big files, store them elsewhere and
+/// attach them when the message is sent.
+pub fn message_to_json(message: Message) -> Json {
+  let address = fn(address: Address) {
+    json.object([
+      #("name", json.nullable(address.name, json.string)),
+      #("email", json.string(address.email)),
+    ])
+  }
+  json.object([
+    #("format", json.int(1)),
+    #("from", json.nullable(message.from, address)),
+    #("to", json.array(message.to, address)),
+    #("cc", json.array(message.cc, address)),
+    #("bcc", json.array(message.bcc, address)),
+    #("reply_to", json.nullable(message.reply_to, address)),
+    #("subject", json.string(message.subject)),
+    #("html", json.nullable(message.html, json.string)),
+    #("text", json.nullable(message.text, json.string)),
+    #("generated", json.nullable(message.generated, json.string)),
+    #(
+      "headers",
+      json.array(message.headers, fn(header) {
+        json.preprocessed_array([json.string(header.0), json.string(header.1)])
+      }),
+    ),
+    #(
+      "attachments",
+      json.array(message.attachments, fn(attachment) {
+        json.object([
+          #("filename", json.string(attachment.filename)),
+          #("content_type", json.string(attachment.content_type)),
+          #(
+            "content",
+            json.string(bit_array.base64_encode(attachment.content, True)),
+          ),
+          #("content_id", json.nullable(attachment.content_id, json.string)),
+        ])
+      }),
+    ),
+    #("tags", json.array(message.tags, json.string)),
+  ])
+}
+
+/// Read a message `message_to_json` wrote.
+pub fn message_decoder() -> Decoder(Message) {
+  let address = {
+    use name <- decode.field("name", decode.optional(decode.string))
+    use email <- decode.field("email", decode.string)
+    decode.success(Address(name:, email:))
+  }
+  let header = {
+    use name <- decode.field(0, decode.string)
+    use value <- decode.field(1, decode.string)
+    decode.success(#(name, value))
+  }
+  let attachment = {
+    use filename <- decode.field("filename", decode.string)
+    use content_type <- decode.field("content_type", decode.string)
+    use content <- decode.field("content", base64())
+    use content_id <- decode.field("content_id", decode.optional(decode.string))
+    decode.success(Attachment(filename:, content_type:, content:, content_id:))
+  }
+  use format <- decode.field("format", decode.int)
+  use <- bool.lazy_guard(format != 1, fn() {
+    decode.failure(message(), "a message in format 1")
+  })
+  use from <- decode.field("from", decode.optional(address))
+  use to <- decode.field("to", decode.list(address))
+  use cc <- decode.field("cc", decode.list(address))
+  use bcc <- decode.field("bcc", decode.list(address))
+  use reply_to <- decode.field("reply_to", decode.optional(address))
+  use subject <- decode.field("subject", decode.string)
+  use html <- decode.field("html", decode.optional(decode.string))
+  use text <- decode.field("text", decode.optional(decode.string))
+  use generated <- decode.field("generated", decode.optional(decode.string))
+  use headers <- decode.field("headers", decode.list(header))
+  use attachments <- decode.field("attachments", decode.list(attachment))
+  use tags <- decode.field("tags", decode.list(decode.string))
+  decode.success(Message(
+    from:,
+    to:,
+    cc:,
+    bcc:,
+    reply_to:,
+    subject:,
+    html:,
+    text:,
+    generated:,
+    headers:,
+    attachments:,
+    tags:,
+  ))
+}
+
+fn base64() -> Decoder(BitArray) {
+  use encoded <- decode.then(decode.string)
+  case bit_array.base64_decode(encoded) {
+    Ok(content) -> decode.success(content)
+    Error(Nil) -> decode.failure(<<>>, "base64")
+  }
 }
 
 // -- What adapters receive -----------------------------------------------------

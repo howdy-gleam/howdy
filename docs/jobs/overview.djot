@@ -1,0 +1,271 @@
+# Background jobs
+
+`howdy_jobs` keeps work to be done later in your app's database, and does
+it outside the request. It gives you:
+
+- jobs queued inside your own transactions, so a job exists only if the
+  change that needs it was committed
+- retries with a growing delay, unique jobs, delayed jobs and priorities
+- [schedules](/docs/jobs/schedules) in cron's notation, queued once per
+  time however many nodes run them
+- [jobs spread across nodes](/docs/jobs/production), with a job that a
+  stopped node left half done run again elsewhere
+- a page in the [admin area](/docs/admin/overview), a command line for
+  servers, and a span for every job in your [traces](/docs/telemetry/overview)
+
+It works on PostgreSQL and SQLite, through the same Repo as the rest of
+your app.
+
+## Install
+
+Add the package to `gleam.toml`, next to `howdy` and `howdy_database`:
+
+```toml
+howdy_jobs = { git = "https://github.com/mikeyjones/howdy.git", ref = "v2.1.1", path = "jobs" }
+```
+
+Its tables are created by a migration package, like any other:
+
+```gleam
+import howdy/jobs
+import howdy/migration
+
+migration.run(db, [auth.schema(), jobs.schema(), my_app.schema()])
+```
+
+## Defining a job
+
+A job is defined once, as a function, with a name and how its arguments
+are stored:
+
+```gleam
+import gleam/dynamic/decode
+import gleam/json
+import howdy/jobs
+
+pub fn welcome_email() -> jobs.Job(String) {
+  jobs.define("welcome_email", encode: json.string, decoder: decode.string)
+  |> jobs.on_queue("mail")
+  |> jobs.max_attempts(5)
+}
+```
+
+The definition is used where the job is queued and where it is done, so
+it needs nothing but itself: no database, no mailer. The name is how a
+stored job finds the code that does it, so do not change it once jobs have
+been queued under it. Names and queue names are letters, digits, `_`, `-`,
+`.` and `:`.
+
+Arguments are stored as JSON. Keep them small, such as IDs rather than
+whole records: the job reads what it needs when it runs, and so sees the
+data as it is then. A job queued before a deploy runs after it with the
+new decoder, so make decoders accept what older code stored.
+
+A job that needs no arguments is `jobs.without_args("nightly_cleanup")`.
+
+The definition also says, for every job of its kind:
+
+- `jobs.on_queue(job, queue)` which queue it goes to, `default` unless
+  you say
+- `jobs.priority(job, n)` from 0 to 9: due jobs of a queue go 0 first
+- `jobs.max_attempts(job, n)` how many times it is tried in all, 20 by
+  default
+- `jobs.timeout(job, milliseconds)` how long one attempt may take, five
+  minutes by default
+- `jobs.backoff(job, fn(attempt) { milliseconds })` how long to wait
+  before trying again after attempt number `attempt` failed. The default
+  doubles from 15 seconds up to six hours.
+
+## Queueing a job
+
+`jobs.new` takes the definition and the arguments, and `jobs.insert` adds
+the job to the database:
+
+```gleam
+use conn <- database.transaction(db)
+use user <- result.try(users.insert(conn, form))
+use _ <- result.try(
+  jobs.new(welcome_email(), user.id) |> jobs.insert(into: conn),
+)
+Ok(user)
+```
+
+Give `insert` the connection of the transaction that makes the job
+necessary. If the transaction rolls back, the job was never queued; if it
+commits, the job is there, however the request ends. There is no window
+in which the user exists but their email was never queued, or the email
+goes out for a user who was never saved.
+
+Runners on the same node are told about the job when the transaction
+commits, and on PostgreSQL every other node hears about it too, so a job
+due now starts at once.
+
+### When
+
+- `jobs.after(insert, milliseconds)` waits that long first.
+- `jobs.at(insert, unix_milliseconds)` waits until then.
+
+A runner takes the job once it is due. A job that is due waits only for a
+free slot in its queue.
+
+### Only once
+
+`jobs.unique(insert, key)` queues the job only if no unfinished job has the
+same key:
+
+```gleam
+jobs.new(reindex(), document.id)
+|> jobs.unique("reindex:" <> int.to_string(document.id))
+|> jobs.insert(into: conn)
+```
+
+`insert` returns `jobs.Inserted(id)` for a new job and `jobs.Duplicate(id)`
+with the waiting or running job's id otherwise. Once that job has finished,
+the key is free again. Combined with `after`, it gathers a burst into one
+job: a digest that waits a minute is queued once however many notes are
+written in that minute.
+
+`jobs.insert_all(inserts, into: conn)` queues several jobs in order.
+
+## Doing jobs
+
+A runner is what does jobs. It has the code for each kind and the queues
+to take them from:
+
+```gleam
+pub fn runner(db: Repo, mailer: mail.Mailer) -> jobs.Runner {
+  jobs.runner(db)
+  |> jobs.queue("default", concurrency: 10)
+  |> jobs.queue("mail", concurrency: 5)
+  |> jobs.handle(welcome_email(), fn(user_id, _attempt) {
+    send_welcome(db, mailer, user_id)
+  })
+}
+```
+
+`concurrency` is how many of the queue's jobs run at once on each node. A
+queue a handled job uses is taken from anyway, ten at a time, unless it is
+given.
+
+Run it under your app's supervisor, before the server, so a stop lets
+running jobs finish after the server has stopped taking requests:
+
+```gleam
+supervisor.new(supervisor.OneForOne)
+|> supervisor.add(jobs.supervised(runner(db, mailer)))
+|> supervisor.add(howdy.supervised(app))
+|> howdy.start_application(name: "my_app")
+```
+
+See [Supervision and shutdown](/docs/guides/supervision).
+
+### What a job says
+
+A handler gets the job's arguments and the attempt being made, and says
+what came of it:
+
+- `jobs.Done`: it is finished.
+- `jobs.Retry(reason)`: it may work later, such as when a service it calls
+  is down. It is tried again after the job's backoff, unless that was its
+  last attempt, and then it fails.
+- `jobs.RetryIn(milliseconds, reason)`: the same, after this long.
+- `jobs.Snooze(milliseconds)`: not now, such as when a rate limit says to
+  wait. It is tried again after this long, and it does not count as an
+  attempt.
+- `jobs.Cancel(reason)`: it is no longer needed, such as when the user it
+  was for has gone. It is not tried again.
+- `jobs.GiveUp(reason)`: it never will work. It fails without being tried
+  again.
+
+A handler that crashes, or runs past its timeout, made an attempt that
+failed: it is tried again like `Retry`. Each failure is kept with the job,
+the reason and when, and the admin and the command line show them.
+
+The `Attempt` says which attempt this is (`attempt.number`, from 1), how
+many it gets, when the job was queued and the failures so far.
+`jobs.is_last(attempt)` is true on the last one, for a handler that wants
+to tell someone before it gives up.
+
+```gleam
+fn send_welcome(db, mailer, user_id) -> jobs.Outcome {
+  case users.get(db, user_id) {
+    Error(service.NotFound(_)) -> jobs.Cancel("the user is gone")
+    Error(error) -> jobs.Retry(service.message(error))
+    Ok(user) ->
+      case mail.send(mailer, welcome(user)) {
+        Ok(_) -> jobs.Done
+        Error(error) ->
+          case mail.retryable(error) {
+            True -> jobs.Retry(mail.error_to_string(error))
+            False -> jobs.GiveUp(mail.error_to_string(error))
+          }
+      }
+  }
+}
+```
+
+### Done at least once
+
+A job is done at least once, not exactly once. While a node runs a job it
+keeps renewing its claim on it; if the node stops without finishing, such
+as when its machine is lost, the claim runs out and another node runs the
+job again. A handler that sent an email and then crashed before saying so
+sends it again. Write handlers so that doing a job twice is harmless, such
+as by checking first whether the work has been done. See
+[Running jobs](/docs/jobs/production).
+
+## Queued email
+
+[Howdy Mail](/docs/mail/overview) sends while the caller waits.
+`mail.message_to_json` and `mail.message_decoder` let a whole message be a
+job's arguments, so it can be sent from a job instead:
+
+```gleam
+pub fn send_email() -> jobs.Job(mail.Message) {
+  jobs.define("send_email",
+    encode: mail.message_to_json,
+    decoder: mail.message_decoder(),
+  )
+  |> jobs.on_queue("mail")
+}
+
+// Queued with the change it is about.
+jobs.new(send_email(), receipt(order)) |> jobs.insert(into: conn)
+
+// Done by the runner.
+jobs.handle(runner, send_email(), fn(message, _) {
+  case mail.send(mailer, message) {
+    Ok(_) -> jobs.Done
+    Error(error) ->
+      case mail.retryable(error) {
+        True -> jobs.Retry(mail.error_to_string(error))
+        False -> jobs.GiveUp(mail.error_to_string(error))
+      }
+  }
+})
+```
+
+Attachments are stored too, a third larger than the files. For big files,
+store them elsewhere, pass their keys and attach them in the handler.
+
+## Testing
+
+`jobs.drain(runner)` does every job that is due, in the test's own
+process, one after another, until none are left, including jobs those
+jobs queue. No runner need be started, and the work is done when it
+returns:
+
+```gleam
+pub fn signing_up_sends_a_welcome_test() {
+  let db = test_database()
+  let box = outbox.start()
+  let assert Ok(_) = signup(db, "ada@example.com")
+  let assert Ok(drained) = jobs.drain(runner(db, mailer(box)))
+  assert drained.completed == 1
+  let assert Ok(_) = outbox.latest_to(box, "ada@example.com")
+}
+```
+
+`Drained` counts what was completed, retried, snoozed, cancelled and
+failed. A job retried later is not waited for: check it with `jobs.get`
+or `jobs.list`.
