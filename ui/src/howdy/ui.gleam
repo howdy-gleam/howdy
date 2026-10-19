@@ -108,6 +108,7 @@ import howdy/ui/hover_card
 import howdy/ui/input
 import howdy/ui/input_group
 import howdy/ui/input_otp
+import howdy/ui/internal/islands
 import howdy/ui/internal/stylesheet
 import howdy/ui/item
 import howdy/ui/kbd
@@ -256,6 +257,20 @@ pub fn stylesheet(at path: String, themes themes: Themes) -> Controller {
     |> response.set_header("cache-control", "no-cache")
     |> response.set_header("etag", etag)
   })
+}
+
+/// A controller serving the browser code for `howdy/ui/island`, under
+/// `/_howdy/islands`. Mount it in any app that mounts islands.
+///
+/// In development it rebuilds the islands for JavaScript whenever a page
+/// loads them, so the browser always runs the current source, under
+/// `gleam run` as well as `gleam dev`. Compile errors appear on the page.
+///
+/// A release serves the bundle written by `gleam run -m howdy/ui islands`.
+/// It checks the bundle as it starts and logs what to run if the bundle
+/// is missing or was built from different code.
+pub fn islands() -> Controller {
+  islands.controller()
 }
 
 // -- Components --------------------------------------------------------------

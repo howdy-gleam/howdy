@@ -3,4 +3,5 @@
 build/
 erl_crash.dump
 /examples/live/priv/static/ui.css
+/examples/islands/priv/howdy_islands
 *.dump
