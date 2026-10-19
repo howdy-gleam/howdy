@@ -10,11 +10,17 @@
 //// Auth emails go through `howdy/mail`: over SMTP when `SMTP_URL` is set,
 //// otherwise printed in the terminal **for this local demonstration
 //// only**. Under `gleam dev` they go to the outbox the admin shows.
+////
+//// Writing a note queues a background job, in the same transaction, that
+//// emails its author a digest of their notes a minute later, and a weekly
+//// schedule does the same for everyone. `gleam run -m tasks/jobs` manages
+//// the jobs from the command line.
 
 import gleam/dynamic/decode
 import gleam/erlang/process
 import gleam/int
 import gleam/io
+import gleam/json
 import gleam/list
 import gleam/option
 import gleam/otp/static_supervisor as supervisor
@@ -31,6 +37,7 @@ import howdy/auth/emails
 import howdy/auth/pages
 import howdy/auth/routes
 import howdy/auth/user.{type Principal, type User}
+import howdy/auth/users
 import howdy/authorization as access
 import howdy/controller.{type GuardedContext}
 import howdy/database
@@ -38,6 +45,8 @@ import howdy/database/postgres
 import howdy/flags
 import howdy/flags/database as flags_database
 import howdy/guard
+import howdy/jobs
+import howdy/jobs/cron
 import howdy/mail
 import howdy/mail/preview
 import howdy/mail/smtp
@@ -63,10 +72,12 @@ pub fn main() {
     Error(Nil) -> Nil
   }
   let db = open("admin_example.sqlite")
-  let identity = identity(db, mailer())
-  // The feature flag keeper and the server run under one supervisor inside
-  // an OTP application: each is restarted on a crash, and SIGTERM stops
-  // them in order, draining open connections.
+  let mailer = mailer()
+  let identity = identity(db, mailer)
+  // The feature flag keeper, the jobs runner and the server run under one
+  // supervisor inside an OTP application: each is restarted on a crash,
+  // and SIGTERM stops them in order, letting running jobs finish and
+  // draining open connections.
   let #(features, keeper) = supervised_features(db)
   let server =
     app(db, identity, permissions(db), features)
@@ -75,6 +86,7 @@ pub fn main() {
   let assert Ok(_) =
     supervisor.new(supervisor.OneForOne)
     |> supervisor.add(keeper)
+    |> supervisor.add(jobs.supervised(runner(db, identity, mailer)))
     |> supervisor.add(howdy.supervised(server))
     |> howdy.start_application(name: "howdy_admin_example_server")
   process.sleep_forever()
@@ -102,6 +114,7 @@ pub fn open(path: String) -> Repo {
       auth.schema(),
       access.schema(),
       flags_database.schema(),
+      jobs.schema(),
       schema(),
     ])
   db
@@ -376,6 +389,14 @@ pub fn create(db: Repo, owner: User, title: String) -> service.Result(Note) {
       [sql.string(owner.id), sql.string(title)],
     ),
   )
+  // Queued in the note's transaction: no note, no email. One digest
+  // waits per user, however many notes they write meanwhile.
+  use _ <- result.try(
+    jobs.new(digest_job(), owner.id)
+    |> jobs.after(60_000)
+    |> jobs.unique("digest:" <> owner.id)
+    |> jobs.insert(into: conn),
+  )
   database.one(
     conn,
     "SELECT id, title, stars FROM notes_notes WHERE user_id = $1 ORDER BY id DESC LIMIT 1",
@@ -383,6 +404,80 @@ pub fn create(db: Repo, owner: User, title: String) -> service.Result(Note) {
     note_row(),
     or: service.Internal("the note was not written"),
   )
+}
+
+// -- Jobs ----------------------------------------------------------------------
+
+/// Email a user the digest of their notes. Its argument is their id.
+pub fn digest_job() -> jobs.Job(String) {
+  jobs.define("notes.digest", encode: json.string, decoder: decode.string)
+  |> jobs.on_queue("mail")
+  |> jobs.max_attempts(5)
+}
+
+/// Queue a digest for everyone who has notes.
+pub fn weekly_digests_job() -> jobs.Job(Nil) {
+  jobs.without_args("notes.weekly_digests")
+}
+
+/// What does the app's jobs, on every node that runs it.
+pub fn runner(
+  db: Repo,
+  identity: auth.Auth,
+  mailer: mail.Mailer,
+) -> jobs.Runner {
+  let assert Ok(mondays) = cron.parse("0 8 * * mon")
+  jobs.runner(db)
+  |> jobs.queue("mail", concurrency: 5)
+  |> jobs.handle(digest_job(), fn(user_id, _attempt) {
+    send_digest(db, identity, mailer, user_id)
+  })
+  |> jobs.handle(weekly_digests_job(), fn(_, _attempt) {
+    let queued = {
+      use conn <- database.transaction(db)
+      use owners <- result.try(database.query(
+        conn,
+        "SELECT DISTINCT user_id FROM notes_notes",
+        [],
+        decode.field(0, decode.string, decode.success),
+      ))
+      list.map(owners, fn(owner) {
+        jobs.new(digest_job(), owner) |> jobs.unique("digest:" <> owner)
+      })
+      |> jobs.insert_all(into: conn)
+    }
+    case queued {
+      Ok(_) -> jobs.Done
+      Error(error) -> jobs.Retry(service.message(error))
+    }
+  })
+  |> jobs.every(mondays, run: weekly_digests_job(), with: Nil)
+}
+
+fn send_digest(
+  db: Repo,
+  identity: auth.Auth,
+  mailer: mail.Mailer,
+  user_id: String,
+) -> jobs.Outcome {
+  case users.get(identity, user_id) {
+    Error(service.NotFound(_)) -> jobs.Cancel("the user is gone")
+    Error(error) -> jobs.Retry(service.message(error))
+    Ok(owner) ->
+      case list(db, owner, newest_first: True) {
+        Error(error) -> jobs.Retry(service.message(error))
+        Ok([]) -> jobs.Cancel("no notes to send")
+        Ok(notes) ->
+          case mail.send(mailer, digest(to: owner.email, notes:)) {
+            Ok(_) -> jobs.Done
+            Error(error) ->
+              case mail.retryable(error) {
+                True -> jobs.Retry(mail.error_to_string(error))
+                False -> jobs.GiveUp(mail.error_to_string(error))
+              }
+          }
+      }
+  }
 }
 
 fn note_row() -> decode.Decoder(Note) {

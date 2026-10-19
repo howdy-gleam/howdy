@@ -10,6 +10,7 @@ import gleam/list
 import gleam/option.{None, Some}
 import gleam/result
 import gleam/string
+import gleam/time/duration
 import gleam/time/timestamp
 import gleam/uri
 import howdy/env
@@ -241,6 +242,45 @@ pub fn list_test() {
   list.each(keys, fn(key) {
     let assert Ok(Nil) = storage.delete(files, prefix <> key)
   })
+}
+
+pub fn deleting_unused_objects_test() {
+  use files, prefix <- each_adapter
+  let put = fn(key) {
+    let assert Ok(Nil) =
+      storage.put(
+        files,
+        prefix <> key,
+        <<"x":utf8>>,
+        content_type: "text/plain",
+      )
+    Nil
+  }
+  put("uploads/kept.txt")
+  put("uploads/orphan-1.txt")
+  put("uploads/orphan-2.txt")
+  put("avatars/elsewhere.txt")
+  // Nothing is old enough yet.
+  let assert Ok(0) =
+    storage.delete_unused(
+      files,
+      prefix: prefix <> "uploads/",
+      before: timestamp.add(timestamp.system_time(), duration.hours(-1)),
+      in_use: fn(_) { False },
+    )
+  let later = timestamp.add(timestamp.system_time(), duration.minutes(1))
+  let assert Ok(2) =
+    storage.delete_unused(
+      files,
+      prefix: prefix <> "uploads/",
+      before: later,
+      in_use: fn(key) { string.ends_with(key, "kept.txt") },
+    )
+  let assert Ok(True) = storage.exists(files, prefix <> "uploads/kept.txt")
+  let assert Ok(False) = storage.exists(files, prefix <> "uploads/orphan-1.txt")
+  let assert Ok(True) = storage.exists(files, prefix <> "avatars/elsewhere.txt")
+  let _ = storage.delete(files, prefix <> "uploads/kept.txt")
+  let _ = storage.delete(files, prefix <> "avatars/elsewhere.txt")
 }
 
 pub fn invalid_keys_are_refused_test() {

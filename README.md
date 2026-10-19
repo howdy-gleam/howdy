@@ -739,6 +739,33 @@ let assert Ok(features) =
 flags.enabled(features, new_checkout(), for: flags.user(user.id))
 ```
 
+## Background jobs
+
+[`howdy_jobs`](https://github.com/mikeyjones/howdy/blob/v2.1.1/jobs/README.md) keeps work to be done later in the app's
+database, on PostgreSQL or SQLite, and does it outside the request. A job is
+queued inside the transaction that makes it necessary, so it exists only if
+that commits; it is retried with a growing delay when it fails, and can be
+unique, delayed or run on a cron schedule, once per time however many nodes
+run it. In development the admin shows the queues and every job under
+**Jobs**; on your own servers, `howdy/jobs/cli` manages them from a task
+module:
+
+```gleam
+pub fn welcome_email() -> jobs.Job(String) {
+  jobs.define("welcome_email", encode: json.string, decoder: decode.string)
+}
+
+use conn <- database.transaction(db)
+use user <- result.try(users.insert(conn, form))
+jobs.new(welcome_email(), user.id) |> jobs.insert(into: conn)
+
+jobs.runner(db)
+|> jobs.handle(welcome_email(), fn(user_id, _attempt) {
+  send_welcome(user_id)
+})
+|> jobs.supervised
+```
+
 ## Testing
 
 `howdy/testing` runs requests through an app without starting a server. The
@@ -815,6 +842,7 @@ The core package reserves `howdy/auth`, every `howdy/auth/*` module and
 `howdy/mail` and every `howdy/mail/*` module for `howdy_mail`, and
 `howdy/storage` and every `howdy/storage/*` module for `howdy_storage`,
 `howdy/flags` and every `howdy/flags/*` module for `howdy_flags`,
+`howdy/jobs` and every `howdy/jobs/*` module for `howdy_jobs`,
 `howdy/openapi` and every `howdy/openapi/*` module for `howdy_openapi`,
 `howdy/telemetry` and every `howdy/telemetry/*` module for `howdy_telemetry`,
 `howdy/ui` and every `howdy/ui/*` module for `howdy_ui`, and `howdy/dev` and

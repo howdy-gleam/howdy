@@ -171,10 +171,12 @@ you have two choices:
   a temporary failure twice, waiting `smtp.backoff` (500 ms by default,
   doubling each time) in between. The caller is held for every attempt,
   so this suits a job or a background process better than a request.
-- Record the message in a table of your own and send it from a job that
-  runs outside the request, using `mail.retryable(error)` to decide what
-  to try again. The [outbox](/docs/mail/development) is a sink for
-  reading mail in development and tests, not that queue.
+- Send it from a [background job](/docs/jobs/overview), queued in the
+  same transaction as the change the email is about, and use
+  `mail.retryable(error)` to decide what to try again. See
+  [Queued email](/docs/jobs/overview#Queued-email). The
+  [outbox](/docs/mail/development) is a sink for reading mail in
+  development and tests, not that queue.
 
 The `Receipt` holds the message's own `id`, which is also in its
 `Message-ID` header, and the `provider_id` the provider gave it, if any.

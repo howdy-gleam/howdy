@@ -635,6 +635,7 @@ pub fn the_live_grid_polls_on_its_own_clock_test() {
       mailer: None,
       recorder: None,
       flags: None,
+      jobs: None,
       api: None,
       hosts: ["localhost"],
       listen: None,

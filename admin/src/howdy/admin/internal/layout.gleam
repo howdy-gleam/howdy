@@ -100,6 +100,10 @@ fn navigation(config: Config) -> List(app_shell.Group) {
       ]
       None -> []
     },
+    case config.jobs {
+      Some(_) -> [Group("Jobs", [Link(at("/jobs"), "Jobs")])]
+      None -> []
+    },
     case config.api {
       Some(_) -> [Group("API", [Link(at("/api"), "Endpoints")])]
       None -> []

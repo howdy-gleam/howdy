@@ -203,6 +203,27 @@
       ]
     },
     {
+      "slug": "jobs",
+      "title": "Jobs",
+      "docs": [
+        {
+          "slug": "overview",
+          "title": "Background jobs",
+          "description": "Queue work in your database inside your own transactions, and have it done outside the request, tried again when it fails."
+        },
+        {
+          "slug": "schedules",
+          "title": "Schedules",
+          "description": "Run jobs on a cron schedule, once per time across every node, and clean up after auth, uploads and old jobs."
+        },
+        {
+          "slug": "production",
+          "title": "Running jobs",
+          "description": "What happens when nodes stop, how jobs spread across them, and how to watch and manage jobs from the admin, the command line and traces."
+        }
+      ]
+    },
+    {
       "slug": "auth",
       "title": "Authentication",
       "docs": [

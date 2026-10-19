@@ -22,6 +22,7 @@ import howdy/content.{type Content}
 import howdy/controller.{type Context, type Controller}
 import howdy/database.{Postgres, Sqlite}
 import howdy/flags.{type Flags}
+import howdy/jobs
 import howdy/mail
 import howdy/mail/outbox.{type Outbox}
 import howdy/service
@@ -83,6 +84,14 @@ fn index(config: Config, ctx: Context) -> Response(Content) {
               "Not registered. Pass your running flags to admin.flags to switch them off, roll them out and see their history.",
             )
         },
+        case config.jobs {
+          Some(runner) -> jobs_card(config, runner)
+          None ->
+            absent(
+              "howdy_jobs",
+              "Not registered. Pass your jobs runner to admin.jobs to see queues, schedules and failed jobs, and retry them.",
+            )
+        },
         case config.api {
           Some(api) -> api_card(config, api)
           None ->
@@ -94,6 +103,33 @@ fn index(config: Config, ctx: Context) -> Response(Content) {
       ]),
     ],
   )
+}
+
+fn jobs_card(config: Config, runner: jobs.Runner) -> Element(msg) {
+  case jobs.counts(jobs.repo(runner)) {
+    Error(error) -> layout.problem(error)
+    Ok(counts) -> {
+      let total = fn(state) {
+        list.filter(counts, fn(count) { count.state == state })
+        |> list.fold(0, fn(sum, count) { sum + count.count })
+      }
+      ui.card([], [
+        ui.card_header([], [
+          ui.card_title([text("howdy_jobs")]),
+          ui.card_description([
+            text(format.describe(list.length(jobs.queues(runner)), "queue")),
+            text(" · " <> int.to_string(total(jobs.Available)) <> " waiting"),
+            text(" · " <> int.to_string(total(jobs.Scheduled)) <> " scheduled"),
+            text(" · " <> int.to_string(total(jobs.Executing)) <> " running"),
+            text(" · " <> int.to_string(total(jobs.Failed)) <> " failed"),
+          ]),
+        ]),
+        ui.card_footer([], [
+          ui.link(config.path(config, "/jobs"), [text("Manage jobs")]),
+        ]),
+      ])
+    }
+  }
 }
 
 fn flags_card(config: Config, features: Flags) -> Element(msg) {

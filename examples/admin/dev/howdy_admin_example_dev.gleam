@@ -15,11 +15,16 @@
 ////
 //// The app's feature flags are under **Flags**: kill switches, rollouts,
 //// ramps, rules for users and groups, and their history.
+////
+//// The jobs runner starts here too, and **Jobs** shows its queues, its
+//// weekly schedule and every job: write a note and its digest waits a
+//// minute, then lands in the outbox.
 
 import gleam/erlang/process
 import howdy
 import howdy/admin
 import howdy/dev
+import howdy/jobs
 import howdy/mail
 import howdy/mail/outbox
 import howdy/telemetry
@@ -37,6 +42,8 @@ pub fn main() -> Nil {
   let identity = example.identity(db, mailer)
   let permissions = example.permissions(db)
   let features = example.features(db)
+  let runner = example.runner(db, identity, mailer)
+  let assert Ok(_) = jobs.start(runner)
   let dashboard =
     admin.new()
     |> admin.named("Notes admin")
@@ -46,6 +53,7 @@ pub fn main() -> Nil {
     |> admin.mail_previews(example.previews(mailer), send_with: mailer)
     |> admin.telemetry(recorder)
     |> admin.flags(features)
+    |> admin.jobs(runner)
 
   let assert Ok(_) =
     dev.start(fn() {

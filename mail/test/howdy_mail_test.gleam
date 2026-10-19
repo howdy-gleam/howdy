@@ -1,3 +1,4 @@
+import gleam/json
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/string
@@ -232,4 +233,59 @@ pub fn errors_test() {
   assert mail.to_service_error(mail.Invalid("no subject"))
     == service.Invalid("no subject")
   let assert service.Internal(_) = mail.to_service_error(mail.Refused("x"))
+}
+
+// -- Keeping messages ----------------------------------------------------------
+
+pub fn a_message_survives_json_test() {
+  let message =
+    mail.message()
+    |> mail.from(mail.named("Acme", "hello@acme.test"))
+    |> mail.to([
+      mail.address("ada@example.com"),
+      mail.named("Bo", "bo@example.com"),
+    ])
+    |> mail.cc([mail.address("cc@example.com")])
+    |> mail.bcc([mail.address("bcc@example.com")])
+    |> mail.reply_to(mail.address("support@acme.test"))
+    |> mail.subject("Your invoice ✓")
+    |> mail.template(
+      email.html([], [
+        email.head([], []),
+        email.body([], [email.paragraph([], [html.text("Hi!")])]),
+      ]),
+    )
+    |> mail.header("List-Unsubscribe", "<https://acme.test/u>")
+    |> mail.attach(
+      mail.attachment(
+        filename: "invoice.pdf",
+        content_type: "application/pdf",
+        content: <<0, 1, 2, 255>>,
+      ),
+    )
+    |> mail.attach(
+      mail.attachment(filename: "logo.png", content_type: "image/png", content: <<
+        9,
+      >>)
+      |> mail.inline("logo"),
+    )
+    |> mail.tag("billing")
+  let stored = json.to_string(mail.message_to_json(message))
+  let assert Ok(read) = json.parse(stored, mail.message_decoder())
+  let mailer = mail.mailer(mail.adapter(named: "none", send: fn(_) { panic }))
+  let assert Ok(before) = mail.prepare(mailer, message)
+  let assert Ok(after) = mail.prepare(mailer, read)
+  assert mail.Outgoing(..after, id: before.id, date: before.date) == before
+  // Text set by hand wins over the generated text, after a round trip too.
+  let assert Ok(read) =
+    json.parse(
+      json.to_string(mail.message_to_json(mail.text(message, "By hand"))),
+      mail.message_decoder(),
+    )
+  let assert Ok(after) = mail.prepare(mailer, read)
+  assert after.text == Some("By hand")
+}
+
+pub fn an_unknown_format_is_refused_test() {
+  let assert Error(_) = json.parse("{\"format\": 2}", mail.message_decoder())
 }

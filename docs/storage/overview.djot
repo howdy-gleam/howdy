@@ -334,8 +334,21 @@ would have sent with `storage.put` and go on to step 4.
 
 A browser that asks for a URL and never finishes leaves nothing behind. One
 that uploads and never says it is done leaves an object no record points
-to. If that matters, list the prefix now and then and delete objects older
-than a day that nothing refers to, or set a lifecycle rule on the bucket.
+to. If that matters, `storage.delete_unused` deletes the objects under a
+prefix that are older than a time you give and that nothing refers to,
+asking you about each one. Run it from a
+[scheduled job](/docs/jobs/schedules), or set a lifecycle rule on the
+bucket:
+
+```gleam
+let day_ago = timestamp.add(timestamp.system_time(), duration.hours(-24))
+storage.delete_unused(files, prefix: "uploads/", before: day_ago,
+  in_use: fn(key) { documents.refers_to(db, key) |> result.unwrap(True) },
+)
+```
+
+Answer `True` when unsure, such as when the database cannot say, and the
+object is kept until next time.
 
 ## S3 and compatible services
 
