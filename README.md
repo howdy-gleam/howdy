@@ -359,6 +359,28 @@ The response is returned unchanged. Query strings, headers and bodies are
 omitted. Unmatched routes bypass middleware, so their 404 responses are not
 logged; handlers that panic do not produce a request log either.
 
+## Health checks
+
+`howdy.health_check` answers load balancers, container platforms and uptime
+monitors at `GET /up`, before routing and middleware, and without a log line
+or trace for each probe. Checks run concurrently within a timeout, and any
+failure turns the `200` into a `503`:
+
+```gleam
+import howdy
+import howdy/database
+import howdy/health
+
+howdy.new()
+|> howdy.health_check(
+  health.new() |> health.check("database", database.health_check(db)),
+)
+```
+
+See
+[docs/guides/health-checks.djot](https://github.com/mikeyjones/howdy/blob/v2.1.1/docs/guides/health-checks.djot)
+for liveness and readiness probes.
+
 ## CORS
 
 Browsers only let a page read cross-origin responses that say so. Attach
@@ -434,7 +456,7 @@ let api =
   |> version.add("v2", [user_v2.controller()])
 
 howdy.new()
-|> howdy.controller(health.controller())
+|> howdy.controller(status.controller())
 |> howdy.versions(api)
 |> howdy.handler
 ```

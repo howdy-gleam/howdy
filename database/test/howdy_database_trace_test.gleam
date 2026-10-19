@@ -3,10 +3,14 @@ import gleam/list
 import gleam/option.{Some}
 import gloo/adapter/sqlite
 import gloo/value
+import howdy
+import howdy/controller
 import howdy/database
+import howdy/health
 import howdy/service
 import howdy/telemetry
 import howdy/telemetry/recorder
+import howdy/testing
 import howdy/trace
 
 fn recording() -> recorder.Recorder {
@@ -110,4 +114,33 @@ pub fn queries_outside_a_span_are_not_traced_test() {
     )
   assert recorder.traces(recorder, limit: 5) == []
   telemetry.stop()
+}
+
+pub fn health_checks_are_not_traced_test() {
+  let db = db()
+  let recorder = recording()
+  let app =
+    howdy.new()
+    |> howdy.controller(
+      controller.new("notes")
+      |> controller.get("/", fn(ctx) {
+        let assert Ok(Nil) = database.health_check(db)()
+        controller.text(ctx, "notes")
+      }),
+    )
+    |> howdy.health_check(
+      health.new() |> health.check("database", database.health_check(db)),
+    )
+
+  assert { testing.get("/up") |> testing.send(app) }.status == 200
+  assert recorder.traces(recorder, limit: 5) == []
+
+  // The same query in a request is traced, so the check above is not
+  // passing for want of a recorder.
+  assert { testing.get("/notes") |> testing.send(app) }.status == 200
+  let assert [trace] = recorder.traces(recorder, limit: 5)
+  let assert Ok([request, select]) =
+    recorder.trace(recorder, trace.root.trace_id)
+  assert request.name == "GET /notes"
+  assert select.name == "SELECT"
 }

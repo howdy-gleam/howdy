@@ -1,0 +1,165 @@
+# Health checks
+
+Load balancers, container platforms and uptime monitors ask an app, every
+few seconds, whether it is still up. `howdy.health_check` gives them an
+answer at `/up`:
+
+```gleam
+import howdy
+import howdy/health
+
+pub fn app() -> howdy.App {
+  howdy.new()
+  |> howdy.controller(pages())
+  |> howdy.health_check(health.new())
+}
+```
+
+```sh
+curl -i http://127.0.0.1:8787/up
+```
+
+```
+HTTP/1.1 200 OK
+content-type: application/json; charset=utf-8
+cache-control: no-store
+
+{"status":"ok"}
+```
+
+`GET` and `HEAD` are answered. Other methods, and other paths, go to the
+app's routes as usual.
+
+## Answered before everything else
+
+The health check is answered before routing and before the app's
+middleware. That keeps it working whatever the app does to other
+requests:
+
+- rate limits, guards, CSRF checks and redirects to HTTPS cannot turn the
+  prober away
+- the [request logger](/docs/middleware/logging) does not write a line for
+  every probe
+- no trace is recorded, so probes do not crowd out real requests in
+  [telemetry](/docs/telemetry/overview)
+
+A route of the app's own at the same path is never reached by `GET` or
+`HEAD`. Use `health.at` to answer somewhere else:
+
+```gleam
+howdy.health_check(app, health.new() |> health.at("/healthz"))
+```
+
+## Checking what the app depends on
+
+With no checks, a `200` means the app started and is accepting
+connections. Add a check for anything the app cannot serve without:
+
+```gleam
+import howdy/database
+
+health.new()
+|> health.check("database", database.health_check(db))
+```
+
+`database.health_check` from [Howdy Database](/docs/database/overview) runs
+`SELECT 1`. A check of your own is any function that returns `Ok(Nil)` when
+all is well, or an `Error` with the reason it is not:
+
+```gleam
+health.new()
+|> health.check("database", database.health_check(db))
+|> health.check("search", fn() {
+  case search.ping(client) {
+    Ok(_) -> Ok(Nil)
+    Error(e) -> Error(search.describe(e))
+  }
+})
+```
+
+The checks run at the same time. If every one passes the answer is `200`;
+if any fails, crashes or runs out of time it is `503`. Either way the
+response names each check and how it went:
+
+```
+HTTP/1.1 503 Service Unavailable
+
+{"status":"error","checks":{"database":"error","search":"ok"}}
+```
+
+A check's status is `ok`, `error` or `timeout`. The reason a check failed
+is never sent, as anyone can ask for the page: it is logged instead, at
+most once every ten seconds for each check.
+
+## Timeouts
+
+The checks get one second between them by default. A check still running
+then is stopped and reported as `timeout`. Change it with `health.timeout`:
+
+```gleam
+health.new()
+|> health.check("database", database.health_check(db))
+|> health.timeout(3000)
+```
+
+Keep it below the prober's own timeout, or the prober gives up before the
+answer arrives. A Kubernetes probe waits one second by default.
+
+## What to check
+
+A failing health check usually takes the app out of service, and some
+platforms restart it. So check what a restart or a different instance
+could fix, and keep the checks cheap:
+
+- An app that connects to its database and runs its migrations in
+  `main`, as `howdy new` projects do, refuses to start without them. A
+  deploy that cannot work then never reports healthy, even with no checks
+  at all.
+- A check of a shared dependency fails on every instance at once. Taking
+  them all out of service will not bring the database back, and
+  restarting them all at once makes the recovery slower.
+
+Platforms that ask two questions get two paths. Call
+`howdy.health_check` once for each:
+
+```gleam
+howdy.new()
+|> howdy.controller(pages())
+// Is the process alive? Restart it if not.
+|> howdy.health_check(health.new() |> health.at("/up"))
+// Can it serve traffic right now? Stop sending requests if not.
+|> howdy.health_check(
+  health.new()
+  |> health.at("/ready")
+  |> health.check("database", database.health_check(db)),
+)
+```
+
+In Kubernetes, point the `livenessProbe` at `/up` and the
+`readinessProbe` at `/ready`. Docker, Kamal and most load balancers ask
+one question; give them `/up`.
+
+## Probing from a container
+
+A `HEALTHCHECK` in a Dockerfile runs inside the container, so it needs a
+client there. Alpine images have `wget`:
+
+```dockerfile
+HEALTHCHECK --interval=10s --timeout=3s \
+  CMD wget -qO /dev/null http://127.0.0.1:8787/up || exit 1
+```
+
+Probes from outside the container, such as a load balancer's, reach the
+app only if it listens on every interface rather than `127.0.0.1`: bind it
+to `0.0.0.0` in a container.
+
+## Testing
+
+`howdy/testing` sends requests through the health check like any other:
+
+```gleam
+pub fn health_check_test() {
+  let response = testing.get("/up") |> testing.send(app())
+  assert response.status == 200
+}
+```

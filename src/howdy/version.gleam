@@ -15,7 +15,7 @@
 ////   |> version.add("v2", [user_v2.controller()])
 ////
 //// howdy.new()
-//// |> howdy.controller(health.controller())
+//// |> howdy.controller(status.controller())
 //// |> howdy.versions(api)
 //// |> howdy.handler
 //// ```
@@ -28,7 +28,7 @@
 ////
 //// - `path()`: the first path segment, such as `/v2/users`. The segment is
 ////   removed before routing. A segment that is not a declared version is
-////   left alone, so `/health` still reaches unversioned controllers.
+////   left alone, so `/status` still reaches unversioned controllers.
 //// - `header("x-api-version")`: a request header holding the version name.
 //// - `accept("vnd.howdy")`: a vendor media type such as
 ////   `application/vnd.howdy.v2+json` in the `accept` header.
