@@ -9,6 +9,7 @@ import howdy/ui
 import howdy/ui/alert
 import howdy/ui/attachment
 import howdy/ui/badge
+import howdy/ui/bell
 import howdy/ui/blocks/app_shell
 import howdy/ui/blocks/sign_in
 import howdy/ui/blocks/sign_up
@@ -129,6 +130,9 @@ pub fn for(name: String) -> List(Example(msg)) {
     ]
     "alert" -> [Example("Alerts", "alerts", alerts)]
     "toast" -> [Example("Toasts", "toasts", toasts)]
+    "bell" -> [
+      Example("A notification bell", "notification_bell", notification_bell),
+    ]
     "loading" -> [Example("Skeletons and spinners", "loading", loading)]
     "chat" -> [
       Example("Conversation", "conversation", conversation),
@@ -684,6 +688,15 @@ pub fn toasts() -> Element(msg) {
       ui.toast_close([attribute.aria_label("Dismiss")]),
     ]),
   ])
+}
+
+/// The gallery serves a pretend inbox at this source, which sends a new
+/// notification every few seconds.
+pub fn notification_bell() -> Element(msg) {
+  bell.new(id: "gallery-bell", source: "/notifications")
+  |> bell.unread(2)
+  |> bell.inbox("#notifications")
+  |> bell.view
 }
 
 pub fn loading() -> Element(msg) {

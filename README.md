@@ -268,6 +268,24 @@ the [browser cookie deletion rules](https://developer.mozilla.org/en-US/docs/Web
 These helpers read and write cookies; they do not sign them or validate sessions.
 For authentication, let a guard validate the session and return `401` when needed.
 
+### Flash messages
+
+`howdy/flash` carries a short message across a redirect, such as "Settings saved"
+after a form post, in a signed cookie that is cleared once shown:
+
+```gleam
+let flash = flash.new(secret: secret_key_base)
+
+// The form handler redirects with a message...
+controller.status(ctx, 303)
+|> response.set_header("location", "/settings")
+|> flash.put(flash, flash.Success, "Settings saved")
+
+// ...and the page it lands on shows it once, as toasts with howdy_ui.
+use messages <- flash.take(ctx, flash)
+toast.region([], toast.flashed(messages))
+```
+
 ## Authentication and authorization
 
 [`howdy_auth`](https://github.com/mikeyjones/howdy/blob/v2.1.1/auth/README.md) is an optional package with email-token, opt-in password
@@ -739,6 +757,24 @@ let assert Ok(features) =
 flags.enabled(features, new_checkout(), for: flags.user(user.id))
 ```
 
+## Notifications
+
+[`howdy_notifications`](https://github.com/mikeyjones/howdy/blob/v2.1.1/notifications/README.md) tells users what happened: each
+notification is kept in an inbox in the app's database until read, pushed
+straight away to every page the user has open, and emailed or sent as a browser
+notification (Web Push) when the kind and the user's preferences ask for it.
+Email can wait to see whether the notification is read in the app first, or be
+gathered into a digest; a supervised worker sends it and retries. howdy_ui's
+`bell` shows the unread count and the newest, live:
+
+```gleam
+notifications.draft("comment.created", "Ana commented on your post")
+|> notifications.link("/posts/42")
+|> notifications.send(notifier, to: post.author_id)
+
+bell.new(id: "inbox", source: "/notifications") |> bell.unread(count) |> bell.view
+```
+
 ## Testing
 
 `howdy/testing` runs requests through an app without starting a server. The
@@ -815,6 +851,8 @@ The core package reserves `howdy/auth`, every `howdy/auth/*` module and
 `howdy/mail` and every `howdy/mail/*` module for `howdy_mail`, and
 `howdy/storage` and every `howdy/storage/*` module for `howdy_storage`,
 `howdy/flags` and every `howdy/flags/*` module for `howdy_flags`,
+`howdy/notifications` and every `howdy/notifications/*` module for
+`howdy_notifications`,
 `howdy/openapi` and every `howdy/openapi/*` module for `howdy_openapi`,
 `howdy/telemetry` and every `howdy/telemetry/*` module for `howdy_telemetry`,
 `howdy/ui` and every `howdy/ui/*` module for `howdy_ui`, and `howdy/dev` and

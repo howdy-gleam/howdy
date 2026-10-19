@@ -1,0 +1,101 @@
+# Email and digests
+
+A notification can go out by email as well as to the inbox, one at a time
+or gathered into a digest. Email and push are sent by a worker running
+alongside your app, which retries what fails, so a slow or broken mail
+provider never holds up the request that sent the notification.
+
+## Email
+
+Give the notifier a [mailer](/docs/mail/overview), a way to find each
+user's address, and a function that writes the email for a notification:
+
+```gleam
+let notifier =
+  notifications.new(db)
+  |> notifications.with_base_url("https://example.com")
+  |> notifications.with_email(
+    mailer,
+    address: fn(user_id) { users.email_address(db, user_id) },
+    render: fn(n) {
+      mail.message()
+      |> mail.subject(n.title)
+      |> mail.text(n.body <> "\n\n" <> "https://example.com" <> option.unwrap(n.link, "/"))
+    },
+  )
+```
+
+`render` gives the subject and body; the recipient is filled in. An address
+that cannot be found gives up on that email. Kinds whose delivery says
+`EmailNow` are then emailed one by one.
+
+### Only if not read first
+
+Someone already looking at the app does not need an email as well.
+`email_after` waits before sending, and skips the email if the
+notification was read in the meantime:
+
+```gleam
+notifications.email_after(notifier, 120)
+```
+
+## Digests
+
+Kinds whose delivery says `EmailDigest` are gathered into one email per
+user, at most once per period:
+
+```gleam
+notifications.with_digest(notifier, every: 86_400, render: fn(unread) {
+  mail.message()
+  |> mail.subject(int.to_string(list.length(unread)) <> " new notifications")
+  |> mail.template(digest_email(unread))
+})
+```
+
+`render` is given the user's unread digest notifications, oldest first, up
+to a hundred. Ones read in the inbox before the digest goes are left out,
+and a user who has read everything gets no email. Without `with_digest`,
+digest kinds are emailed one at a time.
+
+## The worker
+
+Add the worker to your supervision tree, before the server:
+
+```gleam
+supervisor.new(supervisor.OneForOne)
+|> supervisor.add(notifications.supervised(notifier))
+|> supervisor.add(howdy.supervised(app(notifier)))
+|> howdy.start_application(name: "my_app_server")
+```
+
+It looks for email and push that is due every ten seconds
+(`check_every` changes that), and straight away after a send from the same
+node. Run it on every node: workers claim what they send in the database,
+so they share the work without sending anything twice. A worker that dies
+mid-send leaves its claim to expire after two minutes, and another sends
+it then, so a crash can mean a second copy but never a lost one.
+
+What fails is tried again, with the delay doubling from thirty seconds,
+five times in all; then it is given up and logged. A mail provider that is
+down or rate limiting is retried; one that refuses the message is not.
+
+`deliver_due(notifier)` runs one pass and reports what it sent, for a
+scheduled job instead of the worker, or for tests:
+
+```gleam
+assert notifications.deliver_due(notifier)
+  == Ok(notifications.Report(emails: 1, digests: 0, pushes: 0, failed: 0))
+```
+
+## Testing
+
+`howdy/mail/outbox` keeps mail instead of sending it, so a test can read
+what went out:
+
+```gleam
+let box = outbox.start()
+let notifier = notifications.new(db) |> notifications.with_email(mail.mailer(outbox.adapter(box)), ...)
+notifications.draft("security.login", "New sign-in") |> notifications.send(notifier, to: user_id)
+let assert Ok(_) = notifications.deliver_due(notifier)
+let assert Ok(email) = outbox.latest_to(box, "ana@example.com")
+```

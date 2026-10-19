@@ -1439,6 +1439,220 @@ document.addEventListener('drop', (event) => {
   addUploads(uploaderOf(zone), [...event.dataTransfer.files]);
 });
 
+// -- Notification bells --------------------------------------------------------
+// A bell follows its inbox's server-sent events at `<source>/events`: the
+// count on its button follows `unread` events, from this tab or any other,
+// and each `notification` event is shown as a toast and, once the panel has
+// been opened, added to its list. Opening the panel reads the newest from
+// `<source>`. The JSON is what `howdy_notifications` routes answer.
+const bellStreams = new WeakMap();
+const bellOf = (node) => node?.closest('[data-howdy-bell]');
+const bellPath = (bell, path) => bell.dataset.source.replace(/\/$/, '') + path;
+const setBellCount = (bell, count) => {
+  bell.dataset.unread = String(count);
+  const badge = bell.querySelector('[data-howdy-bell-count]');
+  badge.textContent = count > 99 ? '99+' : String(count);
+  badge.hidden = count === 0;
+  const title = bell.dataset.textTitle;
+  bell.querySelector('[data-howdy-bell-button]').setAttribute(
+    'aria-label',
+    count ? `${title}, ${bell.dataset.textUnread.replace('{count}', count)}` : title,
+  );
+};
+const timeAgo = (at) => {
+  const format = new Intl.RelativeTimeFormat(document.documentElement.lang || undefined, { numeric: 'auto' });
+  const seconds = Math.round((at - Date.now()) / 1000);
+  const size = Math.abs(seconds);
+  if (size < 60) return format.format(seconds, 'second');
+  if (size < 3600) return format.format(Math.round(seconds / 60), 'minute');
+  if (size < 86400) return format.format(Math.round(seconds / 3600), 'hour');
+  return format.format(Math.round(seconds / 86400), 'day');
+};
+const markEntry = (bell, entry, unread) => {
+  entry.toggleAttribute('data-unread', unread);
+  entry.querySelector('[data-howdy-bell-mark]').setAttribute(
+    'aria-label',
+    unread ? bell.dataset.textMarkRead : bell.dataset.textMarkUnread,
+  );
+};
+const bellEntry = (bell, notification) => {
+  const entry = bell.querySelector('template[data-howdy-bell-item]').content.firstElementChild.cloneNode(true);
+  entry.dataset.id = notification.id;
+  const link = entry.querySelector('[data-howdy-bell-link]');
+  if (notification.link) link.href = notification.link;
+  entry.querySelector('[data-howdy-bell-title]').textContent = notification.title;
+  entry.querySelector('[data-howdy-bell-body]').textContent = notification.body || '';
+  const time = entry.querySelector('[data-howdy-bell-time]');
+  time.dateTime = new Date(notification.created_at).toISOString();
+  time.textContent = timeAgo(notification.created_at);
+  markEntry(bell, entry, !notification.read_at);
+  return entry;
+};
+const bellEmpty = (bell, text) => {
+  const empty = bell.querySelector('[data-howdy-bell-empty]');
+  empty.textContent = text;
+  empty.hidden = !text;
+};
+const loadBell = async (bell) => {
+  const list = bell.querySelector('[data-howdy-bell-list]');
+  list.setAttribute('aria-busy', 'true');
+  try {
+    const response = await fetch(bell.dataset.source, { headers: { accept: 'application/json' } });
+    if (!response.ok) throw new Error(`status ${response.status}`);
+    const inbox = await response.json();
+    list.replaceChildren(...inbox.notifications.map((notification) => bellEntry(bell, notification)));
+    bell.dataset.loaded = '';
+    bellEmpty(bell, inbox.notifications.length ? '' : bell.dataset.textEmpty);
+    setBellCount(bell, inbox.unread);
+  } catch {
+    if (!list.children.length) bellEmpty(bell, bell.dataset.textFailed);
+  } finally {
+    list.removeAttribute('aria-busy');
+  }
+};
+const postBell = async (bell, path, keepalive = false) => {
+  try {
+    const response = await fetch(bellPath(bell, path), { method: 'POST', headers: { accept: 'application/json' }, keepalive });
+    if (response.ok) setBellCount(bell, (await response.json()).unread);
+    return response.ok;
+  } catch {
+    return false;
+  }
+};
+const bellToast = (bell, notification) => {
+  if (bell.dataset.toasts !== 'true') return;
+  let region = document.querySelector('[data-howdy-toast-region]:not([data-howdy-toast-queue])');
+  if (!region) {
+    region = bell.querySelector('template[data-howdy-bell-region]').content.firstElementChild.cloneNode(true);
+    document.body.append(region);
+  }
+  for (const gone of region.querySelectorAll('[data-howdy-bell-toast][hidden]')) gone.remove();
+  const toast = bell.querySelector('template[data-howdy-bell-toast]').content.firstElementChild.cloneNode(true);
+  toast.dataset.howdyBellToast = '';
+  const title = toast.querySelector('[data-howdy-bell-toast-title]');
+  if (notification.link) {
+    const link = document.createElement('a');
+    link.href = notification.link;
+    link.textContent = notification.title;
+    link.style.color = 'inherit';
+    title.append(link);
+  } else title.textContent = notification.title;
+  const body = toast.querySelector('[data-howdy-bell-toast-body]');
+  if (notification.body) body.textContent = notification.body;
+  else body.parentElement.remove();
+  region.append(toast);
+};
+const connectBell = (bell) => {
+  if (bellStreams.has(bell) || !('EventSource' in window)) return;
+  const panel = bell.querySelector('[data-howdy-bell-panel]');
+  panel.addEventListener('toggle', (event) => {
+    if (event.newState === 'open') loadBell(bell);
+  });
+  const push = bell.querySelector('[data-howdy-bell-push]');
+  if (push && canPush) showPush(bell, push);
+  const stream = new EventSource(bellPath(bell, '/events'));
+  bellStreams.set(bell, stream);
+  let opened = false;
+  // After a reconnect the list may have missed notifications, so an open
+  // panel reads it again.
+  stream.addEventListener('open', () => {
+    if (opened && isOpen(panel)) loadBell(bell);
+    opened = true;
+  });
+  stream.addEventListener('unread', (event) => setBellCount(bell, JSON.parse(event.data).count));
+  stream.addEventListener('notification', (event) => {
+    const notification = JSON.parse(event.data);
+    if (bell.hasAttribute('data-loaded')) {
+      const list = bell.querySelector('[data-howdy-bell-list]');
+      if (!list.querySelector(`[data-id="${CSS.escape(notification.id)}"]`)) list.prepend(bellEntry(bell, notification));
+      bellEmpty(bell, '');
+    }
+    bellToast(bell, notification);
+  });
+};
+// Turning the browser's own notifications on and off, with the service
+// worker and routes `web_push.routes` serves at the button's path.
+const canPush = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+const pushRegistration = (path) => navigator.serviceWorker.getRegistration(`${path}/`);
+const activated = (registration) =>
+  new Promise((resolve) => {
+    const worker = registration.installing || registration.waiting;
+    if (registration.active && !worker) return resolve(registration);
+    worker.addEventListener('statechange', () => {
+      if (worker.state === 'activated') resolve(registration);
+    });
+  });
+const showPush = async (bell, button) => {
+  const blocked = bell.querySelector('[data-howdy-bell-push-blocked]');
+  blocked.hidden = Notification.permission !== 'denied';
+  button.hidden = Notification.permission === 'denied';
+  const registration = await pushRegistration(button.dataset.howdyBellPush);
+  const subscribed = Boolean(await registration?.pushManager.getSubscription()) && Notification.permission === 'granted';
+  button.dataset.on = String(subscribed);
+  button.textContent = subscribed ? bell.dataset.textPushOff : bell.dataset.textPushOn;
+};
+const togglePush = async (bell, button) => {
+  const path = button.dataset.howdyBellPush;
+  button.disabled = true;
+  try {
+    if (button.dataset.on === 'true') {
+      const subscription = await (await pushRegistration(path))?.pushManager.getSubscription();
+      if (subscription) {
+        await fetch(`${path}/subscriptions`, {
+          method: 'DELETE',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ endpoint: subscription.endpoint }),
+        });
+        await subscription.unsubscribe();
+      }
+    } else if ((await Notification.requestPermission()) === 'granted') {
+      const registration = await activated(await navigator.serviceWorker.register(`${path}/worker.js`, { scope: `${path}/` }));
+      const { key } = await (await fetch(`${path}/key`)).json();
+      const bytes = Uint8Array.from(atob(key.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
+      const subscription = await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: bytes });
+      const saved = await fetch(`${path}/subscriptions`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(subscription),
+      });
+      if (!saved.ok) await subscription.unsubscribe();
+    }
+  } catch (error) {
+    console.warn('howdy: browser notifications', error);
+  } finally {
+    button.disabled = false;
+    await showPush(bell, button);
+  }
+};
+const connectBells = (root) => {
+  for (const bell of root.querySelectorAll('[data-howdy-bell]')) connectBell(bell);
+};
+
+document.addEventListener('click', async (event) => {
+  const control = inPath(event, '[data-howdy-bell-read-all], [data-howdy-bell-mark], [data-howdy-bell-link], [data-howdy-bell-push]');
+  const bell = bellOf(control);
+  if (!bell) return;
+  if (control.matches('[data-howdy-bell-push]')) return togglePush(bell, control);
+  if (control.matches('[data-howdy-bell-read-all]')) {
+    if (await postBell(bell, '/read'))
+      for (const entry of bell.querySelectorAll('[data-howdy-bell-entry]')) markEntry(bell, entry, false);
+    return;
+  }
+  const entry = control.closest('[data-howdy-bell-entry]');
+  const id = encodeURIComponent(entry.dataset.id);
+  if (control.matches('[data-howdy-bell-link]')) {
+    // Marked read on the way to the link; `keepalive` lets the request
+    // finish after the page has gone.
+    if (entry.hasAttribute('data-unread')) {
+      markEntry(bell, entry, false);
+      postBell(bell, `/${id}/read`, true);
+    }
+    return;
+  }
+  const unread = entry.hasAttribute('data-unread');
+  if (await postBell(bell, `/${id}/${unread ? 'read' : 'unread'}`)) markEntry(bell, entry, !unread);
+});
+
 // Events that do not leave a live view's shadow root, whether they never
 // bubble or stop at its host, are heard on each root: the document now, and
 // a live view's shadow root once it has mounted. Images that failed before
@@ -1451,6 +1665,7 @@ const hear = (root) => {
   root.addEventListener('animationend', toastFaded);
   root.addEventListener('change', uploadChosen);
   root.addEventListener('error', imageFailed, true);
+  connectBells(root);
   for (const image of root.querySelectorAll('img[data-howdy-on-error=remove]')) {
     if (image.complete && image.naturalWidth === 0) image.remove();
   }

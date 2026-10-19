@@ -101,6 +101,7 @@ pub fn entries() -> List(Entry) {
     component("empty", "Feedback"),
     component("alert", "Feedback"),
     component("toast", "Feedback"),
+    component("bell", "Feedback"),
     component("loading", "Feedback"),
     component("chat", "Chat"),
     component("attachment", "Chat"),

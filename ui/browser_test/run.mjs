@@ -636,6 +636,40 @@ const tests = {
     await page.until(`q('#survey-answers')?.textContent === 'role=design score=3'`);
   },
 
+  async 'a notification bell follows its inbox live'(page) {
+    await page.goto('/bell/preview/0');
+    const button = '[data-howdy-bell-button]';
+    equal(await page.evaluate(`q('[data-howdy-bell-count]').textContent`), '2', 'count drawn with the page');
+    equal(await page.evaluate(`q('${button}').getAttribute('aria-label')`), 'Notifications, 2 unread', 'label');
+    await page.click(button);
+    await page.until(`q('[data-howdy-bell-panel]').matches(':popover-open')`);
+    const entries = `[...document.querySelectorAll('[data-howdy-bell-list] > [data-howdy-bell-entry]')]`;
+    await page.until(`${entries}.length === 3`);
+    equal(await page.evaluate(`${entries}.map((e) => e.hasAttribute('data-unread'))`), [true, true, false], 'unread marks');
+    equal(await page.evaluate(`${entries}[0].querySelector('[data-howdy-bell-title]').textContent`), 'Ana commented on your post', 'title');
+    equal(await page.evaluate(`${entries}[0].querySelector('[data-howdy-bell-link]').getAttribute('href')`), '#n3', 'link');
+    ok((await page.evaluate(`${entries}[0].querySelector('time').textContent`)).includes('2'), 'relative time');
+    // Mark one read with its dot.
+    await page.click('[data-howdy-bell-list] > [data-howdy-bell-entry] [data-howdy-bell-mark]');
+    await page.until(`!${entries}[0].hasAttribute('data-unread')`);
+    equal(await page.evaluate(`${entries}[0].querySelector('[data-howdy-bell-mark]').getAttribute('aria-label')`), 'Mark as unread', 'mark label');
+    equal(await page.evaluate(`q('[data-howdy-bell-count]').textContent`), '1', 'count from the server');
+    await page.click('[data-howdy-bell-read-all]');
+    await page.until(`q('[data-howdy-bell-count]').hidden`);
+    equal(await page.evaluate(`${entries}.some((e) => e.hasAttribute('data-unread'))`), false, 'all read');
+    equal(await page.evaluate(`q('${button}').getAttribute('aria-label')`), 'Notifications', 'label with none unread');
+    // The pretend inbox announces a notification five seconds after the
+    // stream opens.
+    await page.until(`${entries}.length === 4`, 8000);
+    equal(await page.evaluate(`${entries}[0].querySelector('[data-howdy-bell-title]').textContent`), 'Order #3 was placed', 'live entry first');
+    equal(await page.evaluate(`q('[data-howdy-bell-count]').textContent`), '3', 'live count');
+    const toast = `document.querySelector('[data-howdy-toast-region] [data-howdy-bell-toast]')`;
+    await page.until(`${toast} !== null`);
+    equal(await page.evaluate(`${toast}.querySelector('a').textContent`), 'Order #3 was placed', 'toast title');
+    equal(await page.evaluate(`${toast}.querySelector('a').getAttribute('href')`), '#live3', 'toast link');
+    equal(await page.evaluate(`getComputedStyle(${toast}).position`), 'relative', 'toast styled by its class');
+  },
+
   async 'an uploader sends a file to storage and the form posts its key'(page) {
     await page.goto('/uploader/preview/1');
     // Required, so the form will not submit empty.
