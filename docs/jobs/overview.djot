@@ -125,6 +125,14 @@ the key is free again. Combined with `after`, it gathers a burst into one
 job: a digest that waits a minute is queued once however many notes are
 written in that minute.
 
+`jobs.unique_while_waiting(insert, key)` is the same, except that a job
+that has started no longer holds the key. Use it where work that arrives
+while the job runs must not be lost: a change made while a search index is
+being rebuilt queues another rebuild, rather than finding the running one
+and being dropped. If a job like this fails while another with its key is
+waiting, it is cancelled instead of retried, since the waiting one will do
+the work.
+
 `jobs.insert_all(inserts, into: conn)` queues several jobs in order.
 
 ## Doing jobs

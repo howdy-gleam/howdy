@@ -120,6 +120,7 @@ fn jobs_table(id: String) -> String {
      lease_until BIGINT,
      attempted_by TEXT,
      unique_key TEXT,
+     unique_waiting INTEGER NOT NULL DEFAULT 0,
      errors TEXT NOT NULL,
      traceparent TEXT
    );
@@ -132,7 +133,11 @@ fn jobs_table(id: String) -> String {
      ON howdy_jobs (finished_at) WHERE finished_at IS NOT NULL;
    CREATE INDEX howdy_jobs_by_state ON howdy_jobs (state, id);
    CREATE UNIQUE INDEX howdy_jobs_unique ON howdy_jobs (unique_key)
-     WHERE unique_key IS NOT NULL AND state IN " <> unfinished
+     WHERE unique_key IS NOT NULL AND unique_waiting = 0
+       AND state IN " <> unfinished <> ";
+   CREATE UNIQUE INDEX howdy_jobs_unique_waiting ON howdy_jobs (unique_key)
+     WHERE unique_key IS NOT NULL AND unique_waiting = 1
+       AND state = 'available'"
 }
 
 /// A name written into SQL. Names are checked before they get here; the
@@ -178,21 +183,24 @@ pub type New {
     scheduled_at: Int,
     inserted_at: Int,
     unique_key: Option(String),
+    /// The key only counts while the job waits to start.
+    unique_waiting: Bool,
     traceparent: Option(String),
   )
 }
 
 /// Insert a job and give its id, and whether it is new: with a unique key
-/// already held by an unfinished job, that job's id instead.
+/// already held, the holder's id instead.
 pub fn insert(conn: Repo, job: New) -> service.Result(#(Int, Bool)) {
   use conn <- database.connect(conn)
   use rows <- result.try(database.query(
     conn,
     "INSERT INTO howdy_jobs (name, queue, args, state, priority, attempt,
-       max_attempts, scheduled_at, inserted_at, unique_key, errors, traceparent)
+       max_attempts, scheduled_at, inserted_at, unique_key, unique_waiting,
+       errors, traceparent)
      VALUES ($1, $2, $3, 'available', " <> int.to_string(job.priority) <> ", 0, " <> int.to_string(
       job.max_attempts,
-    ) <> ", $4, $5, $6, '[]', $7)
+    ) <> ", $4, $5, $6, " <> flag(job.unique_waiting) <> ", '[]', $7)
      ON CONFLICT DO NOTHING RETURNING id",
     [
       sql.string(job.name),
@@ -210,8 +218,11 @@ pub fn insert(conn: Repo, job: New) -> service.Result(#(Int, Bool)) {
     [], Some(key) ->
       database.query(
         conn,
-        "SELECT id FROM howdy_jobs WHERE unique_key = $1 AND state IN "
-          <> unfinished,
+        "SELECT id FROM howdy_jobs WHERE unique_key = $1 AND "
+          <> case job.unique_waiting {
+          True -> "unique_waiting = 1 AND state = 'available'"
+          False -> "unique_waiting = 0 AND state IN " <> unfinished
+        },
         [sql.string(key)],
         decode.field(0, decode.int, decode.success),
       )
@@ -223,6 +234,13 @@ pub fn insert(conn: Repo, job: New) -> service.Result(#(Int, Bool)) {
         }
       })
     [], None -> Error(service.Internal("the job was not inserted"))
+  }
+}
+
+fn flag(on: Bool) -> String {
+  case on {
+    True -> "1"
+    False -> "0"
   }
 }
 
@@ -316,19 +334,42 @@ pub fn complete(
 }
 
 /// Make the job available again at `at`, with its errors so far.
+/// Put a job back to wait, unless it is unique while waiting and a newer
+/// job with its key already waits: that one will do the work, so this one
+/// is cancelled instead, rather than breaking the key's uniqueness.
+fn wait_again(now: Int) -> String {
+  let superseded =
+    "(unique_waiting = 1 AND EXISTS (SELECT 1 FROM howdy_jobs newer
+       WHERE newer.unique_key = howdy_jobs.unique_key
+         AND newer.unique_waiting = 1 AND newer.state = 'available'
+         AND newer.id <> howdy_jobs.id))"
+  "state = CASE WHEN "
+  <> superseded
+  <> " THEN 'cancelled' ELSE 'available' END, finished_at = CASE WHEN "
+  <> superseded
+  <> " THEN "
+  <> int.to_string(now)
+  <> " ELSE NULL END"
+}
+
 pub fn reschedule(
   conn: Repo,
   id: Int,
   attempt: Int,
   at: Int,
   errors: String,
+  now: Int,
 ) -> service.Result(Bool) {
   use conn <- database.connect(conn)
-  affected(conn, "UPDATE howdy_jobs SET state = 'available', scheduled_at = $1,
-       errors = $2, lease_until = NULL" <> current(id, attempt), [
-    sql.int(at),
-    sql.string(errors),
-  ])
+  affected(
+    conn,
+    "UPDATE howdy_jobs SET " <> wait_again(now) <> ", scheduled_at = $1,
+       errors = $2, lease_until = NULL" <> current(id, attempt),
+    [
+      sql.int(at),
+      sql.string(errors),
+    ],
+  )
   |> result.map(fn(n) { n > 0 })
 }
 
@@ -338,12 +379,17 @@ pub fn snooze(
   id: Int,
   attempt: Int,
   at: Int,
+  now: Int,
 ) -> service.Result(Bool) {
   use conn <- database.connect(conn)
-  affected(conn, "UPDATE howdy_jobs SET state = 'available', scheduled_at = $1,
-       attempt = attempt - 1, lease_until = NULL" <> current(id, attempt), [
-    sql.int(at),
-  ])
+  affected(
+    conn,
+    "UPDATE howdy_jobs SET " <> wait_again(now) <> ", scheduled_at = $1,
+       attempt = attempt - 1, lease_until = NULL" <> current(id, attempt),
+    [
+      sql.int(at),
+    ],
+  )
   |> result.map(fn(n) { n > 0 })
 }
 
@@ -368,12 +414,16 @@ pub fn finish(
 
 /// Hand back jobs this node was running but is stopping before they
 /// finished, without counting their attempts.
-pub fn release(conn: Repo, jobs: List(#(Int, Int))) -> service.Result(Nil) {
+pub fn release(
+  conn: Repo,
+  jobs: List(#(Int, Int)),
+  now: Int,
+) -> service.Result(Nil) {
   use conn <- database.connect(conn)
   list.try_each(jobs, fn(job) {
     affected(
       conn,
-      "UPDATE howdy_jobs SET state = 'available', attempt = attempt - 1,
+      "UPDATE howdy_jobs SET " <> wait_again(now) <> ", attempt = attempt - 1,
          lease_until = NULL" <> current(job.0, job.1),
       [],
     )
@@ -539,7 +589,8 @@ pub fn names(conn: Repo) -> service.Result(List(String)) {
 // -- Changing by hand -------------------------------------------------------------
 
 /// Run a job that is waiting, failed or was cancelled as soon as possible,
-/// allowing it one more attempt if it has used them all.
+/// allowing it one more attempt if it has used them all. A job whose
+/// unique key another unfinished job holds is left alone.
 pub fn retry(conn: Repo, id: Int, now: Int) -> service.Result(Bool) {
   use conn <- database.connect(conn)
   affected(
@@ -548,7 +599,13 @@ pub fn retry(conn: Repo, id: Int, now: Int) -> service.Result(Bool) {
        finished_at = NULL,
        max_attempts = CASE WHEN attempt >= max_attempts
          THEN attempt + 1 ELSE max_attempts END
-     WHERE id = $2 AND state IN ('available', 'failed', 'cancelled')",
+     WHERE id = $2 AND state IN ('available', 'failed', 'cancelled')
+       AND (state = 'available' OR unique_key IS NULL OR NOT EXISTS (
+         SELECT 1 FROM howdy_jobs holder
+         WHERE holder.unique_key = howdy_jobs.unique_key
+           AND holder.unique_waiting = howdy_jobs.unique_waiting
+           AND holder.state IN ('available', 'executing')
+           AND holder.id <> howdy_jobs.id))",
     [sql.int(now), sql.int(id)],
   )
   |> result.map(fn(n) { n > 0 })
