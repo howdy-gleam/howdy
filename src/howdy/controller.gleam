@@ -283,6 +283,16 @@ pub fn read_body(
   context.read_body(ctx.request, limit:)
 }
 
+/// Read the request body a piece at a time with `context.read_chunk`, for a
+/// body too large to hold in memory, such as a file written to disk as it
+/// arrives. A body over `limit` bytes is refused.
+pub fn body_reader(
+  ctx: GuardedContext(guarded),
+  limit limit: Int,
+) -> context.Reader {
+  context.reader(ctx.request, limit:)
+}
+
 // -- Response helpers --------------------------------------------------------
 
 /// A `200` response with a UTF-8 text body.

@@ -521,3 +521,40 @@ fn split(bits: BitArray, size: Int, chunks: List(BitArray)) -> List(BitArray) {
     }
   }
 }
+
+// -- Reading a body in pieces ------------------------------------------------
+
+pub fn bodies_can_be_read_in_pieces_test() {
+  let read_all = fn(limit) {
+    let res =
+      testing.request(http.Put, "/upload")
+      |> testing.bytes_body(<<"abcdefghij":utf8>>)
+      |> testing.send(
+        howdy.new()
+        |> howdy.controller(
+          controller.new("/upload")
+          |> controller.put("/", fn(ctx) {
+            let reader = controller.body_reader(ctx, limit:)
+            controller.text(ctx, string.inspect(pieces(reader, [])))
+          }),
+        ),
+      )
+    testing.text(res)
+  }
+  assert read_all(100) == "Ok([\"abcd\", \"efgh\", \"ij\"])"
+  assert read_all(5) == "Error(BodyTooLarge)"
+}
+
+fn pieces(
+  reader: context.Reader,
+  found: List(String),
+) -> Result(List(String), context.BodyError) {
+  case context.read_chunk(reader, max_bytes: 4) {
+    Ok(Some(#(chunk, reader))) -> {
+      let assert Ok(text) = bit_array.to_string(chunk)
+      pieces(reader, [text, ..found])
+    }
+    Ok(None) -> Ok(list.reverse(found))
+    Error(error) -> Error(error)
+  }
+}

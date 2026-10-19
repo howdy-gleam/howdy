@@ -44,6 +44,7 @@ import gleam/result
 import gleam/string
 import gleam/time/timestamp
 import howdy/content.{type Content}
+import howdy/context
 import howdy/controller.{type Controller}
 import howdy/service
 import howdy/static
@@ -99,6 +100,7 @@ pub fn adapter(config: Config) -> Storage {
       list: fn(prefix, after, limit) { list(config, prefix, after, limit) },
       url: url(config, _),
     )
+    |> storage.with_direct_uploads(upload(config, _))
   case config.public, config.serving {
     True, Some(serving) ->
       storage.with_public_url(storage, fn(key) { link(serving, key) })
@@ -138,36 +140,69 @@ fn details_path(config: Config, key: String) -> String {
 
 fn put(config: Config, put: Put) -> Result(Nil, Error) {
   use path <- result.try(object_path(config, put.key))
-  let temporary =
-    filepath.join(config.directory, reserved <> "/tmp/" <> random_name())
-  use Nil <- result.try(directory_for(temporary))
+  use temporary <- result.try(new_temporary(config))
   let written = case put.body {
     storage.Bytes(bytes) -> simplifile.write_bits(temporary, bytes)
     storage.File(source) -> simplifile.copy_file(source, temporary)
   }
-  use Nil <- result.try(written |> result.map_error(file_error))
-  let stored = {
-    use etag <- result.try(md5_file(temporary) |> result.map_error(Refused))
-    let details =
-      Details(
-        content_type: put.content_type,
-        cache_control: put.cache_control,
-        download_as: put.download_as,
-        etag:,
+  case written {
+    Ok(Nil) ->
+      install(
+        config,
+        put.key,
+        path,
+        temporary,
+        Details(
+          content_type: put.content_type,
+          cache_control: put.cache_control,
+          download_as: put.download_as,
+          etag: "",
+        ),
       )
-    use Nil <- result.try(directory_for(path) |> clash(put.key))
+      |> result.replace(Nil)
+    Error(error) -> {
+      let _ = simplifile.delete(temporary)
+      Error(file_error(error))
+    }
+  }
+}
+
+/// A path for a file being written, in the same file system as the
+/// objects so it can be renamed into place.
+fn new_temporary(config: Config) -> Result(String, Error) {
+  let temporary =
+    filepath.join(config.directory, reserved <> "/tmp/" <> random_name())
+  use Nil <- result.map(directory_for(temporary))
+  temporary
+}
+
+/// Move a complete file into place as the object under `key`, with its
+/// details, giving its ETag. The file is removed if that fails, so a
+/// reader never sees half an object.
+fn install(
+  config: Config,
+  key: String,
+  path: String,
+  temporary: String,
+  details: Details,
+) -> Result(String, Error) {
+  let installed = {
+    use etag <- result.try(md5_file(temporary) |> result.map_error(Refused))
+    use Nil <- result.try(directory_for(path) |> clash(key))
     use Nil <- result.try(
       simplifile.rename(temporary, path)
       |> result.map_error(file_error)
-      |> clash(put.key),
+      |> clash(key),
     )
-    let details_path = details_path(config, put.key)
+    let details_path = details_path(config, key)
     use Nil <- result.try(directory_for(details_path))
+    let details = Details(..details, etag:)
     simplifile.write(details_path, json.to_string(details_to_json(details)))
     |> result.map_error(file_error)
+    |> result.replace(etag)
   }
-  case stored {
-    Ok(Nil) -> Ok(Nil)
+  case installed {
+    Ok(etag) -> Ok(etag)
     Error(error) -> {
       let _ = simplifile.delete(temporary)
       Error(error)
@@ -369,7 +404,7 @@ fn url(config: Config, request: UrlRequest) -> Result(String, Error) {
   use _ <- result.try(object_path(config, request.key))
   let expires = int.to_string(now_seconds() + request.expires_in)
   let download = option.unwrap(request.download_as, "")
-  let signature = sign(serving, request.key, expires, download)
+  let signature = sign(serving, ["GET", request.key, expires, download])
   let query =
     list.flatten([
       [#("expires", expires)],
@@ -386,6 +421,33 @@ fn url(config: Config, request: UrlRequest) -> Result(String, Error) {
   Ok(link(serving, request.key) <> "?" <> query)
 }
 
+/// A signed `PUT` to `controller`, for exactly this size and content type.
+fn upload(
+  config: Config,
+  request: storage.UploadRequest,
+) -> Result(storage.DirectUpload, Error) {
+  use serving <- result.try(option.to_result(
+    config.serving,
+    Invalid("local storage needs local.serve to take direct uploads"),
+  ))
+  use _ <- result.try(object_path(config, request.key))
+  let expires = int.to_string(now_seconds() + request.expires_in)
+  let size = int.to_string(request.size)
+  let signature =
+    sign(serving, ["PUT", request.key, expires, request.content_type, size])
+  let query =
+    [#("expires", expires), #("size", size), #("signature", signature)]
+    |> list.map(fn(pair) { pair.0 <> "=" <> storage.percent_encode(pair.1) })
+    |> string.join("&")
+  Ok(
+    storage.DirectUpload(
+      url: link(serving, request.key) <> "?" <> query,
+      method: "PUT",
+      headers: [#("content-type", request.content_type)],
+    ),
+  )
+}
+
 fn link(serving: Serving, key: String) -> String {
   let encoded =
     string.split(key, "/")
@@ -394,24 +456,10 @@ fn link(serving: Serving, key: String) -> String {
   string.remove_suffix(serving.prefix, "/") <> "/" <> encoded
 }
 
-fn sign(
-  serving: Serving,
-  key: String,
-  expires: String,
-  download: String,
-) -> String {
-  crypto.hmac(
-    <<
-      "GET\n":utf8,
-      key:utf8,
-      "\n":utf8,
-      expires:utf8,
-      "\n":utf8,
-      download:utf8,
-    >>,
-    crypto.Sha256,
-    serving.secret,
-  )
+/// An HMAC over what a URL allows, one part to a line. No part can hold a
+/// line break: keys, content types and expiries are checked for them.
+fn sign(serving: Serving, parts: List(String)) -> String {
+  crypto.hmac(<<string.join(parts, "\n"):utf8>>, crypto.Sha256, serving.secret)
   |> bit_array.base64_url_encode(False)
 }
 
@@ -434,9 +482,105 @@ pub fn controller(config: Config) -> Controller {
       Error(Nil) -> not_found(ctx)
     }
   }
+  let receiver = fn(ctx: controller.Context) {
+    case controller.param(ctx, "key") {
+      Ok(key) -> receive(ctx, config, serving, key)
+      Error(Nil) -> not_found(ctx)
+    }
+  }
   controller.new(serving.prefix)
   |> controller.get("/*key", handler)
   |> controller.route(http.Head, "/*key", handler)
+  |> controller.put("/*key", receiver)
+}
+
+/// Take a direct upload: a `PUT` signed by `upload`, with the content type
+/// and size it was signed for. The body is written to disk as it arrives.
+fn receive(
+  ctx: controller.Context,
+  config: Config,
+  serving: Serving,
+  key: String,
+) -> Response(Content) {
+  let query = request.get_query(ctx.request) |> result.unwrap([])
+  let field = fn(name) { list.key_find(query, name) |> result.unwrap("") }
+  let content_type =
+    request.get_header(ctx.request, "content-type") |> result.unwrap("")
+  let expires = field("expires")
+  let size = field("size")
+  let expected = sign(serving, ["PUT", key, expires, content_type, size])
+  let signed =
+    crypto.secure_compare(<<field("signature"):utf8>>, <<expected:utf8>>)
+  let now = now_seconds()
+  case signed, int.parse(expires), int.parse(size), object_path(config, key) {
+    True, Ok(expires), Ok(size), Ok(path) if expires >= now ->
+      case storage.valid_key(key) {
+        True -> store_upload(ctx, config, key, path, content_type, size)
+        False -> not_found(ctx)
+      }
+    _, _, _, _ -> service.error_response(ctx, service.Forbidden)
+  }
+}
+
+fn store_upload(
+  ctx: controller.Context,
+  config: Config,
+  key: String,
+  path: String,
+  content_type: String,
+  size: Int,
+) -> Response(Content) {
+  let stored = {
+    use temporary <- result.try(new_temporary(config))
+    let reader = controller.body_reader(ctx, limit: size)
+    case write_body(reader, temporary, 0) {
+      Ok(written) if written == size ->
+        install(
+          config,
+          key,
+          path,
+          temporary,
+          Details(
+            content_type:,
+            cache_control: None,
+            download_as: None,
+            etag: "",
+          ),
+        )
+      Ok(_) | Error(_) -> {
+        let _ = simplifile.delete(temporary)
+        Error(Invalid("the upload is not the size it was signed for"))
+      }
+    }
+  }
+  case stored {
+    Ok(etag) ->
+      controller.status(ctx, 200)
+      |> response.set_header("etag", "\"" <> etag <> "\"")
+    Error(error) -> service.error_response(ctx, storage.to_service_error(error))
+  }
+}
+
+/// Write the body to `path` a piece at a time, giving how many bytes it
+/// had. An empty body still makes an empty file.
+fn write_body(
+  reader: context.Reader,
+  path: String,
+  written: Int,
+) -> Result(Int, Nil) {
+  case context.read_chunk(reader, max_bytes: 262_144) {
+    Ok(Some(#(chunk, reader))) ->
+      case simplifile.append_bits(path, chunk) {
+        Ok(Nil) ->
+          write_body(reader, path, written + bit_array.byte_size(chunk))
+        Error(_) -> Error(Nil)
+      }
+    Ok(None) ->
+      simplifile.append_bits(path, <<>>)
+      |> result.replace(written)
+      |> result.replace_error(Nil)
+    Error(_) -> Error(Nil)
+  }
 }
 
 fn respond(
@@ -450,7 +594,8 @@ fn respond(
   let download = field("download") |> option.from_result
   let access = case field("signature"), field("expires") {
     Ok(signature), Ok(expires) -> {
-      let expected = sign(serving, key, expires, option.unwrap(download, ""))
+      let expected =
+        sign(serving, ["GET", key, expires, option.unwrap(download, "")])
       let valid = crypto.secure_compare(<<signature:utf8>>, <<expected:utf8>>)
       let now = now_seconds()
       case valid, int.parse(expires) {

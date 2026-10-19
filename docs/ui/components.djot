@@ -63,7 +63,7 @@ ui.button(Primary, [event.on_click(Save)], [text("Save")])
 Each component also has its own module under `howdy/ui`, such as
 `howdy/ui/button` or `howdy/ui/card`. Its page in the
 [gallery](/components) names the module. A few components with many
-options, `calendar`, `data_table` and `chart`, are
+options, `calendar`, `data_table`, `chart` and `uploader`, are
 [builders](#Builders) used from their own modules only.
 
 ## What there is
@@ -79,8 +79,9 @@ The [gallery](/components) groups them the same way:
   and errors, checkboxes and radios, switches, sliders, one-time code
   inputs, [selects](/components/select),
   [comboboxes and command menus](/components/command),
-  [calendars and date pickers](/components/calendar), and questionnaires
-  that ask one question at a time.
+  [calendars and date pickers](/components/calendar), questionnaires
+  that ask one question at a time, and [uploaders](/components/uploader)
+  that send files straight to storage.
 - *Layout*: containers, stacks and rows, [cards](/components/card), an
   application [sidebar](/components/sidebar), scroll areas, resizable
   panels and right-to-left sections.
@@ -187,6 +188,39 @@ The other controls work the same way: `ui.textarea`, `ui.checkbox`,
 `ui.radio` and `ui.choice` (a control with its label), `ui.switch`,
 `ui.slider`, `ui.select` and `ui.combobox`. [Forms](/docs/controllers/forms)
 covers reading and validating what the form sends.
+
+### Uploads
+
+`howdy/ui/uploader` is a place to drop or choose files. The browser sends
+each one straight to storage, showing its progress as an attachment, and
+the form posts the files' keys instead of the files:
+
+```gleam
+import howdy/ui/attachment
+import howdy/ui/uploader
+
+html.form([attribute.method("post"), attribute.action("/listings")], [
+  ui.stack([], [
+    uploader.new(name: "photos", start: "/listings/uploads")
+      |> uploader.multiple(max_files: 8)
+      |> uploader.accept(["image/png", "image/jpeg"])
+      |> uploader.max_size(10_000_000)
+      |> uploader.layout(attachment.Tile)
+      |> uploader.view,
+    ui.submit_button(Primary, [], [text("Publish")]),
+  ]),
+])
+```
+
+`start` is an endpoint of yours. The browser posts it each file's name,
+type and size as JSON, and it answers with a key and where to send the
+file, which `howdy_storage` gives you; see
+[direct uploads](/docs/storage/overview#Direct-uploads). Files over the
+size or of other types are refused before they are sent, the form will not
+submit while one is still on its way, and `uploader.stored` shows files
+saved earlier so an edit form keeps them unless they are removed. In a
+live view, `live.on_values("photos", PhotosChanged)` hears the keys each
+time they change.
 
 ## Layout
 

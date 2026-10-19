@@ -1,6 +1,8 @@
+import gleam/http
 import gleam/http/request
 import gleam/http/response
 import gleam/httpc
+import gleam/json
 import gleam/string
 import gleam/time/timestamp
 import howdy/storage
@@ -172,3 +174,60 @@ fn random_name() -> String
 
 @external(erlang, "crypto", "strong_rand_bytes")
 fn random_bytes(count: Int) -> BitArray
+
+// -- Direct uploads ----------------------------------------------------------
+
+fn upload_with(
+  upload: storage.DirectUpload,
+  content_type: String,
+  body: BitArray,
+) -> response.Response(BitArray) {
+  let assert Ok(req) = request.to(upload.url)
+  let req =
+    req
+    |> request.set_method(http.Put)
+    |> request.set_header("content-type", content_type)
+    |> request.set_body(body)
+  let assert Ok(response) = httpc.dispatch_bits(httpc.configure(), req)
+  response
+}
+
+pub fn browsers_upload_straight_to_the_bucket_test() {
+  case s3_config() {
+    Error(Nil) -> Nil
+    Ok(config) -> {
+      let files = s3.adapter(config)
+      let key = "direct/" <> random_name() <> ".png"
+      let content = random_bytes(1000)
+      let assert Ok(upload) =
+        storage.upload_url(
+          files,
+          key,
+          content_type: "image/png",
+          size: 1000,
+          expires_in: 60,
+        )
+      // Another size or type does not match the signature.
+      assert upload_with(upload, "image/png", random_bytes(999)).status >= 400
+      assert upload_with(upload, "image/png", random_bytes(1001)).status >= 400
+      assert upload_with(upload, "text/html", content).status >= 400
+      assert storage.exists(files, key) == Ok(False)
+
+      assert upload_with(upload, "image/png", content).status == 200
+      assert storage.get(files, key) == Ok(content)
+      let assert Ok(object) = storage.head(files, key)
+      assert object.content_type == "image/png"
+      let assert Ok(Nil) = storage.delete(files, key)
+      Nil
+    }
+  }
+}
+
+pub fn direct_upload_json_test() {
+  let upload =
+    storage.DirectUpload(url: "https://b/k?x=1", method: "PUT", headers: [
+      #("content-type", "image/png"),
+    ])
+  assert json.to_string(storage.direct_upload_to_json(upload))
+    == "{\"url\":\"https://b/k?x=1\",\"method\":\"PUT\",\"headers\":{\"content-type\":\"image/png\"}}"
+}

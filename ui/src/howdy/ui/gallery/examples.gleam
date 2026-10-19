@@ -37,6 +37,7 @@ import howdy/ui/slider as slider_module
 import howdy/ui/tabs as tabs_module
 import howdy/ui/toast
 import howdy/ui/toggle
+import howdy/ui/uploader
 import lustre/attribute
 import lustre/element.{type Element, text}
 import lustre/element/html
@@ -134,6 +135,10 @@ pub fn for(name: String) -> List(Example(msg)) {
       Example("Long history", "long_history", long_history),
     ]
     "attachment" -> [Example("Attachments", "attachments", attachments)]
+    "uploader" -> [
+      Example("Photos, as tiles", "photo_uploader", photo_uploader),
+      Example("A required document", "document_uploader", document_uploader),
+    ]
     "app_shell" -> [Example("Application shell", "shell", shell)]
     "stat_card" -> [Example("Stat cards", "stat_cards", stat_cards)]
     "sign_in" -> [Example("Sign in", "signing_in", signing_in)]
@@ -864,6 +869,43 @@ pub fn signing_up() -> Element(msg) {
     errors: [#("email", "Enter a whole email address.")],
     sign_in: "#",
   ))
+}
+
+pub fn photo_uploader() -> Element(msg) {
+  uploader.new(name: "photos", start: "/uploads/start")
+  |> uploader.multiple(max_files: 4)
+  |> uploader.accept(["image/*"])
+  |> uploader.max_size(5_000_000)
+  |> uploader.layout(attachment.Tile)
+  |> uploader.stored([
+    uploader.Stored(
+      key: "uploads/example/beach.png",
+      name: "beach.png",
+      size: 820_000,
+      thumbnail: None,
+    ),
+  ])
+  |> uploader.view
+}
+
+pub fn document_uploader() -> Element(msg) {
+  html.form(
+    [
+      attribute.method("post"),
+      attribute.action("/uploads"),
+      attribute.id("document-form"),
+    ],
+    [
+      ui.stack([], [
+        uploader.new(name: "document", start: "/uploads/start")
+          |> uploader.accept([".pdf", "text/plain"])
+          |> uploader.max_size(1_000_000)
+          |> uploader.required
+          |> uploader.view,
+        ui.row([], [ui.submit_button(Primary, [], [text("Send")])]),
+      ]),
+    ],
+  )
 }
 
 pub fn theme_sample() -> Element(msg) {

@@ -7,8 +7,9 @@
 ////   storage.put(files, "a.txt", <<"hi">>, content_type: "text/plain")
 //// ```
 ////
-//// Signed URLs are `memory:` followed by the key and the expiry, which no
-//// browser can open; they let tests check that a URL was asked for.
+//// Signed URLs and direct upload URLs are `memory:` followed by the key,
+//// which no browser can open; they let tests check that a URL was asked
+//// for. Store what a browser would have uploaded with `storage.put`.
 
 import gleam/bit_array
 import gleam/crypto
@@ -65,6 +66,18 @@ pub fn new() -> Storage {
       )
     },
   )
+  |> storage.with_direct_uploads(fn(request) {
+    Ok(
+      storage.DirectUpload(
+        url: "memory:"
+          <> request.key
+          <> "?upload&size="
+          <> int.to_string(request.size),
+        method: "PUT",
+        headers: [#("content-type", request.content_type)],
+      ),
+    )
+  })
 }
 
 type Stored {

@@ -11,7 +11,8 @@ one API over:
 - an adapter of your own
 
 Browsers fetch files through signed URLs that expire, straight from the
-bucket, so downloads never pass through your app.
+bucket, and can upload straight to it too, so large files never pass
+through your app.
 
 ## Install
 
@@ -137,6 +138,188 @@ For files everyone may see, such as public avatars behind a CDN,
 `storage.public_url(files, key)` gives a permanent unsigned URL. It needs
 storage set up for it: `s3.public_url` or `local.public`.
 
+## Direct uploads
+
+An upload through a form passes through your app: the browser sends it to
+you, and you send it on to storage. For large files, or a bucket far from
+your servers, the browser can send it to storage itself. Your app only signs
+the way in, and checks the result:
+
+1. The browser tells your app the file's name, type and size.
+2. Your app checks the type and size against its own limits, chooses a key,
+   and answers with `storage.upload_url`: a URL, a method and headers.
+3. The browser sends the file there.
+4. The browser tells your app it is done, and your app checks the object
+   with `storage.head` before using it.
+
+The URL is signed for one key, one content type and one exact size, and
+expires. Storage refuses an upload of any other size or type, so the limits
+your app checked in step 2 hold even though the file never reaches it.
+
+```gleam
+import gleam/dynamic/decode
+import gleam/json
+import howdy/body
+import howdy/storage
+
+type UploadInput {
+  UploadInput(name: String, content_type: String, size: Int)
+}
+
+fn upload_input() -> decode.Decoder(UploadInput) {
+  use name <- decode.field("name", decode.string)
+  use content_type <- decode.field("type", decode.string)
+  use size <- decode.field("size", decode.int)
+  decode.success(UploadInput(name:, content_type:, size:))
+}
+
+fn check_upload(input: UploadInput) -> validate.Result(UploadInput) {
+  use content_type <- validate.field("type", input.content_type, [
+    validate.one_of(["image/png", "image/jpeg"], fn(type_) { type_ }),
+  ])
+  use size <- validate.field("size", input.size, [
+    validate.min(1),
+    validate.max(5_000_000),
+  ])
+  validate.ok(UploadInput(..input, content_type:, size:))
+}
+
+/// Step 2: POST /avatar/uploads
+fn start_upload(ctx: GuardedContext(User), files: storage.Storage) {
+  use input <- body.validated(ctx, upload_input(), check_upload)
+  let key =
+    storage.new_key(prefix: "avatars/" <> ctx.guard.id, file_name: input.name)
+  let upload =
+    storage.upload_url(
+      files,
+      key,
+      content_type: input.content_type,
+      size: input.size,
+      expires_in: 600,
+    )
+  case upload {
+    Ok(upload) ->
+      controller.json(ctx, json.object([
+        #("key", json.string(key)),
+        #("upload", storage.direct_upload_to_json(upload)),
+      ]))
+    Error(error) -> service.error_response(ctx, storage.to_service_error(error))
+  }
+}
+
+/// Step 4: POST /avatar
+fn finish_upload(ctx: GuardedContext(User), files: storage.Storage) {
+  use key <- body.json(ctx, decode.at(["key"], decode.string))
+  // Only a key this user was given.
+  case string.starts_with(key, "avatars/" <> ctx.guard.id <> "/") {
+    False -> service.error_response(ctx, service.Forbidden)
+    True ->
+      case storage.head(files, key) {
+        Ok(_) -> {
+          save_avatar(ctx.guard, key)
+          controller.status(ctx, 204)
+        }
+        Error(error) ->
+          service.error_response(ctx, storage.to_service_error(error))
+      }
+  }
+}
+```
+
+Putting the user's id in the key's prefix lets step 4 check that the key is
+one this user was given, without keeping a list of the URLs you handed out.
+
+howdy_ui's [uploader](/components/uploader) does the browser's part:
+
+```gleam
+uploader.new(name: "avatar", start: "/avatar/uploads")
+|> uploader.accept(["image/png", "image/jpeg"])
+|> uploader.max_size(5_000_000)
+|> uploader.view
+```
+
+It posts to `start_upload` for each file dropped on it or chosen, sends the
+file, and shows its progress. When the file has arrived it adds a hidden
+input named `avatar` holding the key, so the form around it posts the key,
+and the form's handler checks it as `finish_upload` does. The form will not
+submit while a file is still on its way.
+
+To write the browser's part yourself, `XMLHttpRequest` reports how much of
+the file has been sent, which `fetch` cannot yet do:
+
+```html
+<input type="file" id="avatar" accept="image/png,image/jpeg">
+<progress id="progress" max="100" value="0" hidden></progress>
+<script type="module">
+  const input = document.getElementById("avatar")
+  const progress = document.getElementById("progress")
+  const post = (url, data) =>
+    fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(data),
+    })
+
+  input.addEventListener("change", async () => {
+    const file = input.files[0]
+    if (!file) return
+    const started = await post("/avatar/uploads", {
+      name: file.name,
+      type: file.type,
+      size: file.size,
+    })
+    if (!started.ok) return alert("That file cannot be uploaded.")
+    const { key, upload } = await started.json()
+
+    await new Promise((resolve, reject) => {
+      const request = new XMLHttpRequest()
+      request.open(upload.method, upload.url)
+      for (const [name, value] of Object.entries(upload.headers)) {
+        request.setRequestHeader(name, value)
+      }
+      request.upload.onprogress = (event) => {
+        progress.hidden = false
+        progress.value = (event.loaded / event.total) * 100
+      }
+      request.onload = () => (request.status < 300 ? resolve() : reject())
+      request.onerror = reject
+      request.send(file)
+    })
+
+    await post("/avatar", { key })
+  })
+</script>
+```
+
+The browser sets `Content-Length` from the file itself, so a file that is
+not the size it claimed is refused by storage.
+
+An S3 bucket on another origin needs a CORS rule letting your site send the
+upload. Set it in your provider's console; for AWS S3 and Cloudflare R2:
+
+```json
+[
+  {
+    "AllowedOrigins": ["https://app.example.com"],
+    "AllowedMethods": ["PUT"],
+    "AllowedHeaders": ["content-type"],
+    "MaxAgeSeconds": 3600
+  }
+]
+```
+
+Local storage takes direct uploads too: `local.controller` answers its
+upload URLs and writes the file to disk as it arrives. It is on your own
+origin, so it needs no CORS rule, and an app can use the same code in
+development as against a bucket in production. Memory storage gives
+`memory:` URLs that nothing can upload to; in tests, store what the browser
+would have sent with `storage.put` and go on to step 4.
+
+A browser that asks for a URL and never finishes leaves nothing behind. One
+that uploads and never says it is done leaves an object no record points
+to. If that matters, list the prefix now and then and delete objects older
+than a day that nothing refers to, or set a lifecycle rule on the bucket.
+
 ## S3 and compatible services
 
 ```gleam
@@ -181,7 +364,8 @@ take, 60 seconds by default.
 
 Browsers that fetch a signed URL from another origin, such as an `<img>` on
 your site, need nothing more. JavaScript that reads the response with
-`fetch` needs a CORS rule on the bucket, set in your provider's console.
+`fetch`, or [uploads directly](#Direct-uploads), needs a CORS rule on the
+bucket, set in your provider's console.
 
 ## A local folder
 
@@ -255,6 +439,7 @@ storage.adapter(
   list: fn(prefix, after, limit) { ... },
   url: fn(request) { ... },    // request.key, request.expires_in, ...
 )
+|> storage.with_direct_uploads(fn(request) { ... })  // optional
 ```
 
 ## Testing

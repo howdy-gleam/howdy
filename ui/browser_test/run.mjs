@@ -9,7 +9,7 @@
 // preview, `/ui/<entry>/preview/<index>`, in a fresh page.
 
 import { spawn } from 'node:child_process';
-import { mkdtempSync, readFileSync, existsSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -205,6 +205,23 @@ async function newPage(browser) {
     },
     focus(selector) {
       return evaluate(`q(${JSON.stringify(selector)}).focus()`);
+    },
+    // A file of `content` in a temporary folder, for `chooseFiles`.
+    file(name, content) {
+      const path = join(files, name);
+      writeFileSync(path, content);
+      return path;
+    },
+    // Choose files in a file input, as the file chooser would.
+    async chooseFiles(selector, paths) {
+      const { result } = await send('Runtime.evaluate', { expression: `q(${JSON.stringify(selector)})` });
+      await send('DOM.setFileInputFiles', { files: paths, objectId: result.objectId });
+      await sleep(50);
+    },
+    // Send uploads at this many bytes a second.
+    async slowUploads(bytesPerSecond) {
+      await send('Network.enable');
+      await send('Network.emulateNetworkConditions', { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: bytesPerSecond });
     },
     // Wait until `expression` is true, for animations and smooth scrolling.
     async until(expression, timeout = 2000) {
@@ -619,6 +636,85 @@ const tests = {
     await page.until(`q('#survey-answers')?.textContent === 'role=design score=3'`);
   },
 
+  async 'an uploader sends a file to storage and the form posts its key'(page) {
+    await page.goto('/uploader/preview/1');
+    // Required, so the form will not submit empty.
+    equal(await page.evaluate(`document.querySelector('#document-form').checkValidity()`), false, 'empty form invalid');
+    const file = page.file('notes.txt', 'hello, storage');
+    await page.chooseFiles('[data-howdy-upload-input]', [file]);
+    await page.until(`q('[data-howdy-upload-item]:not(template *)')?.dataset.state === 'done'`, 5000);
+    const item = `document.querySelector('[data-howdy-upload-list] > [data-howdy-upload-item]')`;
+    equal(await page.evaluate(`${item}.querySelector('[data-howdy-upload-name]').textContent`), 'notes.txt', 'name');
+    equal(await page.evaluate(`${item}.querySelector('[data-howdy-upload-detail]').textContent`), 'TXT · 14 B', 'detail');
+    equal(await page.evaluate(`${item}.querySelector('[data-howdy-upload-progress]').hidden`), true, 'progress hidden when done');
+    const key = await page.evaluate(`${item}.querySelector('input[name=document]:not([disabled])').value`);
+    ok(key.startsWith('uploads/') && key.endsWith('.txt'), `a key under uploads/: ${key}`);
+    equal(await page.evaluate(`document.querySelector('#document-form').checkValidity()`), true, 'valid once uploaded');
+    await page.click('#document-form button[type=submit]');
+    await page.until(`q('#uploaded-keys')?.textContent === ${JSON.stringify(key + '=found')}`, 5000);
+  },
+
+  async 'an uploader refuses files it was told not to take'(page) {
+    await page.goto('/uploader/preview/1');
+    const items = `[...document.querySelectorAll('[data-howdy-upload-list] > [data-howdy-upload-item]')]`;
+    await page.chooseFiles('[data-howdy-upload-input]', [page.file('cat.png', 'PNG')]);
+    equal(await page.evaluate(`${items}.map((item) => [item.dataset.state, item.querySelector('[role=alert]').textContent])`), [['failed', 'This type of file is not accepted.']], 'wrong type');
+    equal(await page.evaluate(`${items}[0].querySelector('[data-howdy-upload-retry]').hidden`), true, 'no point retrying');
+    ok(await page.evaluate(`${items}[0].firstElementChild.hasAttribute('data-failed')`), 'marked as failed');
+    // One file at a time: the next replaces it.
+    await page.chooseFiles('[data-howdy-upload-input]', [page.file('big.txt', 'x'.repeat(1_200_000))]);
+    equal(await page.evaluate(`${items}.map((item) => item.querySelector('[role=alert]').textContent)`), ['Too large: the limit is 1 MB.'], 'too large');
+    await page.click('[data-howdy-upload-remove]');
+    equal(await page.evaluate(`${items}.length`), 0, 'removed');
+    ok(await page.evaluate(`document.activeElement.matches('[data-howdy-upload-input]')`), 'focus back on the file input');
+    equal(await page.evaluate(`document.querySelector('[data-howdy-upload-input]').validationMessage`), 'Choose a file.', 'still required');
+  },
+
+  async 'an uploader holds the form while a file is on its way'(page) {
+    await page.goto('/uploader/preview/1');
+    await page.slowUploads(200_000);
+    await page.chooseFiles('[data-howdy-upload-input]', [page.file('slow.txt', 'y'.repeat(600_000))]);
+    const progress = `document.querySelector('[data-howdy-upload-list] [role=progressbar]')`;
+    await page.until(`Number(${progress}.getAttribute('aria-valuenow')) > 0`, 5000);
+    equal(await page.evaluate(`${progress}.getAttribute('aria-label')`), 'Uploading slow.txt', 'progress named');
+    equal(await page.evaluate(`document.querySelector('[data-howdy-upload-input]').validationMessage`), 'Wait for the files to finish uploading.', 'submit held');
+    await page.click('#document-form button[type=submit]');
+    equal(await page.evaluate(`location.pathname`), '/ui/uploader/preview/1', 'did not submit');
+    await page.until(`document.querySelector('[data-howdy-upload-list] > li')?.dataset.state === 'done'`, 10000);
+    equal(await page.evaluate(`document.querySelector('#document-form').checkValidity()`), true, 'free to submit');
+  },
+
+  async 'photos dropped on an uploader show as thumbnails, up to the limit'(page) {
+    await page.goto('/uploader/preview/0');
+    await page.evaluate(`window.heard = []; document.addEventListener('howdy-values', (event) => heard.push(event.detail))`);
+    const drop = (names) => page.evaluate(`(async () => {
+      const png = await (await fetch('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==')).blob();
+      const data = new DataTransfer();
+      for (const name of ${JSON.stringify(names)}) data.items.add(new File([png], name, { type: 'image/png' }));
+      const zone = document.querySelector('[data-howdy-upload-drop]');
+      zone.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, composed: true, dataTransfer: data }));
+      const dragging = zone.hasAttribute('data-dragging');
+      zone.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, composed: true, dataTransfer: data }));
+      return dragging && !zone.hasAttribute('data-dragging');
+    })()`);
+    const states = `[...document.querySelectorAll('[data-howdy-upload-list] > li:not([hidden])')].map((item) => item.dataset.state || 'stored')`;
+    ok(await drop(['a.png', 'b.png']), 'the drop zone lights up while dragging');
+    await page.until(`JSON.stringify(${states}) === ${JSON.stringify(JSON.stringify(['stored', 'done', 'done']))}`, 5000);
+    ok(await page.evaluate(`[...document.querySelectorAll('[data-howdy-upload-list] > li[data-state] img')].every((img) => img.src.startsWith('blob:') && img.complete && img.naturalWidth === 1)`), 'thumbnails shown');
+    ok(await page.evaluate(`[...document.querySelectorAll('[data-howdy-upload-list] > li[data-state] [data-howdy-upload-icon]')].every((icon) => icon.hidden)`), 'icons hidden behind thumbnails');
+    // One stored and two uploaded: room for one more of four.
+    await drop(['c.png', 'd.png']);
+    await page.until(`JSON.stringify(${states}) === ${JSON.stringify(JSON.stringify(['stored', 'done', 'done', 'done', 'failed']))}`, 5000);
+    equal(await page.evaluate(`document.querySelector('[data-howdy-upload-list] > li[data-state=failed] [role=alert]').textContent`), 'Too many files: the limit is 4.', 'too many');
+    // The stored file is hidden, not removed, and no longer posted.
+    await page.click('[data-howdy-upload-list] > li:first-child [data-howdy-upload-remove]');
+    equal(await page.evaluate(`[document.querySelector('[data-howdy-upload-list] > li').hidden, document.querySelector('[data-howdy-upload-list] > li input[name=photos]').disabled]`), [true, true], 'stored file hidden and dropped');
+    const last = await page.evaluate(`heard.at(-1)`);
+    equal(last.name, 'photos', 'event names the field');
+    equal(last.values.length, 3, 'three keys left');
+    ok(last.values.every((key) => key.startsWith('uploads/')), 'only the uploaded keys');
+  },
+
   async 'a questionnaire shows its first question'(page) {
     await page.goto('/questionnaire/preview/0');
     equal(await page.evaluate(`document.querySelector('legend').textContent.trim()`), 'What do you mostly do?', 'prompt');
@@ -629,6 +725,8 @@ const tests = {
 // -- Running -----------------------------------------------------------------
 
 const { browser, close } = await launch();
+// Files for the uploader tests to choose.
+const files = mkdtempSync(join(tmpdir(), 'howdy-uploads-'));
 let failed = 0;
 let ran = 0;
 try {
@@ -649,6 +747,7 @@ try {
   }
 } finally {
   await close();
+  rmSync(files, { recursive: true, force: true });
 }
 console.log(`\n${ran - failed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

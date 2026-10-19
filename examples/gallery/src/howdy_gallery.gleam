@@ -21,6 +21,7 @@ import howdy/controller.{type Context}
 import howdy/cookie
 import howdy/form
 import howdy/query
+import howdy/storage/local
 import howdy/ui
 import howdy/ui/blocks/app_shell.{Group, Link}
 import howdy/ui/blocks/sign_in
@@ -40,6 +41,7 @@ import howdy/validate
 import howdy_gallery/chat
 import howdy_gallery/lab
 import howdy_gallery/orders
+import howdy_gallery/uploads
 import lustre/attribute
 import lustre/element.{type Element, text}
 import lustre/element/html
@@ -114,8 +116,21 @@ pub fn app() -> howdy.App {
         ),
       )
     })
-    |> controller.post("/sign-up", sign_up),
+    |> controller.post("/sign-up", sign_up)
+    // Where the uploader examples in the reference send files.
+    |> controller.post("/uploads/start", uploads.start)
+    |> controller.post("/uploads", fn(ctx) {
+      use fields <- form.read(ctx)
+      use page <- shell(ctx, "Uploads", "/uploads", [
+        ui.h2("Received"),
+        html.output([attribute.id("uploaded-keys")], [
+          text(uploads.check(fields, "document")),
+        ]),
+      ])
+      page
+    }),
   )
+  |> howdy.controller(local.controller(uploads.config()))
   // The howdy_ui reference, for development.
   |> howdy.controller(gallery.controller(at: "/ui"))
   |> howdy.controller(

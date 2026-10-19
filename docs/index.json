@@ -198,7 +198,7 @@
         {
           "slug": "overview",
           "title": "Howdy Storage",
-          "description": "Keep files in an S3-compatible bucket, a local folder or memory with the optional howdy_storage package, and let browsers fetch them through signed URLs."
+          "description": "Keep files in an S3-compatible bucket, a local folder or memory with the optional howdy_storage package, and let browsers fetch and upload them directly through signed URLs."
         }
       ]
     },

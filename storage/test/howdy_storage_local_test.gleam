@@ -1,8 +1,10 @@
 import gleam/http
 import gleam/http/response
 import gleam/list
+import gleam/option.{None}
 import gleam/string
 import howdy
+import howdy/content
 import howdy/storage
 import howdy/storage/local
 import howdy/testing
@@ -196,3 +198,91 @@ fn random_name() -> String
 
 @external(erlang, "timer", "sleep")
 fn process_sleep(milliseconds: Int) -> Nil
+
+// -- Direct uploads ----------------------------------------------------------
+
+fn put_to(
+  config: local.Config,
+  url: String,
+  content_type: String,
+  body: BitArray,
+) -> response.Response(content.Content) {
+  testing.request(http.Put, url)
+  |> testing.bytes_body(body)
+  |> testing.header("content-type", content_type)
+  |> testing.send(app(config))
+}
+
+pub fn direct_uploads_are_written_to_the_folder_test() {
+  use config, _ <- with_folder
+  let files = local.adapter(config)
+  let assert Ok(upload) =
+    storage.upload_url(
+      files,
+      "in/cat.png",
+      content_type: "image/png",
+      size: 4,
+      expires_in: 60,
+    )
+  assert string.starts_with(upload.url, "/files/in/cat.png?expires=")
+  let res = put_to(config, upload.url, "image/png", <<"PNG!":utf8>>)
+  assert res.status == 200
+  let assert Ok(etag) = header(res, "etag")
+  assert storage.get(files, "in/cat.png") == Ok(<<"PNG!":utf8>>)
+  let assert Ok(object) = storage.head(files, "in/cat.png")
+  assert object.content_type == "image/png"
+  assert "\"" <> object.etag <> "\"" == etag
+}
+
+pub fn direct_uploads_must_match_what_was_signed_test() {
+  use config, _ <- with_folder
+  let files = local.adapter(config)
+  let assert Ok(upload) =
+    storage.upload_url(
+      files,
+      "in/a.png",
+      content_type: "image/png",
+      size: 4,
+      expires_in: 60,
+    )
+  assert put_to(config, upload.url, "image/png", <<"PNG":utf8>>).status == 400
+  assert put_to(config, upload.url, "image/png", <<"PNG!!":utf8>>).status == 400
+  assert put_to(config, upload.url, "text/html", <<"PNG!":utf8>>).status == 403
+  assert put_to(
+      config,
+      string.replace(upload.url, "a.png", "b.png"),
+      "image/png",
+      <<"PNG!":utf8>>,
+    ).status
+    == 403
+  assert put_to(
+      config,
+      string.replace(upload.url, "size=4", "size=5"),
+      "image/png",
+      <<"PNG!!":utf8>>,
+    ).status
+    == 403
+  assert storage.exists(files, "in/a.png") == Ok(False)
+  // Nothing half-written is left behind.
+  let assert Ok(page) = storage.list(files, prefix: "", after: None, limit: 10)
+  assert page.objects == []
+}
+
+pub fn read_and_upload_urls_are_not_interchangeable_test() {
+  use config, _ <- with_folder
+  let files = local.adapter(config)
+  let assert Ok(Nil) =
+    storage.put(files, "a.png", <<1>>, content_type: "image/png")
+  let assert Ok(read) = storage.url(files, "a.png", expires_in: 60)
+  assert put_to(config, read, "image/png", <<2>>).status == 403
+  let assert Ok(upload) =
+    storage.upload_url(
+      files,
+      "a.png",
+      content_type: "image/png",
+      size: 1,
+      expires_in: 60,
+    )
+  assert testing.send(testing.get(upload.url), app(config)).status == 403
+  assert storage.get(files, "a.png") == Ok(<<1>>)
+}

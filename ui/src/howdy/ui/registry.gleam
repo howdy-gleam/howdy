@@ -68,6 +68,7 @@ pub fn entries() -> List(Entry) {
     component("command", "Forms"),
     component("calendar", "Forms"),
     component("questionnaire", "Forms"),
+    component("uploader", "Forms"),
     component("layout", "Layout"),
     component("card", "Layout"),
     component("sidebar", "Layout"),

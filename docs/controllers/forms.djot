@@ -67,6 +67,11 @@ use input <- body.json_with_limit(ctx, 10_000_000, import_decoder())
 The `content-type` header is not checked, so a client that forgets to send
 `application/json` is still understood.
 
+For a body too large to hold in memory, such as a file a client sends as
+the whole body of a `PUT`, `controller.body_reader(ctx, limit:)` reads it a
+piece at a time: call `context.read_chunk` until it gives `None`, writing
+each piece wherever it goes.
+
 ## HTML forms
 
 A browser posting a `<form>` sends the fields as

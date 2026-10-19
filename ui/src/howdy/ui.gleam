@@ -134,6 +134,7 @@ import howdy/ui/toast
 import howdy/ui/toggle
 import howdy/ui/tooltip
 import howdy/ui/typography
+import howdy/ui/uploader
 import lustre/attribute.{type Attribute}
 import lustre/element.{type Element}
 import sketch/css.{type Class}
@@ -191,6 +192,7 @@ pub fn classes() -> List(Class) {
     effects.classes(),
     chat.classes(),
     attachment.classes(),
+    uploader.classes(),
     app_shell.classes(),
     stat_card.classes(),
     sign_in.classes(),

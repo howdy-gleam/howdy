@@ -30,6 +30,7 @@ import gleam/bit_array
 import gleam/bool
 import gleam/crypto
 import gleam/int
+import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
@@ -111,6 +112,32 @@ pub type UrlRequest {
   )
 }
 
+/// An upload URL, as an adapter is asked for one.
+pub type UploadRequest {
+  UploadRequest(
+    key: String,
+    content_type: String,
+    /// The exact size in bytes the upload must have.
+    size: Int,
+    /// Seconds from now until the URL stops working.
+    expires_in: Int,
+  )
+}
+
+/// An upload a browser makes itself, straight to storage, from
+/// `upload_url`.
+pub type DirectUpload {
+  DirectUpload(
+    /// Where to send the file.
+    url: String,
+    /// The method to send it with, such as `"PUT"`.
+    method: String,
+    /// Headers the request must carry with exactly these values. The
+    /// browser adds `Content-Length` itself.
+    headers: List(#(String, String)),
+  )
+}
+
 // -- Errors ------------------------------------------------------------------
 
 /// Why a storage call failed.
@@ -169,6 +196,7 @@ pub opaque type Storage {
     list: fn(String, Option(String), Int) -> Result(Page, Error),
     url: fn(UrlRequest) -> Result(String, Error),
     public_url: Option(fn(String) -> String),
+    upload: Option(fn(UploadRequest) -> Result(DirectUpload, Error)),
   )
 }
 
@@ -185,13 +213,32 @@ pub fn adapter(
   list list: fn(String, Option(String), Int) -> Result(Page, Error),
   url url: fn(UrlRequest) -> Result(String, Error),
 ) -> Storage {
-  Storage(name:, put:, get:, head:, delete:, list:, url:, public_url: None)
+  Storage(
+    name:,
+    put:,
+    get:,
+    head:,
+    delete:,
+    list:,
+    url:,
+    public_url: None,
+    upload: None,
+  )
 }
 
 /// Give the storage permanent, unsigned URLs, such as through a CDN in
 /// front of a public bucket. `public_url` fails without one.
 pub fn with_public_url(storage: Storage, url: fn(String) -> String) -> Storage {
   Storage(..storage, public_url: Some(url))
+}
+
+/// Let browsers upload straight to the storage with `upload_url`. The
+/// request is checked before `upload` sees it.
+pub fn with_direct_uploads(
+  storage: Storage,
+  upload: fn(UploadRequest) -> Result(DirectUpload, Error),
+) -> Storage {
+  Storage(..storage, upload: Some(upload))
 }
 
 pub fn name(storage: Storage) -> String {
@@ -371,6 +418,67 @@ pub fn public_url(storage: Storage, key: String) -> Result(String, Error) {
     Some(url) -> Ok(url(key))
     None -> Error(Invalid(storage.name <> " storage has no public URLs"))
   }
+}
+
+// -- Direct uploads ----------------------------------------------------------
+
+/// The largest object one upload may make: 5 GiB, the most S3 takes in a
+/// single request.
+pub const max_upload_size = 5_368_709_120
+
+/// A URL a browser can upload a file to itself, without it passing
+/// through the app. The upload must be exactly `size` bytes of
+/// `content_type` and start within `expires_in` seconds; storage refuses
+/// anything else.
+///
+/// The browser sends its file's size and type first. Check both against
+/// your own limits before asking for the URL, choose the key yourself, and
+/// check the object with `head` when the browser says it is done.
+pub fn upload_url(
+  storage: Storage,
+  key: String,
+  content_type content_type: String,
+  size size: Int,
+  expires_in expires_in: Int,
+) -> Result(DirectUpload, Error) {
+  use <- traced(storage, "upload_url", key, [trace.int("storage.bytes", size)])
+  use Nil <- result.try(check_key(key))
+  use Nil <- result.try(single_line("content type", content_type))
+  use <- bool.guard(
+    string.trim(content_type) == "",
+    Error(Invalid("an upload needs a content type")),
+  )
+  use <- bool.guard(
+    size < 0 || size > max_upload_size,
+    Error(Invalid("an upload must be between 0 bytes and 5 GiB")),
+  )
+  use <- bool.guard(
+    expires_in < 1 || expires_in > max_expiry,
+    Error(Invalid("a URL must expire within 1 second and 7 days")),
+  )
+  case storage.upload {
+    Some(upload) ->
+      upload(UploadRequest(key:, content_type:, size:, expires_in:))
+    None ->
+      Error(Invalid(storage.name <> " storage does not take direct uploads"))
+  }
+}
+
+/// A direct upload as JSON, for the endpoint a browser asks for one:
+/// `{"url": "...", "method": "PUT", "headers": {"content-type": "..."}}`.
+pub fn direct_upload_to_json(upload: DirectUpload) -> json.Json {
+  json.object([
+    #("url", json.string(upload.url)),
+    #("method", json.string(upload.method)),
+    #(
+      "headers",
+      json.object(
+        list.map(upload.headers, fn(header) {
+          #(header.0, json.string(header.1))
+        }),
+      ),
+    ),
+  ])
 }
 
 // -- Keys --------------------------------------------------------------------

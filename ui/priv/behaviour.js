@@ -1200,6 +1200,245 @@ const imageFailed = (event) => {
   if (broken(image)) image.remove();
 };
 
+// -- Uploaders ----------------------------------------------------------------
+// A file dropped on or chosen in an uploader goes straight to storage. The
+// app's start endpoint says where, XMLHttpRequest sends it, since fetch
+// cannot report progress, and then a hidden input holds the file's key.
+// Rows the server drew are only hidden when removed, since a live view may
+// still patch them; rows this script added are its own to remove.
+const uploads = new WeakMap();
+const uploaderOf = (node) => node?.closest('[data-howdy-uploader]');
+const uploadItems = (uploader) =>
+  [...uploader.querySelectorAll('[data-howdy-upload-list] > [data-howdy-upload-item]')].filter((item) => !item.hidden);
+const uploadPart = (item, name) => item.querySelector(`[data-howdy-upload-${name}]`);
+
+// The same as `uploader.file_size` and `attachment` in Gleam.
+const fileSize = (bytes) => {
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let amount = Math.max(bytes, 0);
+  let unit = 0;
+  while (unit < units.length - 1 && amount >= (unit === 0 ? 1000 : 999.5)) {
+    amount /= 1000;
+    unit += 1;
+  }
+  if (unit === 0) return `${Math.round(amount)} B`;
+  return `${amount < 9.95 ? Math.round(amount * 10) / 10 : Math.round(amount)} ${units[unit]}`;
+};
+const extension = (name) => {
+  const parts = name.split('.');
+  return parts.length > 1 ? parts.at(-1).slice(0, 4).toUpperCase() : 'FILE';
+};
+const describe = (name, size) => (extension(name) === 'FILE' ? fileSize(size) : `${extension(name)} · ${fileSize(size)}`);
+
+// Whether a file is one the input's `accept` attribute allows.
+const accepts = (input, file) => {
+  const types = (input.getAttribute('accept') || '').split(',').map((type) => type.trim().toLowerCase()).filter(Boolean);
+  const name = file.name.toLowerCase();
+  const type = file.type.toLowerCase();
+  return !types.length || types.some((allowed) => {
+    if (allowed.startsWith('.')) return name.endsWith(allowed);
+    if (allowed.endsWith('/*')) return type.startsWith(allowed.slice(0, -1));
+    return type === allowed;
+  });
+};
+
+// Keep the form from submitting while a file is on its way, or without one
+// when one is required, and tell a live view the keys when they change.
+const syncUploader = (uploader, changed) => {
+  const input = uploader.querySelector('[data-howdy-upload-input]');
+  const items = uploadItems(uploader);
+  const values = items.map((item) => uploadPart(item, 'key')).filter((key) => !key.disabled).map((key) => key.value);
+  const missing = uploader.dataset.required === 'true' && !values.length;
+  input.required = false;
+  if (items.some((item) => item.dataset.state === 'uploading')) input.setCustomValidity(uploader.dataset.textWait);
+  else input.setCustomValidity(missing ? uploader.dataset.textMissing : '');
+  if (changed) {
+    uploader.dispatchEvent(new CustomEvent('howdy-values', { bubbles: true, composed: true, detail: { name: uploader.dataset.name, values } }));
+  }
+};
+
+const showProgress = (item, percent) => {
+  const done = Math.max(0, Math.min(100, Math.round(percent)));
+  const progress = uploadPart(item, 'progress');
+  progress.setAttribute('aria-valuenow', String(done));
+  progress.firstElementChild.style.width = `${done}%`;
+};
+
+const showUpload = (item, state, message = '', retryable = false) => {
+  item.dataset.state = state;
+  item.firstElementChild.toggleAttribute('data-failed', state === 'failed');
+  uploadPart(item, 'progress').hidden = state !== 'uploading';
+  if (state === 'uploading') showProgress(item, 0);
+  uploadPart(item, 'retry').hidden = !(state === 'failed' && retryable);
+  // Shown before it is filled, so the alert is announced.
+  const error = uploadPart(item, 'error');
+  error.hidden = state !== 'failed';
+  setText(error, message);
+};
+
+const failUpload = (uploader, item, message, retryable) => {
+  showUpload(item, 'failed', message, retryable);
+  syncUploader(uploader, false);
+};
+
+const sendUpload = async (uploader, item) => {
+  const upload = uploads.get(item);
+  const current = () => item.isConnected && uploads.get(item) === upload;
+  showUpload(item, 'uploading');
+  syncUploader(uploader, false);
+  try {
+    const { file } = upload;
+    const started = await fetch(uploader.dataset.start, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', accept: 'application/json' },
+      body: JSON.stringify({ name: file.name, type: file.type || 'application/octet-stream', size: file.size }),
+    });
+    const answer = await started.json().catch(() => ({}));
+    if (!current()) return;
+    if (!started.ok) {
+      const message = answer.fields?.[0]?.message || answer.error || uploader.dataset.textFailed;
+      return failUpload(uploader, item, message, started.status >= 500 || started.status === 429);
+    }
+    const { key, upload: target } = answer;
+    if (typeof key !== 'string' || typeof target?.url !== 'string') return failUpload(uploader, item, uploader.dataset.textFailed, true);
+    await new Promise((resolve, reject) => {
+      const request = new XMLHttpRequest();
+      upload.request = request;
+      request.open(target.method || 'PUT', target.url);
+      for (const [name, value] of Object.entries(target.headers || {})) request.setRequestHeader(name, value);
+      request.upload.onprogress = (event) => {
+        if (event.lengthComputable && current()) showProgress(item, (event.loaded / event.total) * 100);
+      };
+      request.onload = () => (request.status < 300 ? resolve() : reject(new Error(`status ${request.status}`)));
+      request.onerror = () => reject(new Error('network'));
+      request.onabort = () => reject(new Error('aborted'));
+      request.send(file);
+    });
+    upload.request = null;
+    if (!current()) return;
+    const input = uploadPart(item, 'key');
+    input.value = key;
+    input.disabled = false;
+    showUpload(item, 'done');
+    syncUploader(uploader, true);
+  } catch {
+    upload.request = null;
+    if (current()) failUpload(uploader, item, uploader.dataset.textFailed, true);
+  }
+};
+
+const removeUpload = (item) => {
+  const upload = uploads.get(item);
+  if (!upload) {
+    item.hidden = true;
+    uploadPart(item, 'key').disabled = true;
+    return;
+  }
+  uploads.delete(item);
+  upload.request?.abort();
+  if (upload.thumbnail) URL.revokeObjectURL(upload.thumbnail);
+  item.remove();
+};
+
+const newUpload = (uploader, file) => {
+  const template = uploader.querySelector('[data-howdy-upload-blank]');
+  const item = (template.content.firstElementChild || template.firstElementChild).cloneNode(true);
+  setText(uploadPart(item, 'name'), file.name);
+  setText(uploadPart(item, 'detail'), describe(file.name, file.size));
+  const icon = uploadPart(item, 'icon');
+  setText(icon, extension(file.name));
+  uploadPart(item, 'remove').setAttribute('aria-label', `${uploader.dataset.textRemove} ${file.name}`);
+  const retry = uploadPart(item, 'retry');
+  retry.setAttribute('aria-label', `${retry.dataset.label} ${file.name}`);
+  uploadPart(item, 'progress').setAttribute('aria-label', `${uploader.dataset.textUploading} ${file.name}`);
+  const upload = { file, request: null, thumbnail: null };
+  if (file.type.startsWith('image/')) {
+    const media = uploadPart(item, 'media');
+    const image = media.querySelector('img');
+    upload.thumbnail = URL.createObjectURL(file);
+    image.onerror = () => {
+      media.hidden = true;
+      icon.hidden = false;
+    };
+    image.src = upload.thumbnail;
+    media.hidden = false;
+    icon.hidden = true;
+  }
+  uploads.set(item, upload);
+  uploader.querySelector('[data-howdy-upload-list]').append(item);
+  return item;
+};
+
+const addUploads = (uploader, files) => {
+  const max = Number(uploader.dataset.maxFiles) || 1;
+  if (max === 1) {
+    files = files.slice(0, 1);
+    if (files.length) for (const item of uploadItems(uploader)) removeUpload(item);
+  }
+  const input = uploader.querySelector('[data-howdy-upload-input]');
+  const maxSize = Number(uploader.dataset.maxSize) || Infinity;
+  for (const file of files) {
+    const taken = uploadItems(uploader).filter((item) => item.dataset.state !== 'failed').length;
+    const item = newUpload(uploader, file);
+    if (taken >= max) showUpload(item, 'failed', uploader.dataset.textTooMany);
+    else if (!accepts(input, file)) showUpload(item, 'failed', uploader.dataset.textWrongType);
+    else if (file.size > maxSize) showUpload(item, 'failed', uploader.dataset.textTooLarge);
+    else sendUpload(uploader, item);
+  }
+  syncUploader(uploader, files.length > 0);
+};
+
+// Heard on each root, below: `change` does not leave a live view.
+const uploadChosen = (event) => {
+  const input = event.composedPath()[0];
+  if (!(input instanceof HTMLInputElement) || !input.matches('[data-howdy-upload-input]')) return;
+  const files = [...input.files];
+  // Emptied so that choosing the same file again is a change.
+  input.value = '';
+  addUploads(uploaderOf(input), files);
+};
+
+document.addEventListener('click', (event) => {
+  const button = inPath(event, '[data-howdy-upload-remove], [data-howdy-upload-retry]');
+  const item = button?.closest('[data-howdy-upload-item]');
+  const uploader = uploaderOf(item);
+  if (!uploader) return;
+  if (button.matches('[data-howdy-upload-retry]')) {
+    if (uploads.has(item)) sendUpload(uploader, item);
+    return;
+  }
+  // Focus moves to a neighbour, or back to the file input.
+  const items = uploadItems(uploader);
+  const index = items.indexOf(item);
+  const neighbour = items[index + 1] || items[index - 1];
+  removeUpload(item);
+  syncUploader(uploader, true);
+  (neighbour ? uploadPart(neighbour, 'remove') : uploader.querySelector('[data-howdy-upload-input]')).focus();
+});
+
+const dropZone = (event) => {
+  const zone = inPath(event, '[data-howdy-upload-drop]');
+  return zone && event.dataTransfer?.types.includes('Files') ? zone : null;
+};
+document.addEventListener('dragover', (event) => {
+  const zone = dropZone(event);
+  if (!zone) return;
+  event.preventDefault();
+  event.dataTransfer.dropEffect = 'copy';
+  zone.toggleAttribute('data-dragging', true);
+});
+document.addEventListener('dragleave', (event) => {
+  const zone = inPath(event, '[data-howdy-upload-drop]');
+  if (zone && !zone.contains(event.relatedTarget)) zone.removeAttribute('data-dragging');
+});
+document.addEventListener('drop', (event) => {
+  const zone = dropZone(event);
+  if (!zone) return;
+  event.preventDefault();
+  zone.removeAttribute('data-dragging');
+  addUploads(uploaderOf(zone), [...event.dataTransfer.files]);
+});
+
 // Events that do not leave a live view's shadow root, whether they never
 // bubble or stop at its host, are heard on each root: the document now, and
 // a live view's shadow root once it has mounted. Images that failed before
@@ -1210,6 +1449,7 @@ const hear = (root) => {
   heard.add(root);
   for (const type of ['pointerover', 'pointerout', 'focusin', 'focusout']) root.addEventListener(type, toastHeld);
   root.addEventListener('animationend', toastFaded);
+  root.addEventListener('change', uploadChosen);
   root.addEventListener('error', imageFailed, true);
   for (const image of root.querySelectorAll('img[data-howdy-on-error=remove]')) {
     if (image.complete && image.naturalWidth === 0) image.remove();

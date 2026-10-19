@@ -193,6 +193,7 @@ pub fn adapter(config: Config) -> Storage {
       list: fn(prefix, after, limit) { list_page(config, prefix, after, limit) },
       url: url(config, _),
     )
+    |> storage.with_direct_uploads(upload(config, _))
   case config.public_url {
     Some(base) ->
       storage.with_public_url(storage, fn(key) {
@@ -443,6 +444,36 @@ fn url(config: Config, request: UrlRequest) -> Result(String, Error) {
   )
 }
 
+/// A presigned `PUT` whose signature covers the content type and length,
+/// so S3 refuses an upload of any other size or type.
+fn upload(
+  config: Config,
+  request: storage.UploadRequest,
+) -> Result(storage.DirectUpload, Error) {
+  use location <- result.try(location(config))
+  let url =
+    sigv4.presign(
+      http.Put,
+      location.scheme,
+      location.host,
+      location.port,
+      object_path(location, request.key),
+      [],
+      [
+        #("content-type", request.content_type),
+        #("content-length", int.to_string(request.size)),
+      ],
+      credentials(config),
+      timestamp.system_time(),
+      request.expires_in,
+    )
+  Ok(
+    storage.DirectUpload(url:, method: "PUT", headers: [
+      #("content-type", request.content_type),
+    ]),
+  )
+}
+
 /// A signed `GET` URL for `key`. Public so tests can fix the clock.
 @internal
 pub fn presign(
@@ -460,6 +491,7 @@ pub fn presign(
     location.port,
     object_path(location, key),
     query,
+    [],
     credentials(config),
     now,
     expires_in,

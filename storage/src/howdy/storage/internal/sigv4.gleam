@@ -88,7 +88,8 @@ pub fn sign(
 }
 
 /// A URL for `method` on `path`, valid for `expires_in` seconds from
-/// `now`, carrying its signature in the query.
+/// `now`, carrying its signature in the query. `headers` are signed too,
+/// so a request using the URL must send them with exactly these values.
 pub fn presign(
   method: Method,
   scheme: http.Scheme,
@@ -96,12 +97,21 @@ pub fn presign(
   port: Option(Int),
   path: String,
   query: List(#(String, String)),
+  headers: List(#(String, String)),
   credentials: Credentials,
   now: Timestamp,
   expires_in: Int,
 ) -> String {
   let #(date, date_time) = stamp(now)
   let host = host_header(host_name, port)
+  let headers =
+    [
+      #("host", host),
+      ..list.map(headers, fn(header) { #(string.lowercase(header.0), header.1) })
+    ]
+    |> list.sort(fn(a, b) { string.compare(a.0, b.0) })
+  let signed_headers =
+    list.map(headers, fn(header) { header.0 }) |> string.join(";")
   let query =
     list.flatten([
       query,
@@ -113,7 +123,7 @@ pub fn presign(
         ),
         #("X-Amz-Date", date_time),
         #("X-Amz-Expires", int.to_string(expires_in)),
-        #("X-Amz-SignedHeaders", "host"),
+        #("X-Amz-SignedHeaders", signed_headers),
       ],
       case credentials.session_token {
         Some(token) -> [#("X-Amz-Security-Token", token)]
@@ -125,8 +135,8 @@ pub fn presign(
       method,
       path,
       query,
-      [#("host", host)],
-      "host",
+      headers,
+      signed_headers,
       unsigned_payload,
     )
   let signature = signature(credentials, date, date_time, canonical)

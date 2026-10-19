@@ -93,6 +93,7 @@ pub fn presigned_url_test() {
       None,
       "/test.txt",
       [],
+      [],
       credentials(),
       may_24_2013(),
       86_400,

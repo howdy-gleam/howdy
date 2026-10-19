@@ -147,7 +147,8 @@ fn progress(name: String, status: Status) -> Element(msg) {
 }
 
 /// Up to four letters of the file's extension, for its icon.
-fn extension(name: String) -> String {
+@internal
+pub fn extension(name: String) -> String {
   case string.split(name, ".") {
     [_, _, ..] as parts ->
       case list.last(parts) {

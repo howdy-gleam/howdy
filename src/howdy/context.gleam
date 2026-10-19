@@ -96,8 +96,9 @@ pub fn read_body(
 }
 
 /// A request body being read a piece at a time, so that a large one need not
-/// be held in memory.
-@internal
+/// be held in memory. Start one with `reader` or `controller.body_reader`,
+/// then call `read_chunk` until it gives `None`. Like `read_body`, a body
+/// can only be read once.
 pub opaque type Reader {
   LiveReader(request: Request(ewe.Connection), limit: Int)
   FakeReader(bits: BitArray)
@@ -106,7 +107,6 @@ pub opaque type Reader {
 
 /// Start reading the body of `request` in pieces, refusing one larger than
 /// `limit` bytes in all.
-@internal
 pub fn reader(request: Request(Body), limit limit: Int) -> Reader {
   case request.body {
     Live(connection:) ->
@@ -122,7 +122,17 @@ pub fn reader(request: Request(Body), limit limit: Int) -> Reader {
 
 /// The next piece of the body, of at most `max_bytes`, with the reader for
 /// the piece after it, or `None` once the body has been read to the end.
-@internal
+/// A body over the reader's limit gives `BodyTooLarge` once it gets there.
+///
+/// ```gleam
+/// fn count(reader: context.Reader, total: Int) -> Result(Int, context.BodyError) {
+///   case context.read_chunk(reader, max_bytes: 65_536) {
+///     Ok(Some(#(chunk, reader))) -> count(reader, total + bit_array.byte_size(chunk))
+///     Ok(None) -> Ok(total)
+///     Error(error) -> Error(error)
+///   }
+/// }
+/// ```
 pub fn read_chunk(
   reader: Reader,
   max_bytes max_bytes: Int,

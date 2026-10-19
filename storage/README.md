@@ -33,6 +33,12 @@ memory. `storage.url(files, key, expires_in: 3600)` gives a signed URL the
 browser can fetch the file from; `download_url` makes it download under a
 name of your choosing.
 
+For large files the browser can upload straight to storage instead:
+`storage.upload_url(files, key, content_type:, size:, expires_in:)` gives a
+URL signed for exactly that size and type, which storage holds the upload
+to, so your limits apply even though the file never reaches your app.
+howdy_ui's `uploader` does the browser's part, with progress.
+
 ## Adapters
 
 - `howdy/storage/s3`: AWS S3, Cloudflare R2, Tigris, MinIO, Garage,

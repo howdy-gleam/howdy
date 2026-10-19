@@ -180,9 +180,10 @@ re-exports them. Every one is a Sketch class built from tokens.
 | `item` | `item_group`, `item`, `item_link` |
 | `empty` | `empty` |
 | `questionnaire` | `questionnaire.question`s asked one at a time with back, skip and next, checked as they go; works as a plain form or in a live view |
+| `uploader` | `uploader.new(name:, start:)` built up with `multiple`, `accept`, `max_size`, `required`, `layout`, `stored`, `id` and `words`, shown with `view`: drop or choose files, which the browser sends straight to storage with progress, posting each file's key; `file_size`, `describe` |
 
-`calendar`, `data_table` and `chart` are builders with several options, so
-use them from their own modules rather than through `howdy/ui`.
+`calendar`, `data_table`, `chart` and `uploader` are builders with several
+options, so use them from their own modules rather than through `howdy/ui`.
 
 Controls follow their native state. `attribute.disabled(True)` dims them
 and `attribute.aria_invalid("true")` gives them the danger colour, so a form

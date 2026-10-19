@@ -15,6 +15,7 @@
 ////   panels;
 //// - filtering a command menu as you type, and its keyboard shortcut;
 //// - showing a tooltip on hover and focus, and closing a toast;
+//// - sending an uploader's files straight to storage, with progress;
 //// - collapsing the sidebar on wide screens and remembering it;
 //// - fallbacks for browsers without invoker commands, `closedby` on
 ////   dialogs, or CSS anchor positioning.

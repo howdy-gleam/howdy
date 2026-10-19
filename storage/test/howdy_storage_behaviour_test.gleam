@@ -267,3 +267,47 @@ pub fn signed_urls_test() {
 
 @external(erlang, "crypto", "strong_rand_bytes")
 fn random_bytes(count: Int) -> BitArray
+
+pub fn direct_upload_urls_test() {
+  use files, prefix <- each_adapter
+  let key = prefix <> "direct/photo.png"
+  let assert Ok(upload) =
+    storage.upload_url(
+      files,
+      key,
+      content_type: "image/png",
+      size: 10,
+      expires_in: 300,
+    )
+  assert upload.method == "PUT"
+  assert upload.headers == [#("content-type", "image/png")]
+  assert upload.url != ""
+  let assert Error(Invalid(_)) =
+    storage.upload_url(files, key, content_type: "", size: 10, expires_in: 300)
+  let assert Error(Invalid(_)) =
+    storage.upload_url(
+      files,
+      key,
+      content_type: "a/b",
+      size: -1,
+      expires_in: 300,
+    )
+  let assert Error(Invalid(_)) =
+    storage.upload_url(
+      files,
+      key,
+      content_type: "a/b",
+      size: storage.max_upload_size + 1,
+      expires_in: 300,
+    )
+  let assert Error(Invalid(_)) =
+    storage.upload_url(files, key, content_type: "a/b", size: 1, expires_in: 0)
+  let assert Error(Invalid(_)) =
+    storage.upload_url(
+      files,
+      "../x",
+      content_type: "a/b",
+      size: 1,
+      expires_in: 9,
+    )
+}
