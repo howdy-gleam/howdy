@@ -1,11 +1,21 @@
 -module(howdy_ui_island_ffi).
--export([function_location/1, identity/1, build_javascript/1, run/2,
-         development/0, bundle_root/0, fingerprint/1, esbuild/0,
+-export([function_location/1, identity/1, begin_lifetime/1, alive/1, on_stop/2,
+         set_interval/2, clear_interval/1, build/2, gleam/1, run/2,
+         development/0, bundle_root/0, fingerprint/1, compiled_fingerprint/1,
+         version/1, compiled_version/1, esbuild/0,
          cached_boot/0, cache_boot/1, log_error/1]).
 
 -define(ESBUILD_VERSION, "0.28.2").
 
 identity(Value) -> Value.
+
+%% An island only runs in the browser; these keep its module compiling for
+%% the server, which renders it without running effects.
+begin_lifetime(_Root) -> nil.
+alive(_Lifetime) -> true.
+on_stop(_Root, _Cleanup) -> nil.
+set_interval(_Milliseconds, _Callback) -> nil.
+clear_interval(_Interval) -> nil.
 
 %% The package (OTP application), module and name of a function, so the
 %% browser can import the same function from the JavaScript build.
@@ -54,6 +64,43 @@ fingerprint(Module) ->
             {error, nil}
     end.
 
+%% The MD5 of a module as compiled in this project's dev build, read from
+%% disk rather than the code path: the bundle command runs in a VM that
+%% started before the build it asked for.
+compiled_fingerprint(Module) ->
+    case filelib:wildcard("build/dev/erlang/*/ebin/" ++ binary_to_list(Module) ++ ".beam") of
+        [Path] ->
+            case beam_lib:md5(Path) of
+                {ok, {_, Md5}} -> {ok, binary:encode_hex(Md5)};
+                _ -> {error, nil}
+            end;
+        _ ->
+            {error, nil}
+    end.
+
+%% The version of a package, from the `.app` file on the code path.
+version(Package) ->
+    case code:where_is_file(binary_to_list(Package) ++ ".app") of
+        non_existing -> {error, nil};
+        Path -> app_version(Path)
+    end.
+
+%% The version of a package in this project's dev build.
+compiled_version(Package) ->
+    Name = binary_to_list(Package),
+    app_version(filename:join(["build", "dev", "erlang", Name, "ebin", Name ++ ".app"])).
+
+app_version(Path) ->
+    case file:consult(Path) of
+        {ok, [{application, _, Properties}]} ->
+            case proplists:get_value(vsn, Properties) of
+                Vsn when is_list(Vsn) -> {ok, unicode:characters_to_binary(Vsn)};
+                _ -> {error, nil}
+            end;
+        _ ->
+            {error, nil}
+    end.
+
 cached_boot() ->
     case persistent_term:get(howdy_ui_islands_boot, undefined) of
         undefined -> {error, nil};
@@ -68,17 +115,23 @@ log_error(Message) ->
     logger:error("~ts", [Message]),
     nil.
 
-%% Run `gleam build --target javascript` in Dir, one build at a time per
+%% Run `gleam build --target Target` in Dir, one build at a time per
 %% node. Returns the exit code and everything it printed.
-build_javascript(Dir) ->
+build(Dir, Target) ->
     global:trans({howdy_ui_islands_build, self()},
-                 fun() ->
-                     case os:find_executable("gleam") of
-                         false -> {127, <<"gleam is not on the PATH">>};
-                         Gleam -> run(Gleam, [<<"build">>, <<"--target">>, <<"javascript">>], Dir)
-                     end
-                 end,
+                 fun() -> gleam([<<"build">>, <<"--target">>, Target], Dir) end,
                  [node()]).
+
+%% Run gleam with Args in the working directory.
+gleam(Args) ->
+    {ok, Dir} = file:get_cwd(),
+    gleam(Args, Dir).
+
+gleam(Args, Dir) ->
+    case os:find_executable("gleam") of
+        false -> {127, <<"gleam is not on the PATH">>};
+        Gleam -> run(Gleam, Args, Dir)
+    end.
 
 run(Executable, Args) ->
     {ok, Dir} = file:get_cwd(),

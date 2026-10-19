@@ -19,6 +19,7 @@ argv = ">= 1.0.0 and < 2.0.0"
 filepath = ">= 1.1.2 and < 2.0.0"
 howdy = { path = ".." }
 lustre = ">= 5.7.0 and < 6.0.0"
+murmur3a = ">= 1.0.0 and < 2.0.0"
 simplifile = ">= 2.7.0 and < 3.0.0"
 sketch = ">= 4.2.0 and < 5.0.0"
 

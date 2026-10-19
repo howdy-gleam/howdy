@@ -266,7 +266,8 @@ pub fn stylesheet(at path: String, themes themes: Themes) -> Controller {
 /// loads them, so the browser always runs the current source, under
 /// `gleam run` as well as `gleam dev`. Compile errors appear on the page.
 ///
-/// A release serves the bundle written by `gleam run -m howdy/ui islands`.
+/// A release serves the bundle written by `gleam run -m howdy/ui export`,
+/// which bundles the islands and then exports.
 /// It checks the bundle as it starts and logs what to run if the bundle
 /// is missing or was built from different code.
 pub fn islands() -> Controller {

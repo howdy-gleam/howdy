@@ -6,6 +6,7 @@ import howdy
 import howdy/testing
 import howdy/ui
 import howdy/ui/island.{type Island}
+import howdy_ui/islands/probe
 import lustre/element.{type Element, text}
 import lustre/element/html
 import lustre/event
@@ -24,13 +25,10 @@ fn view(count: Int) -> Element(Nil) {
   html.button([event.on_click(Nil)], [text(int.to_string(count))])
 }
 
-pub fn mount_renders_the_view_and_locates_the_function_test() {
+pub fn mount_renders_the_view_test() {
   let html = island.mount(counter, with: 41) |> element.to_string
 
   assert string.contains(html, "<howdy-island ")
-  assert string.contains(html, "data-package=\"howdy_ui\"")
-  assert string.contains(html, "data-module=\"island_test\"")
-  assert string.contains(html, "data-function=\"counter\"")
   assert string.contains(html, "data-flags=\"41\"")
   // The view is rendered as is: no marker for the browser to disagree with.
   assert string.contains(
@@ -39,6 +37,37 @@ pub fn mount_renders_the_view_and_locates_the_function_test() {
   )
   assert !string.contains(html, "lustre:map")
   assert string.contains(html, "import('/_howdy/islands/boot.mjs')")
+}
+
+pub fn mount_locates_the_island_function_test() {
+  let html = island.mount(probe.island, with: 7) |> element.to_string
+
+  assert string.contains(html, "data-package=\"howdy_ui\"")
+  assert string.contains(html, "data-module=\"howdy_ui/islands/probe\"")
+  assert string.contains(html, "data-function=\"island\"")
+  assert string.contains(html, "data-flags=\"7\"")
+  assert string.contains(html, "<output>7</output>")
+}
+
+// This module is not under src/howdy_ui/islands/, so the browser could
+// never load it; mount says so instead of leaving a silent failure.
+pub fn mount_names_where_island_modules_live_test() {
+  let html = island.mount(counter, with: 41) |> element.to_string
+
+  assert string.contains(
+    html,
+    "data-error=\"island_test is not an island module: island modules live in a directory called islands, such as src/howdy_ui/islands/\"",
+  )
+  assert !string.contains(html, "data-module=")
+}
+
+pub fn island_modules_are_those_in_an_islands_directory_test() {
+  assert island.is_island_module("my_app/islands/counter")
+  assert island.is_island_module("howdy/ui/islands/editor")
+  assert island.is_island_module("my_app/islands/forms/signup")
+  assert !island.is_island_module("my_app/islands")
+  assert !island.is_island_module("howdy/ui/internal/islands")
+  assert !island.is_island_module("my_app/counter")
 }
 
 pub fn mount_rejects_anonymous_functions_test() {
@@ -64,7 +93,7 @@ pub fn boot_reports_a_missing_islands_directory_test() {
   assert res.status == 200
   assert string.contains(
     testing.text(res),
-    "no island modules found in src/howdy_ui/islands",
+    "no island modules found. Put them in a directory called islands under src, such as src/howdy_ui/islands/.",
   )
 }
 

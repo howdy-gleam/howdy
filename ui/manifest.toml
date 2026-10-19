@@ -43,5 +43,6 @@ gleam_stdlib = { version = ">= 1.0.0 and < 2.0.0" }
 gleeunit = { version = ">= 1.0.0 and < 2.0.0" }
 howdy = { path = ".." }
 lustre = { version = ">= 5.7.0 and < 6.0.0" }
+murmur3a = { version = ">= 1.0.0 and < 2.0.0" }
 simplifile = { version = ">= 2.7.0 and < 3.0.0" }
 sketch = { version = ">= 4.2.0 and < 5.0.0" }

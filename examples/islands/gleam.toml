@@ -10,6 +10,7 @@ gleam_json = ">= 3.1.0 and < 4.0.0"
 lustre = ">= 5.7.0 and < 6.0.0"
 howdy = { path = "../.." }
 howdy_ui = { path = "../../ui" }
+howdy_islands_library = { path = "library" }
 
 [dev_dependencies]
 howdy_dev = { path = "../../howdy_dev" }

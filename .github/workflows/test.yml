@@ -45,6 +45,7 @@ jobs:
           path: |
             ~/.cache/gleam
             ui/build/packages
+            ui/parity_test/build/packages
             examples/gallery/build/packages
           key: gleam-ui-${{ hashFiles('**/gleam.toml', '**/manifest.toml') }}
           restore-keys: gleam-ui-
@@ -79,6 +80,46 @@ jobs:
       - name: Gallery log
         if: failure()
         run: cat /tmp/gallery.log
+      # Islands render a view on the server and again in the browser, so
+      # every component must render the same HTML and CSS on both targets.
+      - name: Erlang and JavaScript parity
+        run: |
+          (cd parity_test && $GITHUB_WORKSPACE/scripts/ci-deps.sh)
+          parity_test/run.sh
+
+  # Islands end to end: browser tests under `gleam run`, then a clean build
+  # bundled and exported as a release, the same tests against it, and a
+  # release whose code changed after bundling, which must refuse its bundle.
+  islands:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: examples/islands
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/cache@v6
+        with:
+          # ~/.cache/howdy holds the esbuild that bundles islands.
+          path: |
+            ~/.cache/gleam
+            ~/.cache/howdy
+            examples/islands/build/packages
+          key: gleam-islands-${{ hashFiles('**/gleam.toml', '**/manifest.toml') }}
+          restore-keys: gleam-islands-
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "29"
+          gleam-version: "1.18.1"
+          rebar3-version: "3"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: $GITHUB_WORKSPACE/scripts/ci-deps.sh
+      - run: gleam format --check src library/src
+      - name: Islands end to end
+        env:
+          CHROMIUM: google-chrome
+        run: browser_test/smoke.sh
 
   howdy_dev:
     runs-on: ubuntu-latest

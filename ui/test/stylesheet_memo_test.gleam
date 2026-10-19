@@ -8,14 +8,12 @@ import howdy/ui
 import howdy/ui/data_table
 import howdy/ui/internal/stylesheet
 import lustre/element.{text}
-import sketch
 import sketch/css.{type Class}
+import sketch/css/length
 
-/// The name Sketch gives a class, computed from scratch every time.
+/// A class's name, computed from scratch every time.
 fn uncached_name(class: Class) -> String {
-  let assert Ok(sheet) = sketch.stylesheet(strategy: sketch.Ephemeral)
-  let #(_, name) = sketch.class_name(class, sheet)
-  name
+  stylesheet.render(class).0
 }
 
 pub fn memoised_names_match_fresh_computation_test() {
@@ -24,6 +22,14 @@ pub fn memoised_names_match_fresh_computation_test() {
   use _ <- list.each([1, 2])
   use class <- list.each(classes)
   assert stylesheet.class_name(class) == uncached_name(class)
+}
+
+/// Islands render the same view on the server and in the browser, so a
+/// class must get the same name on both. This value is what Erlang and
+/// JavaScript both compute; Sketch's own naming differs between them.
+pub fn names_are_the_same_on_every_target_test() {
+  let class = css.class([css.padding(length.px(4)), css.color("red")])
+  assert stylesheet.render(class).0 == "css-345FE14C"
 }
 
 type Row {

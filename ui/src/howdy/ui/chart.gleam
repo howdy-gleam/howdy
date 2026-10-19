@@ -772,9 +772,11 @@ fn polar(angle: Float, radius: Float) -> #(Float, Float) {
 }
 
 @external(erlang, "math", "cos")
+@external(javascript, "./chart.ffi.mjs", "cos")
 fn cosine(radians: Float) -> Float
 
 @external(erlang, "math", "sin")
+@external(javascript, "./chart.ffi.mjs", "sin")
 fn sine(radians: Float) -> Float
 
 fn point(at: #(Float, Float)) -> String {
