@@ -14,6 +14,8 @@ import howdy/ui/chat.{Incoming}
 import howdy/ui/command
 import howdy/ui/live
 import howdy/ui/questionnaire
+import howdy/ui/rich_text
+import howdy/ui/rich_text/document.{type Document}
 import howdy/ui/toast
 import howdy_gallery/timer
 import lustre
@@ -35,6 +37,9 @@ pub type Model {
     skipped: Int,
     /// Where the toasts' timers are delivered.
     timers: Option(Subject(Msg)),
+    /// The rich text editor's document, as last heard, and how many times.
+    note: Document,
+    notes_heard: Int,
   )
 }
 
@@ -54,6 +59,8 @@ pub type Msg {
   SkipAhead
   Older
   Answered(List(#(String, String)))
+  Note(String)
+  ClearNote
 }
 
 pub fn app() -> lustre.App(Nil, Model, Msg) {
@@ -71,6 +78,8 @@ fn init(_) -> #(Model, Effect(Msg)) {
       asked: questionnaire.start(questions()),
       skipped: 0,
       timers: None,
+      note: document.from_text("Hello from the server"),
+      notes_heard: 0,
     ),
     timer.subscribe(Timers),
   )
@@ -101,6 +110,15 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     }
     Toppings(toppings) -> #(Model(..model, toppings:), effect.none())
     Plan(plan) -> #(Model(..model, plan:), effect.none())
+    Note(json) ->
+      case document.decode(json) {
+        Ok(note) -> #(
+          Model(..model, note:, notes_heard: model.notes_heard + 1),
+          effect.none(),
+        )
+        Error(_) -> #(model, effect.none())
+      }
+    ClearNote -> #(Model(..model, note: document.empty()), effect.none())
     Tab(tab) -> #(Model(..model, tab:), effect.none())
     Notify -> {
       let #(toasts, _) =
@@ -217,6 +235,30 @@ fn view(model: Model) -> Element(Msg) {
       html.output([attribute.id("lab-toppings-heard")], [
         text(string.join(model.toppings, " | ")),
       ]),
+    ]),
+    // A rich text editor, heard when it loses focus and cleared from the
+    // server.
+    html.section([live.on_value("note", Note)], [
+      rich_text.new(name: "note")
+        |> rich_text.value(model.note)
+        |> rich_text.mentions(
+          trigger: "@",
+          kind: "person",
+          search: "/people/search",
+        )
+        |> rich_text.view,
+      html.output([attribute.id("lab-note-heard")], [
+        text(
+          int.to_string(model.notes_heard)
+          <> ": "
+          <> document.to_plain_text(model.note),
+        ),
+      ]),
+      ui.button(
+        Outline,
+        [attribute.id("lab-note-clear"), event.on_click(ClearNote)],
+        [text("Clear")],
+      ),
     ]),
     // A select, heard by name; and one disabled and invalid.
     html.section([live.on_value("plan", Plan)], [

@@ -122,6 +122,9 @@ import howdy/ui/popover
 import howdy/ui/progress
 import howdy/ui/questionnaire
 import howdy/ui/resizable
+import howdy/ui/rich_text
+import howdy/ui/rich_text/document as rich_text_document
+import howdy/ui/rich_text/script as rich_text_script
 import howdy/ui/scroll_area
 import howdy/ui/select
 import howdy/ui/sidebar
@@ -194,6 +197,8 @@ pub fn classes() -> List(Class) {
     chat.classes(),
     attachment.classes(),
     uploader.classes(),
+    rich_text.classes(),
+    rich_text_document.classes(),
     app_shell.classes(),
     stat_card.classes(),
     sign_in.classes(),
@@ -272,6 +277,14 @@ pub fn stylesheet(at path: String, themes themes: Themes) -> Controller {
 /// is missing or was built from different code.
 pub fn islands() -> Controller {
   islands.controller()
+}
+
+/// A controller serving the browser code for `howdy/ui/rich_text`, under
+/// `/_howdy/rich-text`. Mount it in any app with a rich text editor. The
+/// code is loaded only by pages that have one, and is cached for good,
+/// since its URL changes whenever it does.
+pub fn rich_text() -> Controller {
+  rich_text_script.controller()
 }
 
 // -- Components --------------------------------------------------------------

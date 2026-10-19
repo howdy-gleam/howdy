@@ -1457,4 +1457,37 @@ const hear = (root) => {
 };
 for (const root of roots()) hear(root);
 document.addEventListener('lustre:mount', (event) => hear(event.target.shadowRoot), true);
+
+// Rich text editors load their code, from the URL each names, the first
+// time one is on the page. A custom element is upgraded wherever it is,
+// including in a live view's shadow root and when a patch adds it later.
+// An element that is moved stays the same editor; one that is removed for
+// good is taken down.
+if (!customElements.get('howdy-rich-text')) {
+  customElements.define('howdy-rich-text', class extends HTMLElement {
+    connectedCallback() {
+      // Its children may still be on their way.
+      queueMicrotask(() => {
+        if (!this.isConnected || this.editor || this.loading) return;
+        this.loading = true;
+        import(this.dataset.script)
+          .then(({ mount }) => {
+            if (this.isConnected && !this.editor) this.editor = mount(this);
+          })
+          .catch((error) => {
+            this.setAttribute('data-failed', '');
+            console.error(`howdy: the rich text editor could not load from ${this.dataset.script}. Mount ui.rich_text() in the app.`, error);
+          })
+          .finally(() => (this.loading = false));
+      });
+    }
+    disconnectedCallback() {
+      queueMicrotask(() => {
+        if (this.isConnected || !this.editor) return;
+        this.editor.destroy();
+        this.editor = null;
+      });
+    }
+  });
+}
 }

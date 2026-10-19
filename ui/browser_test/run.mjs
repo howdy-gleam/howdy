@@ -9,6 +9,23 @@
 import { setTimeout as sleep } from 'node:timers/promises';
 import { equal, ok, focused, run } from './harness.mjs';
 
+// The inline content of a rich text editor's paragraph, as it would post.
+const richDoc = async (page, index) =>
+  (await page.evaluate(`JSON.parse(q('[data-howdy-rich-text-value]').value)`)).content[index].content;
+
+// Measure an editor while its code is held back, then once it has taken
+// over. A page can only do this once: the code is cached after.
+const sameHeightOnceReady = async (page, preview) => {
+  const held = await page.hold('*_howdy/rich-text/*');
+  await page.goto(`/rich_text/preview/${preview}`);
+  const height = `Math.round(q('howdy-rich-text').getBoundingClientRect().height)`;
+  const before = await page.evaluate(height);
+  ok(!(await page.evaluate(`q('howdy-rich-text').hasAttribute('data-ready')`)), 'measured before the editor loaded');
+  await held.release();
+  await page.until(`q('howdy-rich-text')?.hasAttribute('data-ready')`, 5000);
+  equal(await page.evaluate(height), before, 'height');
+};
+
 // -- Tests -------------------------------------------------------------------
 
 const tests = {
@@ -472,6 +489,225 @@ const tests = {
     equal(last.name, 'photos', 'event names the field');
     equal(last.values.length, 3, 'three keys left');
     ok(last.values.every((key) => key.startsWith('uploads/')), 'only the uploaded keys');
+  },
+
+  async 'a rich text editor formats as you type and posts the document'(page) {
+    await page.goto('/rich_text/preview/0');
+    await page.until(`q('howdy-rich-text')?.hasAttribute('data-ready')`, 5000);
+    equal(await page.evaluate(`document.querySelector('#comment-form').checkValidity()`), false, 'required and empty');
+    await page.click('howdy-rich-text [contenteditable]');
+    await page.type('Hello ');
+    await page.press('b', 2);
+    equal(await page.evaluate(`q('[data-command=bold]').getAttribute('aria-pressed')`), 'true', 'bold pressed');
+    await page.type('world');
+    await page.press('b', 2);
+    await page.type('!');
+    equal(await richDoc(page, 0), [{ type: 'text', text: 'Hello ' }, { type: 'text', marks: [{ type: 'bold' }], text: 'world' }, { type: 'text', text: '!' }], 'bold from the keyboard');
+    equal(await page.evaluate(`document.querySelector('#comment-form').checkValidity()`), true, 'valid with text');
+    // Markdown-like shortcuts.
+    await page.press('Enter');
+    await page.type('# Title');
+    await page.press('Enter');
+    await page.type('- one');
+    await page.press('Enter');
+    await page.type('two');
+    await page.press('Enter');
+    await page.press('Enter');
+    await page.type('a `tick` and **strong**');
+    const doc = await page.evaluate(`JSON.parse(q('[data-howdy-rich-text-value]').value)`);
+    equal(doc.content.map((node) => node.type), ['paragraph', 'heading', 'bullet_list', 'paragraph'], 'blocks');
+    equal(doc.content[1].attrs.level, 1, 'heading level');
+    equal(doc.content[2].content.length, 2, 'two list items');
+    equal(doc.content[3].content, [{ type: 'text', text: 'a ' }, { type: 'text', marks: [{ type: 'code' }], text: 'tick' }, { type: 'text', text: ' and ' }, { type: 'text', marks: [{ type: 'bold' }], text: 'strong' }], 'inline shortcuts');
+    ok(!(await page.evaluate(`q('[data-command=undo]').disabled`)), 'undo enabled');
+  },
+
+  async 'mentions are suggested by the search endpoint and posted with their ids'(page) {
+    await page.goto('/rich_text/preview/0');
+    await page.until(`q('howdy-rich-text')?.hasAttribute('data-ready')`, 5000);
+    await page.click('howdy-rich-text [contenteditable]');
+    await page.type('Thanks @gr');
+    const menuOpen = `q('[data-howdy-rich-text-menu]').matches(':popover-open')`;
+    const labels = `[...document.querySelectorAll('[data-howdy-rich-text-options] [role=option] > span:nth-child(2)')].map((el) => el.textContent)`;
+    await page.until(`${menuOpen} && ${labels}.length === 1`, 3000);
+    equal(await page.evaluate(labels), ['Grace Hopper'], 'suggestions');
+    equal(await page.evaluate(`q('[contenteditable]').getAttribute('aria-activedescendant')`), await page.evaluate(`q('[role=option]').id`), 'active option announced');
+    await page.press('Enter');
+    equal(await page.evaluate(menuOpen), false, 'closed once chosen');
+    await page.type('and #4');
+    await page.until(`${menuOpen} && ${labels}.length === 1`, 3000);
+    await page.press('Tab');
+    // Escape closes the list, and it stays closed for that mention.
+    // Choosing adds a space after the mention.
+    await page.type('@a');
+    await page.until(`${menuOpen} && ${labels}.length > 1`, 3000);
+    await page.press('ArrowDown');
+    equal(await page.evaluate(`q('[role=option][aria-selected=true] > span:nth-child(2)').textContent`), await page.evaluate(`${labels}[1]`), 'arrow moves');
+    await page.press('Escape');
+    equal(await page.evaluate(menuOpen), false, 'escape closes');
+    await page.type('d');
+    await sleep(300);
+    equal(await page.evaluate(menuOpen), false, 'stays closed');
+    const inline = (await richDoc(page, 0)).filter((node) => node.type === 'mention').map((node) => node.attrs);
+    equal(inline, [{ trigger: '@', kind: 'person', id: '3', label: 'Grace Hopper' }, { trigger: '#', kind: 'issue', id: '42', label: '42' }], 'mentions in the document');
+    await page.click('#comment-form button[type=submit]');
+    await page.until(`q('#rich-text-mentions')?.textContent === 'person:3 issue:42'`, 5000);
+    equal(await page.evaluate(`q('#rich-text-plain').textContent`), 'Thanks @Grace Hopper and #42 @ad', 'plain text');
+    equal(await page.evaluate(`q('#rich-text-shown a[data-mention=person]').getAttribute('href')`), '#person-3', 'drawn by the server');
+  },
+
+  async 'links are added from the toolbar, and unsafe ones refused'(page) {
+    await page.goto('/rich_text/preview/2');
+    await page.until(`q('howdy-rich-text')?.hasAttribute('data-ready')`, 5000);
+    await page.click('howdy-rich-text [contenteditable]');
+    await page.type('Read the docs');
+    for (let i = 0; i < 4; i++) await page.press('ArrowLeft', 8);
+    await page.click('[data-command=link]');
+    ok(await page.evaluate(`q('[data-howdy-rich-text-link]').matches(':popover-open')`), 'link form open');
+    ok(await page.evaluate(`document.activeElement.matches('[data-howdy-rich-text-link-input]')`), 'address focused');
+    await page.type('javascript:alert(1)');
+    await page.press('Enter');
+    equal(await page.evaluate(`q('[data-howdy-rich-text-link-input]').validationMessage`), 'Enter a web address, such as https://example.com.', 'refused');
+    await page.evaluate(`q('[data-howdy-rich-text-link-input]').value = ''`);
+    await page.type('example.com/docs');
+    await page.press('Enter');
+    equal(await page.evaluate(`q('[data-howdy-rich-text-link]').matches(':popover-open')`), false, 'closed');
+    equal(await richDoc(page, 0), [{ type: 'text', text: 'Read the ' }, { type: 'text', marks: [{ type: 'link', attrs: { href: 'https://example.com/docs' } }], text: 'docs' }], 'linked');
+    equal(await page.evaluate(`q('[data-command=link]').getAttribute('aria-pressed')`), 'true', 'link pressed in a link');
+    ok(await page.evaluate(`q('[contenteditable]').contains(document.activeElement) || document.activeElement.matches('[contenteditable]')`), 'focus back in the text');
+  },
+
+  async 'pasted HTML keeps only what a document can hold'(page) {
+    await page.goto('/rich_text/preview/2');
+    await page.until(`q('howdy-rich-text')?.hasAttribute('data-ready')`, 5000);
+    await page.click('howdy-rich-text [contenteditable]');
+    await page.evaluate(`(() => {
+      const data = new DataTransfer();
+      data.setData('text/html', '<p>Hi <b>bold</b> <a href="javascript:window.pwned=1">bad</a> <a href="https://ok.example/">good</a><script>window.pwned=1<\/script><img src=x onerror="window.pwned=1"></p><h1>Head</h1><table><tr><td>cell</td></tr></table>');
+      data.setData('text/plain', 'Hi bold bad good');
+      q('[contenteditable]').dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
+    })()`);
+    await sleep(200);
+    const doc = await page.evaluate(`JSON.parse(q('[data-howdy-rich-text-value]').value)`);
+    const json = JSON.stringify(doc);
+    ok(!json.includes('javascript'), 'no javascript link');
+    ok(json.includes('https://ok.example/'), 'the safe link is kept');
+    ok(json.includes('"bold"'), 'bold is kept');
+    ok(json.includes('cell') && json.includes('Head'), 'text from elsewhere is kept');
+    ok(!/image|img|script|table/.test(json), 'nothing else');
+    equal(await page.evaluate(`window.pwned`), undefined, 'nothing ran');
+  },
+
+  async 'an editor sends pasted and chosen files to storage and posts their keys'(page) {
+    await page.goto('/rich_text/preview/1');
+    await page.until(`q('howdy-rich-text')?.hasAttribute('data-ready')`, 5000);
+    await page.click('howdy-rich-text [contenteditable] h2');
+    await page.press('End');
+    await page.chooseFiles('[data-howdy-rich-text-files]', [page.file('notes.txt', 'hello, storage')]);
+    // A picture pasted from the clipboard.
+    await page.evaluate(`(async () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = canvas.height = 2;
+      const blob = await new Promise((r) => canvas.toBlob(r, 'image/png'));
+      const data = new DataTransfer();
+      data.items.add(new File([blob], 'dot.png', { type: 'image/png' }));
+      q('[contenteditable]').dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
+    })()`);
+    const files = `JSON.parse(q('[data-howdy-rich-text-value]').value).content.filter((node) => node.type === 'attachment').map((node) => node.attrs)`;
+    await page.until(`${files}.length === 2`, 5000);
+    const attached = await page.evaluate(files);
+    ok(attached.every((file) => file.key.startsWith('uploads/')), 'keys from the start endpoint');
+    equal(attached.map((file) => [file.name, file.content_type, file.size]).sort(), [['dot.png', 'image/png', attached.find((file) => file.name === 'dot.png').size], ['notes.txt', 'text/plain', 14]], 'what was attached');
+    equal(await page.evaluate(`[...document.querySelectorAll('[contenteditable] figure [data-part=name]')].map((el) => el.textContent).sort()`), ['dot.png', 'notes.txt'], 'shown as attachments');
+    ok(await page.evaluate(`[...document.querySelectorAll('[contenteditable] figure img')].some((img) => !img.hidden && img.src.startsWith('blob:'))`), 'the picture is shown');
+    equal(await page.evaluate(`q('[data-howdy-rich-text-proxy]').validationMessage`), '', 'the form may submit');
+    await page.click('#article-form button[type=submit]');
+    await page.until(`q('#rich-text-attachments')?.textContent.split(' ').length === 2`, 5000);
+    ok(await page.evaluate(`q('#rich-text-attachments').textContent.split(' ').every((entry) => entry.endsWith('=found'))`), 'stored');
+    ok(await page.evaluate(`q('#rich-text-shown figure img').src.includes('/files/')`), 'the picture drawn from storage');
+    await page.until(`q('howdy-rich-text')?.hasAttribute('data-ready')`, 5000);
+    ok(await page.evaluate(`[...document.querySelectorAll('[contenteditable] figure img')].some((img) => !img.hidden && img.src.includes('/files/'))`), 'and in the editor again');
+  },
+
+  async 'removing an attachment takes it out of the document'(page) {
+    await page.goto('/rich_text/preview/1');
+    await page.until(`q('howdy-rich-text')?.hasAttribute('data-ready')`, 5000);
+    await page.click('howdy-rich-text [contenteditable] h2');
+    await page.chooseFiles('[data-howdy-rich-text-files]', [page.file('gone.txt', 'bye')]);
+    const count = `JSON.parse(q('[data-howdy-rich-text-value]').value).content.filter((node) => node.type === 'attachment').length`;
+    await page.until(`${count} === 1`, 5000);
+    await page.click('[contenteditable] figure [data-part=remove]');
+    equal(await page.evaluate(count), 0, 'removed');
+    equal(await page.evaluate(`document.querySelectorAll('[contenteditable] figure').length`), 0, 'and not shown');
+  },
+
+  async 'nothing moves when an empty editor takes over from the server drawing'(page) {
+    await sameHeightOnceReady(page, 0);
+  },
+
+  async 'nothing moves when a written editor takes over from the server drawing'(page) {
+    await sameHeightOnceReady(page, 1);
+  },
+
+  async 'a required editor keeps an empty form from submitting'(page) {
+    await page.goto('/rich_text/preview/0');
+    await page.until(`q('howdy-rich-text')?.hasAttribute('data-ready')`, 5000);
+    equal(await page.evaluate(`getComputedStyle(q('[contenteditable] p'), '::before').content`), '"Add a comment… type @ to mention someone"', 'placeholder shown');
+    await page.click('#comment-form button[type=submit]');
+    await sleep(200);
+    ok(await page.evaluate(`location.pathname.startsWith('/ui/')`), 'still on the page');
+    equal(await page.evaluate(`q('[data-howdy-rich-text-proxy]').validationMessage`), 'Write something.', 'why');
+    // Spaces alone are still empty.
+    await page.click('howdy-rich-text [contenteditable]');
+    await page.type('   ');
+    equal(await page.evaluate(`document.querySelector('#comment-form').checkValidity()`), false, 'spaces are empty');
+    await page.type('ok');
+    equal(await page.evaluate(`document.querySelector('#comment-form').checkValidity()`), true, 'then valid');
+    // A label pointing at the editor's id focuses the editor.
+    await page.evaluate(`(() => { const label = document.createElement('label'); label.htmlFor = q('[data-howdy-rich-text-proxy]').id; label.id = 'probe-label'; label.textContent = 'Comment'; document.body.prepend(label); document.activeElement.blur(); })()`);
+    await page.click('#probe-label');
+    await page.until(`document.activeElement.matches('[contenteditable]')`);
+  },
+
+  async 'the toolbar is one stop in the tab order'(page) {
+    await page.goto('/rich_text/preview/2');
+    await page.until(`q('howdy-rich-text')?.hasAttribute('data-ready')`, 5000);
+    await page.focus('[data-command=bold]');
+    await page.press('ArrowRight');
+    equal(await page.evaluate(`document.activeElement.getAttribute('aria-label')`), 'Italic', 'arrow moves');
+    equal(await page.evaluate(`[...document.querySelectorAll('[data-command]')].map((el) => el.tabIndex)`), [-1, 0, -1], 'one stop');
+    await page.press('End');
+    equal(await page.evaluate(`document.activeElement.getAttribute('aria-label')`), 'Link', 'end');
+  },
+
+  async 'a live view hears the editor when it loses focus, and can replace its document'(page) {
+    await page.open('/lab');
+    await page.until(`q('howdy-rich-text')?.hasAttribute('data-ready')`, 5000);
+    await page.click('howdy-rich-text [contenteditable] p');
+    await page.press('End');
+    await page.type(' and me');
+    const heard = `q('#lab-note-heard').textContent`;
+    equal(await page.evaluate(heard), '0: Hello from the server', 'not heard while typing');
+    await page.click('#lab-plan');
+    await page.press('Escape');
+    await page.until(`${heard} === '1: Hello from the server and me'`, 3000);
+    equal(await page.evaluate(`q('howdy-rich-text [contenteditable]').textContent`), 'Hello from the server and me', 'the patch left the editor alone');
+    // Mentions inside a shadow root.
+    await page.click('howdy-rich-text [contenteditable] p');
+    await page.press('End');
+    await page.type(' @mar');
+    await page.until(`q('[data-howdy-rich-text-menu]').matches(':popover-open') && q('[role=option]')`, 3000);
+    await page.press('Enter');
+    ok(await page.evaluate(`Boolean(q('[contenteditable] [data-howdy-mention=person][data-id="5"]'))`), 'mentioned in a live view');
+    // The server clears it.
+    await page.click('#lab-note-clear');
+    await page.until(`q('howdy-rich-text [contenteditable]').textContent === ''`, 3000);
+    equal(await page.evaluate(`JSON.parse(q('[data-howdy-rich-text-value]').value)`), { type: 'doc', content: [{ type: 'paragraph' }] }, 'empty value');
+    await page.click('howdy-rich-text [contenteditable]');
+    await page.type('again');
+    await page.click('#lab-plan');
+    await page.press('Escape');
+    await page.until(`${heard}.endsWith(': again')`, 3000);
   },
 
   async 'a questionnaire shows its first question'(page) {

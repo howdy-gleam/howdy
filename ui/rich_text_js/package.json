@@ -1,0 +1,25 @@
+{
+  "name": "howdy-ui-rich-text",
+  "private": true,
+  "type": "module",
+  "description": "The browser side of howdy/ui/rich_text, bundled into ../priv/rich_text.js",
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "dependencies": {
+    "prosemirror-commands": "1.7.2",
+    "prosemirror-dropcursor": "1.8.4",
+    "prosemirror-gapcursor": "1.4.1",
+    "prosemirror-history": "1.5.1",
+    "prosemirror-inputrules": "1.5.1",
+    "prosemirror-keymap": "1.2.3",
+    "prosemirror-model": "1.25.12",
+    "prosemirror-schema-list": "1.5.1",
+    "prosemirror-state": "1.4.4",
+    "prosemirror-transform": "1.12.2",
+    "prosemirror-view": "1.42.6"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  }
+}

@@ -189,12 +189,15 @@ async function newPage(browser) {
       await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 5, y: 760 });
       await sleep(50);
     },
-    async press(key) {
+    // `modifiers` add up: 1 Alt, 2 Control, 4 Meta, 8 Shift.
+    async press(key, modifiers = 0) {
       const code = keys[key] ?? key.toUpperCase().charCodeAt(0);
-      const text = key === 'Enter' ? '\r' : key.length === 1 ? key : undefined;
+      const typed = key === 'Enter' ? '\r' : key.length === 1 ? key : undefined;
+      // A key held with Control or Meta types nothing.
+      const text = modifiers & 6 ? undefined : typed;
       const name = key === ' ' ? 'Space' : key.length === 1 ? `Key${key.toUpperCase()}` : key;
-      await send('Input.dispatchKeyEvent', { type: text ? 'keyDown' : 'rawKeyDown', key, code: name, windowsVirtualKeyCode: code, text });
-      await send('Input.dispatchKeyEvent', { type: 'keyUp', key, code: name, windowsVirtualKeyCode: code });
+      await send('Input.dispatchKeyEvent', { type: text ? 'keyDown' : 'rawKeyDown', key, code: name, windowsVirtualKeyCode: code, text, modifiers });
+      await send('Input.dispatchKeyEvent', { type: 'keyUp', key, code: name, windowsVirtualKeyCode: code, modifiers });
       await sleep(30);
     },
     async type(text) {

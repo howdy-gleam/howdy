@@ -62,6 +62,14 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+      # The rich text editor's bundle is committed; rebuild it from its
+      # pinned sources and check it, and the hash naming it, are unchanged.
+      - name: Rich text bundle matches its source
+        working-directory: ui/rich_text_js
+        run: |
+          npm ci
+          node build.mjs
+          git diff --exit-code -- ../priv/rich_text.js ../src/howdy/ui/internal/rich_text_script.gleam
       - name: Build and start the gallery
         working-directory: examples/gallery
         run: |
