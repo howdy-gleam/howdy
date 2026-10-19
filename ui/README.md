@@ -181,8 +181,9 @@ re-exports them. Every one is a Sketch class built from tokens.
 | `empty` | `empty` |
 | `questionnaire` | `questionnaire.question`s asked one at a time with back, skip and next, checked as they go; works as a plain form or in a live view |
 | `uploader` | `uploader.new(name:, start:)` built up with `multiple`, `accept`, `max_size`, `required`, `layout`, `stored`, `id` and `words`, shown with `view`: drop or choose files, which the browser sends straight to storage with progress, posting each file's key; `file_size`, `describe` |
+| `rich_text` | `rich_text.new(name:)` built up with `value`, `placeholder`, `tools`, `mentions(trigger:, kind:, search:)`, `attachments(start:, url:)`, `accept`, `max_size`, `required`, `disabled`, `invalid`, `id` and `words`, shown with `view`: a ProseMirror editor posting its document as JSON; `field`, `not_empty`, `max_length` and `suggestions_to_json` on the server. `howdy/ui/rich_text/document` decodes, stores and draws documents. Mount `ui.rich_text()` |
 
-`calendar`, `data_table`, `chart` and `uploader` are builders with several
+`calendar`, `data_table`, `chart`, `uploader` and `rich_text` are builders with several
 options, so use them from their own modules rather than through `howdy/ui`.
 
 Controls follow their native state. `attribute.disabled(True)` dims them

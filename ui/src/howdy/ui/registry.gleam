@@ -70,6 +70,7 @@ pub fn entries() -> List(Entry) {
     component("calendar", "Forms"),
     component("questionnaire", "Forms"),
     component("uploader", "Forms"),
+    component("rich_text", "Forms"),
     component("layout", "Layout"),
     component("card", "Layout"),
     component("sidebar", "Layout"),

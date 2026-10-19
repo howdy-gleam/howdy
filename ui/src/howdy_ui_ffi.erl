@@ -1,7 +1,7 @@
 -module(howdy_ui_ffi).
 -export([known/1, register/2, name_of/1, remember_name/2, all_css/0, css_for/1,
          scope_begin/0, scope_end/0, note/1,
-         behaviour_source/0, behaviour_path/0]).
+         behaviour_source/0, behaviour_path/0, rich_text_source/0]).
 
 -define(TABLE, howdy_ui_classes).
 -define(NAMES, howdy_ui_names).
@@ -152,4 +152,28 @@ behaviour_path() ->
             erlang:error({howdy_ui_priv_dir_missing, howdy_ui});
         Dir ->
             iolist_to_binary(filename:join(Dir, "behaviour.js"))
+    end.
+
+%% The rich text editor's bundle, read once from priv like the behaviour
+%% script.
+-define(RICH_TEXT, {howdy_ui, rich_text_source}).
+
+rich_text_source() ->
+    case persistent_term:get(?RICH_TEXT, undefined) of
+        undefined ->
+            Path = case code:priv_dir(howdy_ui) of
+                {error, bad_name} ->
+                    erlang:error({howdy_ui_priv_dir_missing, howdy_ui});
+                Dir ->
+                    filename:join(Dir, "rich_text.js")
+            end,
+            case file:read_file(Path) of
+                {ok, Source} ->
+                    persistent_term:put(?RICH_TEXT, Source),
+                    Source;
+                {error, Reason} ->
+                    erlang:error({howdy_ui_rich_text_missing, Path, Reason})
+            end;
+        Source ->
+            Source
     end.

@@ -34,6 +34,8 @@ import howdy/ui/layout
 import howdy/ui/menu
 import howdy/ui/questionnaire as questionnaire_module
 import howdy/ui/resizable
+import howdy/ui/rich_text
+import howdy/ui/rich_text/document
 import howdy/ui/select
 import howdy/ui/slider as slider_module
 import howdy/ui/tabs as tabs_module
@@ -144,6 +146,12 @@ pub fn for(name: String) -> List(Example(msg)) {
     "uploader" -> [
       Example("Photos, as tiles", "photo_uploader", photo_uploader),
       Example("A required document", "document_uploader", document_uploader),
+    ]
+    "rich_text" -> [
+      Example("A comment, with mentions", "comment_editor", comment_editor),
+      Example("An article, with files", "article_editor", article_editor),
+      Example("A few tools", "short_editor", short_editor),
+      Example("Showing a document", "showing_a_document", showing_a_document),
     ]
     "app_shell" -> [Example("Application shell", "shell", shell)]
     "stat_card" -> [Example("Stat cards", "stat_cards", stat_cards)]
@@ -892,6 +900,113 @@ pub fn signing_up() -> Element(msg) {
     errors: [#("email", "Enter a whole email address.")],
     sign_in: "#",
   ))
+}
+
+pub fn comment_editor() -> Element(msg) {
+  html.form(
+    [
+      attribute.method("post"),
+      attribute.action("/rich-text"),
+      attribute.id("comment-form"),
+    ],
+    [
+      ui.stack([], [
+        rich_text.new(name: "comment")
+          |> rich_text.placeholder("Add a comment… type @ to mention someone")
+          |> rich_text.mentions(
+            trigger: "@",
+            kind: "person",
+            search: "/people/search",
+          )
+          |> rich_text.mentions(
+            trigger: "#",
+            kind: "issue",
+            search: "/issues/search",
+          )
+          |> rich_text.required
+          |> rich_text.view,
+        ui.submit_button(Primary, [], [text("Comment")]),
+      ]),
+    ],
+  )
+}
+
+pub fn article_editor() -> Element(msg) {
+  html.form(
+    [
+      attribute.method("post"),
+      attribute.action("/rich-text"),
+      attribute.id("article-form"),
+    ],
+    [
+      ui.stack([], [
+        rich_text.new(name: "article")
+          |> rich_text.value(release_notes())
+          |> rich_text.mentions(
+            trigger: "@",
+            kind: "person",
+            search: "/people/search",
+          )
+          |> rich_text.attachments(start: "/uploads/start", url: fn(_) { None })
+          |> rich_text.max_size(5_000_000)
+          |> rich_text.view,
+        ui.submit_button(Primary, [], [text("Publish")]),
+      ]),
+    ],
+  )
+}
+
+pub fn short_editor() -> Element(msg) {
+  rich_text.new(name: "bio")
+  |> rich_text.tools([[rich_text.Bold, rich_text.Italic, rich_text.Link]])
+  |> rich_text.placeholder("A line or two about yourself")
+  |> rich_text.view
+}
+
+pub fn showing_a_document() -> Element(msg) {
+  document.view_with(
+    release_notes(),
+    mention: document.mention_view(_, href: Some("#")),
+    attachment: document.attachment_view(_, url: None),
+  )
+}
+
+fn release_notes() -> document.Document {
+  let text = fn(words) { document.Text(words, []) }
+  document.Document([
+    document.Heading(2, [text("Release notes")]),
+    document.Paragraph([
+      text("Thanks to "),
+      document.Mentioned(document.Mention(
+        trigger: "@",
+        kind: "person",
+        id: "1",
+        label: "Ada Lovelace",
+      )),
+      text(", writing now has "),
+      document.Text("mentions", [document.Bold]),
+      text(" and "),
+      document.Text("attachments", [document.Italic]),
+      text(". See "),
+      document.Text("the components guide", [
+        document.Link("/docs/ui/components"),
+      ]),
+      text("."),
+    ]),
+    document.BulletList([
+      [document.Paragraph([text("Headings, quotes and lists")])],
+      [
+        document.Paragraph([
+          text("Shortcuts as you type, such as "),
+          document.Text("**bold**", [document.Code]),
+        ]),
+      ],
+    ]),
+    document.Quote([
+      document.Paragraph([text("It looks like the rest of the theme.")]),
+    ]),
+    document.CodeBlock("rich_text.new(name: \"body\")\n|> rich_text.view"),
+  ])
 }
 
 pub fn photo_uploader() -> Element(msg) {

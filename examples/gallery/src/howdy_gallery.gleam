@@ -47,6 +47,7 @@ import howdy_gallery/inbox
 import howdy_gallery/lab
 import howdy_gallery/orders
 import howdy_gallery/uploads
+import howdy_gallery/writing
 import lustre/attribute
 import lustre/element.{type Element, text}
 import lustre/element/html
@@ -135,6 +136,21 @@ pub fn app() -> howdy.App {
       page
     }),
   )
+  |> howdy.controller(
+    // Where the rich text examples in the reference search and post.
+    controller.new("/")
+    |> controller.get("/people/search", writing.search_people)
+    |> controller.get("/issues/search", writing.search_issues)
+    |> controller.post("/rich-text", fn(ctx) {
+      use fields <- form.read(ctx)
+      use page <- shell(ctx, "Writing", "/rich-text", [
+        writing.attachment_report(fields),
+        ..writing.received(fields)
+      ])
+      page
+    }),
+  )
+  |> howdy.controller(ui.rich_text())
   |> howdy.controller(local.controller(uploads.config()))
   |> howdy.controller(inbox.controller())
   // The howdy_ui reference, for development.

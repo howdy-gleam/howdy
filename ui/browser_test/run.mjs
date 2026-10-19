@@ -1,254 +1,30 @@
-// Browser tests for the interactive components, driven through Chromium's
-// DevTools protocol with real mouse and keyboard input. No dependencies
-// beyond Node 22+ and a Chromium binary.
+// Browser tests for the interactive components, against the gallery.
 //
 //   cd examples/gallery && gleam run          # serves the gallery on :8791
 //   node ui/browser_test/run.mjs [filter]
 //
-// BASE_URL and CHROMIUM override the defaults. Each test opens one gallery
-// preview, `/ui/<entry>/preview/<index>`, in a fresh page.
+// Each test opens one gallery preview, `/ui/<entry>/preview/<index>`, in a
+// fresh page. See harness.mjs for the page API.
 
-import { spawn } from 'node:child_process';
-import { mkdtempSync, readFileSync, writeFileSync, existsSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
+import { equal, ok, focused, run } from './harness.mjs';
 
-const BASE = process.env.BASE_URL || 'http://127.0.0.1:8791/ui';
-const ORIGIN = new URL(BASE).origin;
+// The inline content of a rich text editor's paragraph, as it would post.
+const richDoc = async (page, index) =>
+  (await page.evaluate(`JSON.parse(q('[data-howdy-rich-text-value]').value)`)).content[index].content;
 
-// Installed in every page: q and qa find elements in the page or inside
-// any live view's shadow root.
-const HELPERS = `
-window.q = (s) => document.querySelector(s) || [...document.querySelectorAll('lustre-server-component')].map((h) => h.shadowRoot?.querySelector(s)).find(Boolean) || null;
-window.qa = (s) => [...document.querySelectorAll(s), ...[...document.querySelectorAll('lustre-server-component')].flatMap((h) => [...(h.shadowRoot?.querySelectorAll(s) || [])])];
-`;
-const CHROMIUM = process.env.CHROMIUM || 'chromium';
-const only = process.argv[2];
-
-// -- Chromium and the protocol -----------------------------------------------
-
-async function launch() {
-  const profile = mkdtempSync(join(tmpdir(), 'howdy-browser-'));
-  const child = spawn(CHROMIUM, [
-    '--headless=new',
-    '--remote-debugging-port=0',
-    '--no-first-run',
-    '--no-default-browser-check',
-    '--disable-gpu',
-    `--user-data-dir=${profile}`,
-    'about:blank',
-  ], { stdio: 'ignore' });
-  const portFile = join(profile, 'DevToolsActivePort');
-  for (let i = 0; i < 100 && !existsSync(portFile); i++) await sleep(100);
-  const [port] = readFileSync(portFile, 'utf8').split('\n');
-  const version = await (await fetch(`http://127.0.0.1:${port}/json/version`)).json();
-  const browser = await connect(version.webSocketDebuggerUrl);
-  return {
-    browser,
-    // Chromium keeps writing its profile as it shuts down, so wait for it to
-    // exit, and never fail the run over a leftover temporary directory.
-    async close() {
-      if (child.exitCode === null && child.signalCode === null) {
-        const exited = new Promise((resolve) => child.once('exit', resolve));
-        child.kill();
-        await Promise.race([exited, sleep(5000)]);
-      }
-      try {
-        rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
-      } catch (error) {
-        console.warn(`could not remove ${profile}: ${error.message}`);
-      }
-    },
-  };
-}
-
-async function connect(url) {
-  const socket = new WebSocket(url);
-  await new Promise((resolve, reject) => {
-    socket.onopen = resolve;
-    socket.onerror = reject;
-  });
-  let next = 1;
-  const pending = new Map();
-  const listeners = new Set();
-  socket.onmessage = ({ data }) => {
-    const message = JSON.parse(data);
-    if (message.id && pending.has(message.id)) {
-      const { resolve, reject } = pending.get(message.id);
-      pending.delete(message.id);
-      if (message.error) reject(new Error(message.error.message));
-      else resolve(message.result);
-    } else {
-      for (const listener of listeners) listener(message);
-    }
-  };
-  return {
-    send(method, params = {}, sessionId) {
-      const id = next++;
-      socket.send(JSON.stringify({ id, method, params, sessionId }));
-      return new Promise((resolve, reject) => pending.set(id, { resolve, reject }));
-    },
-    on(listener) {
-      listeners.add(listener);
-      return () => listeners.delete(listener);
-    },
-  };
-}
-
-// A page: navigation, evaluation and input.
-async function newPage(browser) {
-  const { targetId } = await browser.send('Target.createTarget', { url: 'about:blank' });
-  const { sessionId } = await browser.send('Target.attachToTarget', { targetId, flatten: true });
-  const send = (method, params) => browser.send(method, params, sessionId);
-  const errors = [];
-  browser.on((message) => {
-    if (message.sessionId !== sessionId) return;
-    if (message.method === 'Runtime.exceptionThrown') errors.push(message.params.exceptionDetails.exception?.description || message.params.exceptionDetails.text);
-  });
-  await send('Page.enable');
-  await send('Runtime.enable');
-  await send('Page.addScriptToEvaluateOnNewDocument', { source: HELPERS });
-  await send('Emulation.setDeviceMetricsOverride', { width: 1024, height: 768, deviceScaleFactor: 1, mobile: false });
-
-  const evaluate = async (expression) => {
-    const result = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true });
-    if (result.exceptionDetails) throw new Error(result.exceptionDetails.exception?.description || result.exceptionDetails.text);
-    return result.result.value;
-  };
-
-  const keys = {
-    ArrowDown: 40, ArrowUp: 38, ArrowLeft: 37, ArrowRight: 39, Enter: 13, Escape: 27,
-    Home: 36, End: 35, Tab: 9, ' ': 32, PageUp: 33, PageDown: 34, Backspace: 8,
-  };
-
-  const page = {
-    errors,
-    evaluate,
-    // A page of the gallery app itself, rather than a component preview.
-    open(path) {
-      return page.navigate(ORIGIN + path);
-    },
-    goto(path) {
-      return page.navigate(BASE + path);
-    },
-    async navigate(url) {
-      const loaded = new Promise((resolve) => {
-        const off = browser.on((message) => {
-          if (message.sessionId === sessionId && message.method === 'Page.loadEventFired') {
-            off();
-            resolve();
-          }
-        });
-      });
-      await send('Page.navigate', { url });
-      await loaded;
-      // Module scripts run before load; give layout a frame.
-      await evaluate('new Promise((r) => requestAnimationFrame(() => r()))');
-    },
-    // The centre of the first element matching `selector`, in viewport
-    // coordinates.
-    async centre(selector) {
-      const box = await evaluate(`(() => {
-        const el = q(${JSON.stringify(selector)});
-        if (!el) return null;
-        el.scrollIntoView({ block: 'nearest' });
-        const r = el.getBoundingClientRect();
-        return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
-      })()`);
-      if (!box) throw new Error(`no element matches ${selector}`);
-      return box;
-    },
-    async mouse(type, x, y, extra = {}) {
-      await send('Input.dispatchMouseEvent', { type, x, y, button: 'left', buttons: type === 'mouseReleased' ? 0 : 1, clickCount: 1, pointerType: 'mouse', ...extra });
-    },
-    async click(selector) {
-      const { x, y } = await page.centre(selector);
-      await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y });
-      await page.mouse('mousePressed', x, y);
-      await page.mouse('mouseReleased', x, y);
-      await sleep(50);
-    },
-    async hover(selector) {
-      const { x, y } = await page.centre(selector);
-      await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y });
-      await sleep(50);
-    },
-    async drag(selector, dx, dy) {
-      const { x, y } = await page.centre(selector);
-      await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y });
-      await page.mouse('mousePressed', x, y);
-      const steps = 8;
-      for (let i = 1; i <= steps; i++) {
-        await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: x + (dx * i) / steps, y: y + (dy * i) / steps, button: 'left', buttons: 1 });
-      }
-      await page.mouse('mouseReleased', x + dx, y + dy);
-      await sleep(50);
-    },
-    // Park the pointer in the bottom-left corner, away from the previews
-    // and from toasts.
-    async leave() {
-      await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 5, y: 760 });
-      await sleep(50);
-    },
-    async press(key) {
-      const code = keys[key] ?? key.toUpperCase().charCodeAt(0);
-      const text = key === 'Enter' ? '\r' : key.length === 1 ? key : undefined;
-      const name = key === ' ' ? 'Space' : key.length === 1 ? `Key${key.toUpperCase()}` : key;
-      await send('Input.dispatchKeyEvent', { type: text ? 'keyDown' : 'rawKeyDown', key, code: name, windowsVirtualKeyCode: code, text });
-      await send('Input.dispatchKeyEvent', { type: 'keyUp', key, code: name, windowsVirtualKeyCode: code });
-      await sleep(30);
-    },
-    async type(text) {
-      for (const char of text) await send('Input.insertText', { text: char });
-      await sleep(30);
-    },
-    focus(selector) {
-      return evaluate(`q(${JSON.stringify(selector)}).focus()`);
-    },
-    // A file of `content` in a temporary folder, for `chooseFiles`.
-    file(name, content) {
-      const path = join(files, name);
-      writeFileSync(path, content);
-      return path;
-    },
-    // Choose files in a file input, as the file chooser would.
-    async chooseFiles(selector, paths) {
-      const { result } = await send('Runtime.evaluate', { expression: `q(${JSON.stringify(selector)})` });
-      await send('DOM.setFileInputFiles', { files: paths, objectId: result.objectId });
-      await sleep(50);
-    },
-    // Send uploads at this many bytes a second.
-    async slowUploads(bytesPerSecond) {
-      await send('Network.enable');
-      await send('Network.emulateNetworkConditions', { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: bytesPerSecond });
-    },
-    // Wait until `expression` is true, for animations and smooth scrolling.
-    async until(expression, timeout = 2000) {
-      const end = Date.now() + timeout;
-      while (Date.now() < end) {
-        // A page navigating away has no context to evaluate in for a moment.
-        if (await evaluate(expression).catch(() => false)) return;
-        await sleep(40);
-      }
-      throw new Error(`timed out waiting for ${expression}`);
-    },
-    close: () => browser.send('Target.closeTarget', { targetId }),
-  };
-  return page;
-}
-
-function equal(actual, expected, what) {
-  if (JSON.stringify(actual) !== JSON.stringify(expected)) {
-    throw new Error(`${what}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
-  }
-}
-
-function ok(value, what) {
-  if (!value) throw new Error(what);
-}
-
-const focused = `(() => { let f = document.activeElement; while (f?.shadowRoot?.activeElement) f = f.shadowRoot.activeElement; return f?.textContent.trim() || f?.getAttribute('aria-label') || f?.tagName; })()`;
+// Measure an editor while its code is held back, then once it has taken
+// over. A page can only do this once: the code is cached after.
+const sameHeightOnceReady = async (page, preview) => {
+  const held = await page.hold('*_howdy/rich-text/*');
+  await page.goto(`/rich_text/preview/${preview}`);
+  const height = `Math.round(q('howdy-rich-text').getBoundingClientRect().height)`;
+  const before = await page.evaluate(height);
+  ok(!(await page.evaluate(`q('howdy-rich-text').hasAttribute('data-ready')`)), 'measured before the editor loaded');
+  await held.release();
+  await page.until(`q('howdy-rich-text')?.hasAttribute('data-ready')`, 5000);
+  equal(await page.evaluate(height), before, 'height');
+};
 
 // -- Tests -------------------------------------------------------------------
 
@@ -749,6 +525,225 @@ const tests = {
     ok(last.values.every((key) => key.startsWith('uploads/')), 'only the uploaded keys');
   },
 
+  async 'a rich text editor formats as you type and posts the document'(page) {
+    await page.goto('/rich_text/preview/0');
+    await page.until(`q('howdy-rich-text')?.hasAttribute('data-ready')`, 5000);
+    equal(await page.evaluate(`document.querySelector('#comment-form').checkValidity()`), false, 'required and empty');
+    await page.click('howdy-rich-text [contenteditable]');
+    await page.type('Hello ');
+    await page.press('b', 2);
+    equal(await page.evaluate(`q('[data-command=bold]').getAttribute('aria-pressed')`), 'true', 'bold pressed');
+    await page.type('world');
+    await page.press('b', 2);
+    await page.type('!');
+    equal(await richDoc(page, 0), [{ type: 'text', text: 'Hello ' }, { type: 'text', marks: [{ type: 'bold' }], text: 'world' }, { type: 'text', text: '!' }], 'bold from the keyboard');
+    equal(await page.evaluate(`document.querySelector('#comment-form').checkValidity()`), true, 'valid with text');
+    // Markdown-like shortcuts.
+    await page.press('Enter');
+    await page.type('# Title');
+    await page.press('Enter');
+    await page.type('- one');
+    await page.press('Enter');
+    await page.type('two');
+    await page.press('Enter');
+    await page.press('Enter');
+    await page.type('a `tick` and **strong**');
+    const doc = await page.evaluate(`JSON.parse(q('[data-howdy-rich-text-value]').value)`);
+    equal(doc.content.map((node) => node.type), ['paragraph', 'heading', 'bullet_list', 'paragraph'], 'blocks');
+    equal(doc.content[1].attrs.level, 1, 'heading level');
+    equal(doc.content[2].content.length, 2, 'two list items');
+    equal(doc.content[3].content, [{ type: 'text', text: 'a ' }, { type: 'text', marks: [{ type: 'code' }], text: 'tick' }, { type: 'text', text: ' and ' }, { type: 'text', marks: [{ type: 'bold' }], text: 'strong' }], 'inline shortcuts');
+    ok(!(await page.evaluate(`q('[data-command=undo]').disabled`)), 'undo enabled');
+  },
+
+  async 'mentions are suggested by the search endpoint and posted with their ids'(page) {
+    await page.goto('/rich_text/preview/0');
+    await page.until(`q('howdy-rich-text')?.hasAttribute('data-ready')`, 5000);
+    await page.click('howdy-rich-text [contenteditable]');
+    await page.type('Thanks @gr');
+    const menuOpen = `q('[data-howdy-rich-text-menu]').matches(':popover-open')`;
+    const labels = `[...document.querySelectorAll('[data-howdy-rich-text-options] [role=option] > span:nth-child(2)')].map((el) => el.textContent)`;
+    await page.until(`${menuOpen} && ${labels}.length === 1`, 3000);
+    equal(await page.evaluate(labels), ['Grace Hopper'], 'suggestions');
+    equal(await page.evaluate(`q('[contenteditable]').getAttribute('aria-activedescendant')`), await page.evaluate(`q('[role=option]').id`), 'active option announced');
+    await page.press('Enter');
+    equal(await page.evaluate(menuOpen), false, 'closed once chosen');
+    await page.type('and #4');
+    await page.until(`${menuOpen} && ${labels}.length === 1`, 3000);
+    await page.press('Tab');
+    // Escape closes the list, and it stays closed for that mention.
+    // Choosing adds a space after the mention.
+    await page.type('@a');
+    await page.until(`${menuOpen} && ${labels}.length > 1`, 3000);
+    await page.press('ArrowDown');
+    equal(await page.evaluate(`q('[role=option][aria-selected=true] > span:nth-child(2)').textContent`), await page.evaluate(`${labels}[1]`), 'arrow moves');
+    await page.press('Escape');
+    equal(await page.evaluate(menuOpen), false, 'escape closes');
+    await page.type('d');
+    await sleep(300);
+    equal(await page.evaluate(menuOpen), false, 'stays closed');
+    const inline = (await richDoc(page, 0)).filter((node) => node.type === 'mention').map((node) => node.attrs);
+    equal(inline, [{ trigger: '@', kind: 'person', id: '3', label: 'Grace Hopper' }, { trigger: '#', kind: 'issue', id: '42', label: '42' }], 'mentions in the document');
+    await page.click('#comment-form button[type=submit]');
+    await page.until(`q('#rich-text-mentions')?.textContent === 'person:3 issue:42'`, 5000);
+    equal(await page.evaluate(`q('#rich-text-plain').textContent`), 'Thanks @Grace Hopper and #42 @ad', 'plain text');
+    equal(await page.evaluate(`q('#rich-text-shown a[data-mention=person]').getAttribute('href')`), '#person-3', 'drawn by the server');
+  },
+
+  async 'links are added from the toolbar, and unsafe ones refused'(page) {
+    await page.goto('/rich_text/preview/2');
+    await page.until(`q('howdy-rich-text')?.hasAttribute('data-ready')`, 5000);
+    await page.click('howdy-rich-text [contenteditable]');
+    await page.type('Read the docs');
+    for (let i = 0; i < 4; i++) await page.press('ArrowLeft', 8);
+    await page.click('[data-command=link]');
+    ok(await page.evaluate(`q('[data-howdy-rich-text-link]').matches(':popover-open')`), 'link form open');
+    ok(await page.evaluate(`document.activeElement.matches('[data-howdy-rich-text-link-input]')`), 'address focused');
+    await page.type('javascript:alert(1)');
+    await page.press('Enter');
+    equal(await page.evaluate(`q('[data-howdy-rich-text-link-input]').validationMessage`), 'Enter a web address, such as https://example.com.', 'refused');
+    await page.evaluate(`q('[data-howdy-rich-text-link-input]').value = ''`);
+    await page.type('example.com/docs');
+    await page.press('Enter');
+    equal(await page.evaluate(`q('[data-howdy-rich-text-link]').matches(':popover-open')`), false, 'closed');
+    equal(await richDoc(page, 0), [{ type: 'text', text: 'Read the ' }, { type: 'text', marks: [{ type: 'link', attrs: { href: 'https://example.com/docs' } }], text: 'docs' }], 'linked');
+    equal(await page.evaluate(`q('[data-command=link]').getAttribute('aria-pressed')`), 'true', 'link pressed in a link');
+    ok(await page.evaluate(`q('[contenteditable]').contains(document.activeElement) || document.activeElement.matches('[contenteditable]')`), 'focus back in the text');
+  },
+
+  async 'pasted HTML keeps only what a document can hold'(page) {
+    await page.goto('/rich_text/preview/2');
+    await page.until(`q('howdy-rich-text')?.hasAttribute('data-ready')`, 5000);
+    await page.click('howdy-rich-text [contenteditable]');
+    await page.evaluate(`(() => {
+      const data = new DataTransfer();
+      data.setData('text/html', '<p>Hi <b>bold</b> <a href="javascript:window.pwned=1">bad</a> <a href="https://ok.example/">good</a><script>window.pwned=1<\/script><img src=x onerror="window.pwned=1"></p><h1>Head</h1><table><tr><td>cell</td></tr></table>');
+      data.setData('text/plain', 'Hi bold bad good');
+      q('[contenteditable]').dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
+    })()`);
+    await sleep(200);
+    const doc = await page.evaluate(`JSON.parse(q('[data-howdy-rich-text-value]').value)`);
+    const json = JSON.stringify(doc);
+    ok(!json.includes('javascript'), 'no javascript link');
+    ok(json.includes('https://ok.example/'), 'the safe link is kept');
+    ok(json.includes('"bold"'), 'bold is kept');
+    ok(json.includes('cell') && json.includes('Head'), 'text from elsewhere is kept');
+    ok(!/image|img|script|table/.test(json), 'nothing else');
+    equal(await page.evaluate(`window.pwned`), undefined, 'nothing ran');
+  },
+
+  async 'an editor sends pasted and chosen files to storage and posts their keys'(page) {
+    await page.goto('/rich_text/preview/1');
+    await page.until(`q('howdy-rich-text')?.hasAttribute('data-ready')`, 5000);
+    await page.click('howdy-rich-text [contenteditable] h2');
+    await page.press('End');
+    await page.chooseFiles('[data-howdy-rich-text-files]', [page.file('notes.txt', 'hello, storage')]);
+    // A picture pasted from the clipboard.
+    await page.evaluate(`(async () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = canvas.height = 2;
+      const blob = await new Promise((r) => canvas.toBlob(r, 'image/png'));
+      const data = new DataTransfer();
+      data.items.add(new File([blob], 'dot.png', { type: 'image/png' }));
+      q('[contenteditable]').dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
+    })()`);
+    const files = `JSON.parse(q('[data-howdy-rich-text-value]').value).content.filter((node) => node.type === 'attachment').map((node) => node.attrs)`;
+    await page.until(`${files}.length === 2`, 5000);
+    const attached = await page.evaluate(files);
+    ok(attached.every((file) => file.key.startsWith('uploads/')), 'keys from the start endpoint');
+    equal(attached.map((file) => [file.name, file.content_type, file.size]).sort(), [['dot.png', 'image/png', attached.find((file) => file.name === 'dot.png').size], ['notes.txt', 'text/plain', 14]], 'what was attached');
+    equal(await page.evaluate(`[...document.querySelectorAll('[contenteditable] figure [data-part=name]')].map((el) => el.textContent).sort()`), ['dot.png', 'notes.txt'], 'shown as attachments');
+    ok(await page.evaluate(`[...document.querySelectorAll('[contenteditable] figure img')].some((img) => !img.hidden && img.src.startsWith('blob:'))`), 'the picture is shown');
+    equal(await page.evaluate(`q('[data-howdy-rich-text-proxy]').validationMessage`), '', 'the form may submit');
+    await page.click('#article-form button[type=submit]');
+    await page.until(`q('#rich-text-attachments')?.textContent.split(' ').length === 2`, 5000);
+    ok(await page.evaluate(`q('#rich-text-attachments').textContent.split(' ').every((entry) => entry.endsWith('=found'))`), 'stored');
+    ok(await page.evaluate(`q('#rich-text-shown figure img').src.includes('/files/')`), 'the picture drawn from storage');
+    await page.until(`q('howdy-rich-text')?.hasAttribute('data-ready')`, 5000);
+    ok(await page.evaluate(`[...document.querySelectorAll('[contenteditable] figure img')].some((img) => !img.hidden && img.src.includes('/files/'))`), 'and in the editor again');
+  },
+
+  async 'removing an attachment takes it out of the document'(page) {
+    await page.goto('/rich_text/preview/1');
+    await page.until(`q('howdy-rich-text')?.hasAttribute('data-ready')`, 5000);
+    await page.click('howdy-rich-text [contenteditable] h2');
+    await page.chooseFiles('[data-howdy-rich-text-files]', [page.file('gone.txt', 'bye')]);
+    const count = `JSON.parse(q('[data-howdy-rich-text-value]').value).content.filter((node) => node.type === 'attachment').length`;
+    await page.until(`${count} === 1`, 5000);
+    await page.click('[contenteditable] figure [data-part=remove]');
+    equal(await page.evaluate(count), 0, 'removed');
+    equal(await page.evaluate(`document.querySelectorAll('[contenteditable] figure').length`), 0, 'and not shown');
+  },
+
+  async 'nothing moves when an empty editor takes over from the server drawing'(page) {
+    await sameHeightOnceReady(page, 0);
+  },
+
+  async 'nothing moves when a written editor takes over from the server drawing'(page) {
+    await sameHeightOnceReady(page, 1);
+  },
+
+  async 'a required editor keeps an empty form from submitting'(page) {
+    await page.goto('/rich_text/preview/0');
+    await page.until(`q('howdy-rich-text')?.hasAttribute('data-ready')`, 5000);
+    equal(await page.evaluate(`getComputedStyle(q('[contenteditable] p'), '::before').content`), '"Add a comment… type @ to mention someone"', 'placeholder shown');
+    await page.click('#comment-form button[type=submit]');
+    await sleep(200);
+    ok(await page.evaluate(`location.pathname.startsWith('/ui/')`), 'still on the page');
+    equal(await page.evaluate(`q('[data-howdy-rich-text-proxy]').validationMessage`), 'Write something.', 'why');
+    // Spaces alone are still empty.
+    await page.click('howdy-rich-text [contenteditable]');
+    await page.type('   ');
+    equal(await page.evaluate(`document.querySelector('#comment-form').checkValidity()`), false, 'spaces are empty');
+    await page.type('ok');
+    equal(await page.evaluate(`document.querySelector('#comment-form').checkValidity()`), true, 'then valid');
+    // A label pointing at the editor's id focuses the editor.
+    await page.evaluate(`(() => { const label = document.createElement('label'); label.htmlFor = q('[data-howdy-rich-text-proxy]').id; label.id = 'probe-label'; label.textContent = 'Comment'; document.body.prepend(label); document.activeElement.blur(); })()`);
+    await page.click('#probe-label');
+    await page.until(`document.activeElement.matches('[contenteditable]')`);
+  },
+
+  async 'the toolbar is one stop in the tab order'(page) {
+    await page.goto('/rich_text/preview/2');
+    await page.until(`q('howdy-rich-text')?.hasAttribute('data-ready')`, 5000);
+    await page.focus('[data-command=bold]');
+    await page.press('ArrowRight');
+    equal(await page.evaluate(`document.activeElement.getAttribute('aria-label')`), 'Italic', 'arrow moves');
+    equal(await page.evaluate(`[...document.querySelectorAll('[data-command]')].map((el) => el.tabIndex)`), [-1, 0, -1], 'one stop');
+    await page.press('End');
+    equal(await page.evaluate(`document.activeElement.getAttribute('aria-label')`), 'Link', 'end');
+  },
+
+  async 'a live view hears the editor when it loses focus, and can replace its document'(page) {
+    await page.open('/lab');
+    await page.until(`q('howdy-rich-text')?.hasAttribute('data-ready')`, 5000);
+    await page.click('howdy-rich-text [contenteditable] p');
+    await page.press('End');
+    await page.type(' and me');
+    const heard = `q('#lab-note-heard').textContent`;
+    equal(await page.evaluate(heard), '0: Hello from the server', 'not heard while typing');
+    await page.click('#lab-plan');
+    await page.press('Escape');
+    await page.until(`${heard} === '1: Hello from the server and me'`, 3000);
+    equal(await page.evaluate(`q('howdy-rich-text [contenteditable]').textContent`), 'Hello from the server and me', 'the patch left the editor alone');
+    // Mentions inside a shadow root.
+    await page.click('howdy-rich-text [contenteditable] p');
+    await page.press('End');
+    await page.type(' @mar');
+    await page.until(`q('[data-howdy-rich-text-menu]').matches(':popover-open') && q('[role=option]')`, 3000);
+    await page.press('Enter');
+    ok(await page.evaluate(`Boolean(q('[contenteditable] [data-howdy-mention=person][data-id="5"]'))`), 'mentioned in a live view');
+    // The server clears it.
+    await page.click('#lab-note-clear');
+    await page.until(`q('howdy-rich-text [contenteditable]').textContent === ''`, 3000);
+    equal(await page.evaluate(`JSON.parse(q('[data-howdy-rich-text-value]').value)`), { type: 'doc', content: [{ type: 'paragraph' }] }, 'empty value');
+    await page.click('howdy-rich-text [contenteditable]');
+    await page.type('again');
+    await page.click('#lab-plan');
+    await page.press('Escape');
+    await page.until(`${heard}.endsWith(': again')`, 3000);
+  },
+
   async 'a questionnaire shows its first question'(page) {
     await page.goto('/questionnaire/preview/0');
     equal(await page.evaluate(`document.querySelector('legend').textContent.trim()`), 'What do you mostly do?', 'prompt');
@@ -756,32 +751,4 @@ const tests = {
   },
 };
 
-// -- Running -----------------------------------------------------------------
-
-const { browser, close } = await launch();
-// Files for the uploader tests to choose.
-const files = mkdtempSync(join(tmpdir(), 'howdy-uploads-'));
-let failed = 0;
-let ran = 0;
-try {
-  for (const [name, test] of Object.entries(tests)) {
-    if (only && !name.includes(only)) continue;
-    ran++;
-    const page = await newPage(browser);
-    try {
-      await test(page);
-      if (page.errors.length) throw new Error('page errors: ' + page.errors.join('; '));
-      console.log(`  ok    ${name}`);
-    } catch (error) {
-      failed++;
-      console.log(`  FAIL  ${name}\n        ${error.message}`);
-    } finally {
-      await page.close().catch(() => {});
-    }
-  }
-} finally {
-  await close();
-  rmSync(files, { recursive: true, force: true });
-}
-console.log(`\n${ran - failed} passed, ${failed} failed`);
-process.exit(failed ? 1 : 0);
+await run(tests, { base: 'http://127.0.0.1:8791/ui' });

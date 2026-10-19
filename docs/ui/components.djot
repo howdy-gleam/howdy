@@ -63,7 +63,7 @@ ui.button(Primary, [event.on_click(Save)], [text("Save")])
 Each component also has its own module under `howdy/ui`, such as
 `howdy/ui/button` or `howdy/ui/card`. Its page in the
 [gallery](/components) names the module. A few components with many
-options, `calendar`, `data_table`, `chart` and `uploader`, are
+options, `calendar`, `data_table`, `chart`, `uploader` and `rich_text`, are
 [builders](#Builders) used from their own modules only.
 
 ## What there is
@@ -80,8 +80,9 @@ The [gallery](/components) groups them the same way:
   inputs, [selects](/components/select),
   [comboboxes and command menus](/components/command),
   [calendars and date pickers](/components/calendar), questionnaires
-  that ask one question at a time, and [uploaders](/components/uploader)
-  that send files straight to storage.
+  that ask one question at a time, [uploaders](/components/uploader)
+  that send files straight to storage, and a
+  [rich text editor](/components/rich_text) with mentions.
 - *Layout*: containers, stacks and rows, [cards](/components/card), an
   application [sidebar](/components/sidebar), scroll areas, resizable
   panels and right-to-left sections.
@@ -221,6 +222,83 @@ submit while one is still on its way, and `uploader.stored` shows files
 saved earlier so an edit form keeps them unless they are removed. In a
 live view, `live.on_values("photos", PhotosChanged)` hears the keys each
 time they change.
+
+### Rich text
+
+`howdy/ui/rich_text` is an editor for formatted writing, like Rails'
+Action Text: bold, italic, links, headings, quotes, lists and code, with
+mentions of people or anything else, and files sent straight to storage.
+It posts the document as JSON, which `howdy/ui/rich_text/document` reads
+into Gleam values:
+
+```gleam
+import howdy/ui/rich_text
+import howdy/ui/rich_text/document
+
+html.form([attribute.method("post"), attribute.action("/posts")], [
+  ui.stack([], [
+    rich_text.new(name: "body")
+      |> rich_text.value(post.body)
+      |> rich_text.placeholder("Write something…")
+      |> rich_text.mentions(trigger: "@", kind: "person", search: "/people/search")
+      |> rich_text.attachments(start: "/posts/uploads", url: fn(file) {
+        Some(files.url(file.key))
+      })
+      |> rich_text.required
+      |> rich_text.view,
+    ui.submit_button(Primary, [], [text("Post")]),
+  ]),
+])
+```
+
+The editor's browser code is ProseMirror, loaded only by pages with an
+editor. Mount `ui.rich_text()` in the app to serve it:
+
+```gleam
+howdy.new()
+|> howdy.controller(ui.rich_text())
+```
+
+Reading the post is where it is made safe. `rich_text.field` in a form
+validator, or `document.decode`, refuses anything the editor could not
+have made, such as a `<script>` or a `javascript:` link, so a forged post
+gets no further than a typed one. Store the document with
+`document.to_string`, and show it with `document.view`, which draws it
+through Lustre, escaping all its text:
+
+```gleam
+use body <- rich_text.field(fields, "body", [rich_text.not_empty()])
+```
+
+Typing a trigger such as `@` asks the `search` endpoint for suggestions:
+`GET /people/search?q=ad`, answered with `rich_text.suggestions_to_json`.
+Each mention keeps the id you gave it and the label shown at the time.
+List them with `document.mentions` to send notifications, after checking
+each id is someone the writer may mention. When showing the document,
+`document.view_with` draws mentions and attachments from your records as
+they are now, so a renamed person shows their new name:
+
+```gleam
+document.view_with(
+  post.body,
+  mention: fn(mention) {
+    document.mention_view(mention, href: Some("/people/" <> mention.id))
+  },
+  attachment: fn(file) {
+    document.attachment_view(file, url: Some(files.url(file.key)))
+  },
+)
+```
+
+Attachments use the same `start` endpoint as the [uploader](#Uploads);
+check each key from `document.attachments` before you keep it. The
+toolbar, menus and text use the theme's tokens and prose styles, and the
+editor understands Markdown-like shortcuts as you type: `#` for a heading,
+`>` for a quote, `-` or `1.` for a list, three backticks for code, and
+`**bold**`, `_italic_`, `~~strike~~` and `` `code` ``. In a live view,
+`live.on_value("body", BodyChanged)` hears the document each time the
+editor loses focus, and giving it a new value, such as an empty one after
+sending, replaces what is in the editor.
 
 ## Layout
 

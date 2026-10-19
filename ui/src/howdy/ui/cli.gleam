@@ -12,6 +12,10 @@
 ////   copies need, and optionally a theme preset.
 //// - `registry` writes the catalogue as JSON and `llms.txt`, for tools and
 ////   for publishing a registry of your own.
+//// - `export` bundles the app's islands into `priv/howdy_islands`, then
+////   runs `gleam export erlang-shipment`.
+//// - `islands` only bundles the islands, for builds that export
+////   separately. Run it just before `gleam export erlang-shipment`.
 ////
 //// Options: `--to=<dir>` chooses the directory, `--force` overwrites,
 //// `--dry-run` shows what would change without changing it, `--install`
@@ -27,6 +31,7 @@ import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
+import howdy/ui/internal/islands
 import howdy/ui/registry
 import simplifile
 
@@ -87,6 +92,8 @@ pub fn execute(args: List(String)) -> Result(String, String) {
         "diff" -> diff(options)
         "init" -> init(options)
         "registry" -> publish(options)
+        "islands" -> islands.bundle()
+        "export" -> islands.export()
         _ -> Error(usage)
       }
     }
@@ -103,6 +110,8 @@ const usage = "usage: gleam run -m howdy/ui <command>
   diff <name>... [options]  compare your copies with the versions they came from
   init [options]            prepare a project for copies
   registry [--out=<dir>]    write the catalogue as JSON and llms.txt
+  export                    bundle the app's islands, then export a release
+  islands                   bundle the app's islands, to export separately
 
 options:
   --to=<dir>              where the copies live (default: src/<app>/ui)

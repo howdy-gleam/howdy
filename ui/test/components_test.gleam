@@ -202,6 +202,9 @@ pub fn every_copyable_entry_depends_only_on_what_it_may_test() {
       assert string.contains(source, "pub fn classes()")
       assert list.all(own_imports, fn(line) {
         core(line)
+        // Its own modules, such as the rich text editor's document and
+        // browser code, stay in howdy_ui, and a copy uses them from there.
+        || string.starts_with(line, "import " <> entry.module <> "/")
         || list.any(registry.entries(), fn(other) {
           other.kind == registry.Component
           && other.name != entry.name

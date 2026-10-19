@@ -5,6 +5,9 @@
 //// distinct class are computed once and kept in ETS tables owned by a
 //// supervised process in the howdy_ui application. After startup, cache
 //// access is direct, so rendering does not queue on the owner process.
+////
+//// Inside an island the same functions run in the browser, where the
+//// registry is a Map and new CSS is added to the page as it appears.
 
 import gleam/int
 import gleam/list
@@ -12,34 +15,44 @@ import gleam/set
 import gleam/string
 import howdy/ui/theme.{type Themes}
 import howdy/ui/theme/tokens
+import murmur3a
 import sketch
 import sketch/css.{type Class}
 
 @external(erlang, "howdy_ui_ffi", "known")
+@external(javascript, "./stylesheet.ffi.mjs", "known")
 fn known(name: String) -> Bool
 
 @external(erlang, "howdy_ui_ffi", "register")
+@external(javascript, "./stylesheet.ffi.mjs", "register")
 fn register(name: String, css: String) -> Nil
 
 @external(erlang, "howdy_ui_ffi", "name_of")
+@external(javascript, "./stylesheet.ffi.mjs", "name_of")
 fn name_of(class: Class) -> Result(String, Nil)
 
 @external(erlang, "howdy_ui_ffi", "remember_name")
+@external(javascript, "./stylesheet.ffi.mjs", "remember_name")
 fn remember_name(class: Class, name: String) -> Nil
 
 @external(erlang, "howdy_ui_ffi", "all_css")
+@external(javascript, "./stylesheet.ffi.mjs", "all_css")
 fn all_css() -> String
 
 @external(erlang, "howdy_ui_ffi", "css_for")
+@external(javascript, "./stylesheet.ffi.mjs", "css_for")
 fn css_for(names: List(String)) -> String
 
 @external(erlang, "howdy_ui_ffi", "scope_begin")
+@external(javascript, "./stylesheet.ffi.mjs", "scope_begin")
 fn scope_begin() -> Nil
 
 @external(erlang, "howdy_ui_ffi", "scope_end")
+@external(javascript, "./stylesheet.ffi.mjs", "scope_end")
 fn scope_end() -> List(String)
 
 @external(erlang, "howdy_ui_ffi", "note")
+@external(javascript, "./stylesheet.ffi.mjs", "note")
 fn note(name: String) -> Nil
 
 @external(erlang, "erlang", "phash2")
@@ -54,11 +67,10 @@ pub fn class_name(class: Class) -> String {
   let name = case name_of(class) {
     Ok(name) -> name
     Error(Nil) -> {
-      let assert Ok(sheet) = sketch.stylesheet(strategy: sketch.Ephemeral)
-      let #(sheet, name) = sketch.class_name(class, sheet)
+      let #(name, css) = render(class)
       case name == "" || known(name) {
         True -> Nil
-        False -> register(name, sketch.render(sheet))
+        False -> register(name, css)
       }
       remember_name(class, name)
       name
@@ -66,6 +78,30 @@ pub fn class_name(class: Class) -> String {
   }
   note(name)
   name
+}
+
+/// A class's name and CSS, the same on every target.
+///
+/// Sketch names a class by hashing `string.inspect` of its styles, which
+/// prints record labels on JavaScript and not on Erlang, so the two targets
+/// disagree. An island renders the same view on both, so the name here is
+/// a hash of the CSS Sketch renders, with Sketch's own name taken out.
+/// Classes Sketch names explicitly keep their names.
+pub fn render(class: Class) -> #(String, String) {
+  let assert Ok(sheet) = sketch.stylesheet(strategy: sketch.Ephemeral)
+  let #(sheet, generated) = sketch.class_name(class, sheet)
+  let css = sketch.render(sheet)
+  case generated {
+    "css-" <> _ -> {
+      let name =
+        string.replace(css, generated, "")
+        |> murmur3a.hash_string(1)
+        |> murmur3a.hex_digest
+      let name = "css-" <> name
+      #(name, string.replace(css, generated, name))
+    }
+    _ -> #(generated, css)
+  }
 }
 
 /// Register a block of CSS that is not a class, such as `@keyframes`, under
@@ -122,11 +158,10 @@ pub fn css_of(classes: List(Class)) -> String {
   let #(_, parts) =
     list.fold(classes, #(set.new(), []), fn(acc, class) {
       let #(seen, parts) = acc
-      let assert Ok(sheet) = sketch.stylesheet(strategy: sketch.Ephemeral)
-      let #(sheet, name) = sketch.class_name(class, sheet)
+      let #(name, css) = render(class)
       case name == "" || set.contains(seen, name) {
         True -> acc
-        False -> #(set.insert(seen, name), [sketch.render(sheet), ..parts])
+        False -> #(set.insert(seen, name), [css, ..parts])
       }
     })
   parts |> list.reverse |> string.join("\n\n")
