@@ -200,6 +200,7 @@ pub opaque type Insert {
     max_attempts: Int,
     at: When,
     unique: Option(String),
+    unique_waiting: Bool,
   )
 }
 
@@ -219,6 +220,7 @@ pub fn new(job: Job(args), args: args) -> Insert {
     max_attempts: job.max_attempts,
     at: Now,
     unique: None,
+    unique_waiting: False,
   )
 }
 
@@ -237,13 +239,24 @@ pub fn at(insert: Insert, unix_milliseconds: Int) -> Insert {
 /// `Duplicate` with that job's id instead. Once it has finished, the key is
 /// free again.
 pub fn unique(insert: Insert, key: String) -> Insert {
-  Insert(..insert, unique: Some(key))
+  Insert(..insert, unique: Some(key), unique_waiting: False)
+}
+
+/// Queue it only if no job with the same `key` is waiting to start; one
+/// that is running does not count. Work that arrives while a job runs then
+/// gets a job of its own, which a job holding the key the whole time would
+/// miss: with `after`, a burst of changes is gathered into one job, and a
+/// change made while it runs is not lost. `insert` gives `Duplicate` with
+/// the waiting job's id when there is one. Keys of `unique` jobs and of
+/// these are separate.
+pub fn unique_while_waiting(insert: Insert, key: String) -> Insert {
+  Insert(..insert, unique: Some(key), unique_waiting: True)
 }
 
 /// What `insert` did.
 pub type Inserted {
   Inserted(id: Int)
-  /// A job with the same unique key was waiting or running already.
+  /// A job holding the same unique key was waiting, or running, already.
   Duplicate(id: Int)
 }
 
@@ -290,6 +303,7 @@ fn insert_at(insert: Insert, conn: Repo, now: Int) -> service.Result(Inserted) {
       scheduled_at:,
       inserted_at: now,
       unique_key: insert.unique,
+      unique_waiting: insert.unique_waiting,
       traceparent: trace.traceparent(),
     ),
   ))
@@ -1251,6 +1265,7 @@ fn produce(
         store.release(
           producer.runner.repo,
           list.map(jobs, fn(entry) { #({ entry.1 }.id, { entry.1 }.attempt) }),
+          producer.runner.clock(),
         )
       {
         Ok(Nil) -> Nil
@@ -1410,7 +1425,13 @@ fn settle(
   case outcome {
     Done -> store.complete(runner.repo, row.id, row.attempt, now)
     Snooze(delay) ->
-      store.snooze(runner.repo, row.id, row.attempt, now + int.max(delay, 0))
+      store.snooze(
+        runner.repo,
+        row.id,
+        row.attempt,
+        now + int.max(delay, 0),
+        now,
+      )
     Retry(reason) | RetryIn(reason:, ..) if row.attempt >= row.max_attempts -> {
       log(logging.Error, row, "failed for good: " <> reason)
       store.finish(
@@ -1431,6 +1452,7 @@ fn settle(
         row.attempt,
         now + delay,
         failed(reason),
+        now,
       )
     }
     RetryIn(milliseconds:, reason:) -> {
@@ -1441,6 +1463,7 @@ fn settle(
         row.attempt,
         now + int.max(milliseconds, 0),
         failed(reason),
+        now,
       )
     }
     Cancel(reason) ->
@@ -1618,7 +1641,7 @@ pub fn rescue_expired(runner: Runner) -> service.Result(Int) {
         }
         False -> {
           log(logging.Warning, row, "will run again: " <> reason)
-          store.reschedule(conn, row.id, row.attempt, now, errors)
+          store.reschedule(conn, row.id, row.attempt, now, errors, now)
         }
       }
     }),

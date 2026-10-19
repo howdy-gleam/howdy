@@ -762,3 +762,85 @@ pub fn postgres_tells_runners_about_jobs_other_nodes_queue_test() {
     _ -> Nil
   }
 }
+
+// -- Unique while waiting -------------------------------------------------------------
+
+pub fn unique_while_waiting_lets_a_running_job_be_followed_test() {
+  let db = open()
+  let seen = process.new_subject()
+  let runner =
+    jobs.runner(db)
+    |> jobs.handle(echo_job(), fn(text, _) {
+      // Hold the first run until the test has queued more.
+      let gate = process.new_subject()
+      process.send(seen, gate)
+      case text {
+        "first" -> {
+          let _ = process.receive(gate, 5000)
+          Nil
+        }
+        _ -> Nil
+      }
+      Done
+    })
+  let first =
+    queue(db, jobs.new(echo_job(), "first") |> jobs.unique_while_waiting("k"))
+  // While it waits, more collapse into it.
+  let assert Ok(Duplicate(same)) =
+    jobs.insert(jobs.new(echo_job(), "x") |> jobs.unique_while_waiting("k"), db)
+  assert same == first
+  // A plain unique key of the same name is separate.
+  let assert Ok(Inserted(_)) =
+    jobs.insert(jobs.new(echo_job(), "plain") |> jobs.unique("k"), db)
+  let assert Ok(_) =
+    jobs.start(
+      runner |> jobs.queue("default", concurrency: 1) |> jobs.check_every(20),
+    )
+  let assert Ok(gate) = process.receive(seen, 2000)
+  let assert Ok(Nil) = wait_for(fn() { record(db, first).state == Executing })
+  // Running, it no longer holds the key.
+  let assert Ok(Inserted(follow_up)) =
+    jobs.insert(
+      jobs.new(echo_job(), "follow up") |> jobs.unique_while_waiting("k"),
+      db,
+    )
+  let assert Ok(Duplicate(again)) =
+    jobs.insert(jobs.new(echo_job(), "y") |> jobs.unique_while_waiting("k"), db)
+  assert again == follow_up
+  process.send(gate, Nil)
+  let assert Ok(Nil) =
+    wait_for(fn() {
+      record(db, first).state == Completed
+      && record(db, follow_up).state == Completed
+    })
+  jobs.stop(runner)
+}
+
+pub fn a_superseded_waiting_job_is_cancelled_rather_than_retried_test() {
+  let db = open()
+  let clock = new_clock()
+  let seen = process.new_subject()
+  let started = process.new_subject()
+  let runner =
+    runner(db, clock, seen, fn(text, _) {
+      case text {
+        "old" -> {
+          process.send(started, Nil)
+          // Another job with the key is queued while this one runs.
+          let assert Ok(_) =
+            jobs.insert(
+              jobs.new(echo_job(), "new") |> jobs.unique_while_waiting("k"),
+              db,
+            )
+          Retry("down")
+        }
+        _ -> Done
+      }
+    })
+  let old =
+    queue(db, jobs.new(echo_job(), "old") |> jobs.unique_while_waiting("k"))
+  assert drained(runner).completed == 1
+  let assert Ok(Nil) = process.receive(started, 0)
+  let superseded = record(db, old)
+  assert superseded.state == Cancelled
+}
