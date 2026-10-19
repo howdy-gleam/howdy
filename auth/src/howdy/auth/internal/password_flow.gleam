@@ -233,7 +233,11 @@ pub fn change(
   client: String,
 ) -> service.Result(Nil) {
   use hasher <- result.try(common.passwords(config))
-  let wrong = service.Invalid("current password is incorrect")
+  let wrong =
+    service.Coded(
+      "password_incorrect",
+      service.Invalid("current password is incorrect"),
+    )
   use _ <- result.try(
     case
       string.byte_size(current) > 0
@@ -244,7 +248,11 @@ pub fn change(
     },
   )
   use _ <- result.try(case current == new {
-    True -> Error(service.Invalid("new password must differ from the current"))
+    True ->
+      Error(service.Coded(
+        "password_unchanged",
+        service.Invalid("new password must differ from the current"),
+      ))
     False -> Ok(Nil)
   })
   use _ <- result.try(validate_new_password(config, new))
@@ -332,6 +340,7 @@ pub fn change(
       "",
       PasswordChanged,
       None,
+      common.recipient_locale(config, user.locale),
     ))
   Ok(Nil)
 }

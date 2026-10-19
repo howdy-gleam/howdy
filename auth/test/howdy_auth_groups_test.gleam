@@ -67,7 +67,7 @@ pub fn one_group_per_user_has_one_account_per_address_test() {
     )
   assert globex.id == "globex"
   // Registration has to say which group.
-  let assert Error(service.Invalid(_)) =
+  let assert Error(service.Coded(_, service.Invalid(_))) =
     auth.request_token(identity, "ada@example.com", auth.Register)
   assert auth.request_token(
       auth.in_group(identity, "missing"),
@@ -110,9 +110,9 @@ pub fn account_per_group_keeps_accounts_apart_test() {
   let acme = auth.in_group(identity, "acme")
   let globex = auth.in_group(identity, "globex")
   // An address alone names no account.
-  let assert Error(service.Invalid(_)) =
+  let assert Error(service.Coded(_, service.Invalid(_))) =
     auth.request_token(identity, "ada@example.com", auth.Login)
-  let assert Error(service.Invalid(_)) =
+  let assert Error(service.Coded(_, service.Invalid(_))) =
     auth.login_password(identity, "ada@example.com", "whatever it may be")
   let in_acme = join(identity, mailbox, "acme", "ada@example.com")
   let password = "an uncommon orchard phrase 947!"

@@ -136,7 +136,7 @@ A request for `/users?page=0` now answers `422`, with the failing field and
 its message in the body:
 
 ```json
-{"error":"validation failed","fields":[{"field":"page","message":"must be at least 1"}]}
+{"error":"validation failed","code":"validation","fields":[{"field":"page","code":"too_small","message":"must be at least 1","minimum":1}]}
 ```
 
 ## Testing query strings

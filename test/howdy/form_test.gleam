@@ -3,6 +3,7 @@ import gleam/option.{None, Some}
 import howdy
 import howdy/controller
 import howdy/form.{type Form}
+import howdy/problem
 import howdy/service.{FieldError}
 import howdy/testing
 import howdy/validate
@@ -208,10 +209,10 @@ pub fn every_field_error_is_reported_test() {
     ])
   assert signup(fields)
     == Error([
-      FieldError("email", "is required"),
-      FieldError("age", "must be an integer"),
-      FieldError("nickname", "must be at most 5 characters"),
-      FieldError("referrer", "must be at least 1"),
+      FieldError("email", problem.Required),
+      FieldError("age", problem.NotInteger),
+      FieldError("nickname", problem.TooLong(5)),
+      FieldError("referrer", problem.TooSmall(1)),
     ])
 }
 
@@ -219,8 +220,8 @@ pub fn blank_required_fields_test() {
   // A blank string is kept for the rules to judge; a blank int is missing.
   assert signup(form.from_fields([#("email", ""), #("age", "")]))
     == Error([
-      FieldError("email", "must be a valid email address"),
-      FieldError("age", "is required"),
+      FieldError("email", problem.NotEmail),
+      FieldError("age", problem.Required),
     ])
 }
 
@@ -238,16 +239,19 @@ pub fn repeated_singular_fields_are_rejected_test() {
     ])
   assert signup(fields)
     == Error([
-      FieldError("email", "must occur only once"),
-      FieldError("age", "must occur only once"),
-      FieldError("nickname", "must occur only once"),
-      FieldError("referrer", "must occur only once"),
+      FieldError("email", problem.Repeated),
+      FieldError("age", problem.Repeated),
+      FieldError("nickname", problem.Repeated),
+      FieldError("referrer", problem.Repeated),
     ])
 }
 
 pub fn error_finds_a_fields_message_test() {
-  let errors = [FieldError("email", "is required"), FieldError("age", "bad")]
-  assert form.error(errors, "age") == Some("bad")
+  let errors = [
+    FieldError("email", problem.Required),
+    FieldError("age", problem.Custom("bad", "bad")),
+  ]
+  assert form.error(errors, "age") == Some(problem.Custom("bad", "bad"))
   assert form.error(errors, "name") == None
 }
 
@@ -262,7 +266,8 @@ pub fn pages_can_render_errors_with_submitted_values_test() {
         case signup(fields) {
           Ok(_) -> controller.text(ctx, "welcome")
           Error(errors) -> {
-            let assert Some(message) = form.error(errors, "email")
+            let assert Some(found) = form.error(errors, "email")
+            let message = problem.message(found, problem.english())
             controller.html(ctx, form.value(fields, "email") <> ": " <> message)
             |> controller.with_status(422)
           }
@@ -289,5 +294,5 @@ pub fn validated_test() {
     |> testing.send(app(handler))
   assert res.status == 422
   assert testing.field_errors(res)
-    == Ok([FieldError("age", "must be at least 13")])
+    == Ok([FieldError("age", problem.TooSmall(13))])
 }

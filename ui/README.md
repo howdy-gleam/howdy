@@ -161,7 +161,7 @@ re-exports them. Every one is a Sketch class built from tokens.
 | `avatar` | `avatar` with initials behind the picture, `avatar_initials` |
 | `progress` | `progress`, `progress_indeterminate` |
 | `effects` | `scroll_fade`, `shimmer` |
-| `chat` | `chat_conversation`, `chat_message`, `chat_bubble`, `chat_note`; `chat.conversation_with` (a jump-to-newest button), `remember`, `start_at`, `on_older` (load history as the reader scrolls back, keeping their place), `styled_bubble`, `tinted_note`, `status`, `jump`, `reactions`, `reaction` |
+| `chat` | `chat_conversation`, `chat_message`, `chat_bubble`, `chat_note`; `remember`, `start_at`, `on_older` (load history as the reader scrolls back, keeping their place), `styled_bubble`, `tinted_note`, `status`, `jump`, `reactions`, `reaction` |
 | `attachment` | `attachment` (uploading, processing, failed or done, with a thumbnail and actions), `attachment_group`; `attachment.styled` for `Compact` and `Tile` |
 | `kbd` | `kbd`, `shortcut` |
 | `button_group` | `button_group` |
@@ -201,6 +201,29 @@ ui.field([], [
 ])
 ```
 
+### Words and languages
+
+Everything the components say, from a pagination's "Previous" to a toast's
+close button, is in one `howdy/ui/words.Words` record. Components that are
+plain functions take it as their first argument. Those built step by step
+take it with a `words` step, and speak English without one:
+
+```gleam
+let w = words.translated(i18n.new(locale.to_string(l)))  // or words.english()
+
+ui.pagination(w, current: 3, total: 12, href: page_href)
+data_table.new(columns, rows) |> data_table.words(w)
+calendar.new("due", year: 2026, month: 10) |> calendar.locale(w.calendar)
+```
+
+`translated` covers Arabic, Chinese, Dutch, English, French, German,
+Italian, Japanese, Polish, Portuguese and Spanish. Numbers, month and
+weekday names, and the first day of the week come from CLDR for 46
+locales. The words outside English were machine translated and await
+review. Change any of them with a record update:
+`Words(..words.english(), dismiss: "Close")`. For right-to-left
+languages, set `page.direction(direction.of(l))`.
+
 ### Interactive components
 
 Dialogs, popovers, menus, tooltips, tabs, accordions and selects are built
@@ -239,7 +262,7 @@ A live view hears the value of a select, combobox or calendar with
 
 ```gleam
 html.div([live.on_value("status", FilterStatus)], [
-  ui.combobox(id: "status", name: "status", ...),
+  ui.combobox(words: w, id: "status", name: "status", ...),
 ])
 ```
 

@@ -17,8 +17,17 @@
 ////
 //// Set the direction once, on the page; use `provider` for a passage in
 //// another direction. Both set the HTML `dir` attribute, so the browser
-//// does the rest.
+//// does the rest. `of` gives the direction of a locale, so a page in the
+//// reader's language can follow it:
+////
+//// ```gleam
+//// let l = locale.detect(ctx, locales)
+//// page.new(title)
+//// |> page.lang(locale.to_string(l))
+//// |> page.direction(direction.of(l))
+//// ```
 
+import howdy/locale.{type Locale}
 import howdy/ui/style.{class}
 import lustre/attribute.{type Attribute}
 import lustre/element.{type Element}
@@ -32,6 +41,24 @@ pub type Direction {
   Rtl
   /// Whichever the text itself starts with, for content from users.
   Auto
+}
+
+/// The direction text in a locale runs: `Rtl` for Arabic, Hebrew, Persian
+/// and others written right to left, `Ltr` for the rest.
+pub fn of(language: Locale) -> Direction {
+  case locale.right_to_left(language) {
+    True -> Rtl
+    False -> Ltr
+  }
+}
+
+/// The direction of a BCP 47 tag, such as a translator's locale. A tag
+/// that cannot be read is left to right.
+pub fn of_tag(tag: String) -> Direction {
+  case locale.parse(tag) {
+    Ok(parsed) -> of(parsed)
+    Error(Nil) -> Ltr
+  }
 }
 
 /// The `dir` attribute for a direction, for any element.

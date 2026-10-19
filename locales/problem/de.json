@@ -1,0 +1,18 @@
+{
+  "@@locale": "de",
+  "@@x-review": "machine translation, not yet reviewed by a native speaker",
+  "blank": "darf nicht leer sein",
+  "email": "muss eine gültige E-Mail-Adresse sein",
+  "file_too_large": "darf höchstens {maximum} groß sein",
+  "file_type": "muss einer der folgenden Typen sein: {allowed}",
+  "integer": "muss eine ganze Zahl sein",
+  "one_of": "muss einer der folgenden Werte sein: {allowed}",
+  "repeated": "darf nur einmal vorkommen",
+  "required": "ist erforderlich",
+  "too_few_items": "muss mindestens {minimum, plural, one {# Eintrag} other {# Einträge}} enthalten",
+  "too_large": "darf höchstens {maximum, number} sein",
+  "too_long": "darf höchstens {maximum, plural, one {# Zeichen} other {# Zeichen}} lang sein",
+  "too_many_items": "darf höchstens {maximum, plural, one {# Eintrag} other {# Einträge}} enthalten",
+  "too_short": "muss mindestens {minimum, plural, one {# Zeichen} other {# Zeichen}} lang sein",
+  "too_small": "muss mindestens {minimum, number} sein"
+}

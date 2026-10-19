@@ -20,6 +20,7 @@ import howdy/ui/menu
 import howdy/ui/menubar
 import howdy/ui/navigation_menu
 import howdy/ui/scroll_area
+import howdy/ui/words
 import lustre/attribute
 import lustre/element.{type Element, text}
 import lustre/element/html
@@ -176,7 +177,7 @@ pub fn input_groups_are_groups_around_one_field_test() {
 pub fn breadcrumbs_are_a_labelled_nav_ending_at_the_current_page_test() {
   let html =
     render(
-      breadcrumb.breadcrumb([], [
+      breadcrumb.breadcrumb(words.english(), [], [
         breadcrumb.link("/", [text("Home")]),
         breadcrumb.ellipsis(),
         breadcrumb.link("/docs", [text("Docs")]),

@@ -94,6 +94,10 @@ pub fn normalize_email(email: String) -> service.Result(String) {
     })
   {
     True -> Ok(email)
-    False -> Error(service.Invalid("invalid email address"))
+    False ->
+      Error(service.Coded(
+        "email_invalid",
+        service.Invalid("invalid email address"),
+      ))
   }
 }

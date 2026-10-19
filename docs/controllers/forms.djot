@@ -284,15 +284,19 @@ Two things are worth knowing about how fields are checked:
 - `custom(check, message)` builds a rule from your own test.
 
 A custom rule is a function that returns `True` for a good value, plus the
-message to use otherwise:
+problem to report otherwise. Rules report a
+[`Problem`](/docs/i18n/overview#validation-messages), not a sentence, so the
+words can be chosen in the reader's language; for a rule of your own, use
+`Custom` with a short code for clients and the message:
 
 ```gleam
 import gleam/string
+import howdy/problem
 
 fn no_spaces() -> validate.Rule(String) {
   validate.custom(
     fn(value) { !string.contains(value, " ") },
-    "must not contain spaces",
+    problem.Custom("spaces", "must not contain spaces"),
   )
 }
 ```
@@ -317,14 +321,15 @@ Decode failures still answer `400`. Validation failures answer `422` with
 every field error:
 
 ```json
-{"error":"validation failed","fields":[{"field":"name","message":"must not be empty"},{"field":"email","message":"must be a valid email address"},{"field":"age","message":"must be at least 13"}]}
+{"error":"validation failed","code":"validation","fields":[{"field":"name","code":"blank","message":"must not be empty"},{"field":"email","code":"email","message":"must be a valid email address"},{"field":"age","code":"too_small","message":"must be at least 13","minimum":13}]}
 ```
 
 The two statuses mean different things to a client. A `400` says the request
 was malformed, which is a bug in the client. A `422` says the request was
 understood but the values were not acceptable, which is something to show
 the person filling in the form. The `fields` list is made for that: match
-each `field` to an input and show its `message` beside it.
+each `field` to an input and show its `message` beside it, or the words for
+its `code` in the reader's language.
 
 If you have a value from somewhere other than a JSON body,
 `validate.check(ctx, result, next)` does the same job for any
@@ -381,10 +386,14 @@ refreshing the next page does not post the form a second time.
 On failure, render the form again with status `422`, passing in what the
 visitor typed and the errors. Two functions do the lookups for one input:
 `form.value(fields, "email")` is what was submitted, or `""`, and
-`form.error(errors, "email")` is that field's message, if it has one.
+`form.error(errors, "email")` is that field's problem, if it has one.
+`problem.message` puts a problem into words: `problem.english()` gives
+English, and `problem.translated(locale)` the words for the request's
+[locale](/docs/i18n/overview).
 
 ```gleam
 import gleam/option.{None, Some}
+import howdy/problem
 import lustre/attribute
 import lustre/element/html
 
@@ -397,7 +406,10 @@ fn email_input(fields: Form, errors: List(validate.FieldError)) {
       attribute.value(form.value(fields, "email")),
     ]),
     case form.error(errors, "email") {
-      Some(message) -> html.p([attribute.class("error")], [html.text(message)])
+      Some(found) ->
+        html.p([attribute.class("error")], [
+          html.text(problem.message(found, problem.english())),
+        ])
       None -> html.text("")
     },
   ])
@@ -435,6 +447,7 @@ response back into a list of field errors:
 
 ```gleam
 import gleam/json
+import howdy/problem
 import howdy/service.{FieldError}
 import howdy/testing
 
@@ -452,7 +465,7 @@ pub fn signup_rejects_children_test() {
 
   assert res.status == 422
   assert testing.field_errors(res)
-    == Ok([FieldError("age", "must be at least 13")])
+    == Ok([FieldError("age", problem.TooSmall(13))])
 }
 ```
 
@@ -520,7 +533,7 @@ pub fn age_must_be_a_number_test() {
     ])
 
   assert signup_from_form(fields)
-    == Error([FieldError("age", "must be an integer")])
+    == Error([FieldError("age", problem.NotInteger)])
 }
 ```
 

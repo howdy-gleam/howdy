@@ -138,7 +138,7 @@ pub fn signup_controller() {
   multi-select, in order.
 - When rendering the page again, `form.value(fields, "email")` gives the
   submitted value or `""`, and `form.error(errors, "email")` the field's
-  message, if any. Escape submitted values like any other user input.
+  problem, if any, which `problem.message` puts into words in any language. Escape submitted values like any other user input.
 - `get`, `all` and `fields` give raw access. `form.validated(ctx, signup)`
   answers a failed validation with the JSON `422` of `body.validated`, for
   endpoints that are not pages.
@@ -719,6 +719,24 @@ use Nil <- result.try(
 storage.url(files, key, expires_in: 3600)
 ```
 
+## Internationalisation
+
+Core's `howdy/locale` works out which locale a request wants, from the URL, a
+cookie, a saved preference or `accept-language`.
+[`howdy_i18n`](https://github.com/mikeyjones/howdy/blob/v2.1.1/i18n/README.md) turns ICU MessageFormat catalogues into
+typed Gleam functions, and writes numbers, money, dates, relative times and
+lists from CLDR data. Validation problems, Howdy UI and Howdy Auth follow the
+same locale:
+
+```gleam
+let l = locale.detect(ctx, locales)
+let t = i18n.new(locale.to_string(l))
+messages.cart_items(t, count: 3)                  // "3 Artikel"
+format.currency(t, minor: 1999, code: "EUR")      // "19,99 €"
+problem.message(problem.TooShort(8), problem.translated(l))
+// "muss mindestens 8 Zeichen lang sein"
+```
+
 ## Feature flags
 
 [`howdy_flags`](https://github.com/mikeyjones/howdy/blob/v2.1.1/flags/README.md) keeps feature flags defined in code and
@@ -747,6 +765,7 @@ validation. Keep the app separate from `main` so tests can build it too:
 
 ```gleam
 import gleam/json
+import howdy/problem
 import howdy/service.{FieldError}
 import howdy/testing
 import my_app
@@ -768,7 +787,7 @@ pub fn blank_name_is_rejected_test() {
 
   assert res.status == 422
   assert testing.field_errors(res)
-    == Ok([FieldError("name", "must not be empty")])
+    == Ok([FieldError("name", problem.Blank)])
 }
 ```
 
@@ -817,7 +836,8 @@ The core package reserves `howdy/auth`, every `howdy/auth/*` module and
 `howdy/flags` and every `howdy/flags/*` module for `howdy_flags`,
 `howdy/openapi` and every `howdy/openapi/*` module for `howdy_openapi`,
 `howdy/telemetry` and every `howdy/telemetry/*` module for `howdy_telemetry`,
-`howdy/ui` and every `howdy/ui/*` module for `howdy_ui`, and `howdy/dev` and
+`howdy/ui` and every `howdy/ui/*` module for `howdy_ui`, `howdy/i18n` and
+every `howdy/i18n/*` module for `howdy_i18n`, and `howdy/dev` and
 every `howdy/dev/*` module for `howdy_dev`. Core must not
 define these modules: Gleam/BEAM module names are
 global across dependencies. CI runs `scripts/check-auth-namespace.sh` to

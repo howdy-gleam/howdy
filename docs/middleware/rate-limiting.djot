@@ -38,7 +38,7 @@ Request 101 is refused with `429`, a `retry-after` header giving the seconds
 to wait, and the usual [error body](/docs/controllers/services):
 
 ```json
-{"error":"too many requests"}
+{"error":"too many requests","code":"too_many_requests"}
 ```
 
 ## Create limiters at startup

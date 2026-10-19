@@ -15,6 +15,7 @@ import gleam/int
 import gleam/json.{type Json}
 import howdy/content.{type Content}
 import howdy/context.{type Context}
+import howdy/problem.{type Problem}
 import logging
 
 /// The ways a service call can fail. Each variant maps to a status code.
@@ -41,11 +42,17 @@ pub type Error {
   /// 429 with a `retry-after` header. Usually produced by `howdy/rate_limit`,
   /// but a service can return it too, for example for password resets.
   TooManyRequests(retry_after_seconds: Int)
+  /// Another error with a stable code for clients, which answers as `error`
+  /// does with `code` in its body. A client that shows errors in other
+  /// languages translates by code, since the message is English:
+  /// `Coded("email_taken", Conflict("an account already exists"))`.
+  /// `uncoded` gives the error inside, for matching on its kind.
+  Coded(code: String, error: Error)
 }
 
 /// One problem with one field. The same type as `validate.FieldError`.
 pub type FieldError {
-  FieldError(field: String, message: String)
+  FieldError(field: String, problem: Problem)
 }
 
 /// The result type every service function returns.
@@ -53,7 +60,7 @@ pub type Result(a) =
   gleam.Result(a, Error)
 
 /// `Ok` becomes `200` with the encoded value. `Error` becomes the matching
-/// status with a JSON body of `{"error": "..."}`.
+/// status with a JSON body of `{"error": "...", "code": "..."}`.
 pub fn respond(
   result: Result(a),
   ctx: Context(guarded),
@@ -100,6 +107,7 @@ pub fn status_code(error: Error) -> Int {
     Internal(_) -> 500
     Validation(_) -> 422
     TooManyRequests(_) -> 429
+    Coded(error:, ..) -> status_code(error)
   }
 }
 
@@ -115,6 +123,32 @@ pub fn message(error: Error) -> String {
     Internal(_) -> "internal server error"
     Validation(_) -> "validation failed"
     TooManyRequests(_) -> "too many requests"
+    Coded(error:, ..) -> message(error)
+  }
+}
+
+/// The code sent to the client for an error: a `Coded` error's own, or one
+/// for its kind, such as `not_found` or `too_many_requests`.
+pub fn code(error: Error) -> String {
+  case error {
+    NotFound(_) -> "not_found"
+    Invalid(_) -> "invalid"
+    Conflict(_) -> "conflict"
+    Unauthorized -> "unauthorized"
+    Forbidden -> "forbidden"
+    UnsupportedMediaType(_) -> "unsupported_media_type"
+    Internal(_) -> "internal"
+    Validation(_) -> "validation"
+    TooManyRequests(_) -> "too_many_requests"
+    Coded(code:, ..) -> code
+  }
+}
+
+/// The error without any `Coded` around it.
+pub fn uncoded(error: Error) -> Error {
+  case error {
+    Coded(error:, ..) -> uncoded(error)
+    _ -> error
   }
 }
 
@@ -124,19 +158,20 @@ pub fn error_response(
   _ctx: Context(guarded),
   error: Error,
 ) -> Response(Content) {
-  case error {
+  let kind = uncoded(error)
+  case kind {
     Internal(detail) -> logging.log(logging.Error, detail)
     _ -> Nil
   }
 
-  let fields = case error {
+  let fields = case kind {
     Validation(errors) -> [
       #(
         "fields",
         json.array(errors, fn(e) {
           json.object([
             #("field", json.string(e.field)),
-            #("message", json.string(e.message)),
+            ..problem.to_json_fields(e.problem)
           ])
         }),
       ),
@@ -146,11 +181,15 @@ pub fn error_response(
 
   let response =
     json_response(
-      json.object([#("error", json.string(message(error))), ..fields]),
+      json.object([
+        #("error", json.string(message(error))),
+        #("code", json.string(code(error))),
+        ..fields
+      ]),
     )
     |> with_status(status_code(error))
 
-  case error {
+  case kind {
     TooManyRequests(seconds) ->
       response.set_header(response, "retry-after", int.to_string(seconds))
     _ -> response

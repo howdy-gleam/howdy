@@ -141,9 +141,9 @@ pub fn password_method_and_registration_are_explicitly_enabled_test() {
 pub fn password_policy_and_exact_input_test() {
   use database, identity, _, mailbox <- fixture
   let assert Ok(identity) = auth.with_passwords(identity)
-  let assert Error(service.Invalid(_)) =
+  let assert Error(service.Coded(_, service.Invalid(_))) =
     auth.register_password(identity, "short@example.com", "short")
-  let assert Error(service.Invalid(_)) =
+  let assert Error(service.Coded(_, service.Invalid(_))) =
     auth.register_password(
       identity,
       "large@example.com",
@@ -324,16 +324,25 @@ pub fn current_password_changes_the_password_without_a_fresh_email_login_test() 
   assert auth.set_password(identity, p, replacement) == Error(service.Forbidden)
 
   assert auth.change_password(identity, p, current: "wrong", new: replacement)
-    == Error(service.Invalid("current password is incorrect"))
+    == Error(service.Coded(
+      "password_incorrect",
+      service.Invalid("current password is incorrect"),
+    ))
   assert auth.change_password(identity, p, current: "", new: replacement)
-    == Error(service.Invalid("current password is incorrect"))
+    == Error(service.Coded(
+      "password_incorrect",
+      service.Invalid("current password is incorrect"),
+    ))
   assert auth.change_password(
       identity,
       p,
       current: strong_password,
       new: strong_password,
     )
-    == Error(service.Invalid("new password must differ from the current"))
+    == Error(service.Coded(
+      "password_unchanged",
+      service.Invalid("new password must differ from the current"),
+    ))
   assert result.is_error(auth.change_password(
     identity,
     p,
@@ -384,7 +393,10 @@ pub fn current_password_guesses_share_the_login_budget_test() {
   let p = principal(identity, session)
   list.each(list.repeat(Nil, 5), fn(_) {
     assert auth.change_password(identity, p, current: "wrong", new: replacement)
-      == Error(service.Invalid("current password is incorrect"))
+      == Error(service.Coded(
+        "password_incorrect",
+        service.Invalid("current password is incorrect"),
+      ))
   })
   let assert Error(service.TooManyRequests(wait)) =
     auth.change_password(

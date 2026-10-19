@@ -5,6 +5,7 @@ import howdy/ui/button.{Outline}
 import howdy/ui/button_group
 import howdy/ui/resizable
 import howdy/ui/toggle
+import howdy/ui/words
 import lustre/attribute
 import lustre/element.{type Element, text}
 import lustre/element/html
@@ -64,7 +65,7 @@ pub fn toggles_carry_their_pressed_state_test() {
 pub fn breadcrumbs_mark_the_current_page_test() {
   let html =
     render(
-      ui.breadcrumb([], [
+      ui.breadcrumb(words.english(), [], [
         ui.breadcrumb_link("/", [text("Home")]),
         ui.breadcrumb_ellipsis(),
         ui.breadcrumb_page([text("Order")]),
@@ -79,10 +80,16 @@ pub fn breadcrumbs_mark_the_current_page_test() {
 pub fn carousels_announce_each_slide_test() {
   let html =
     render(
-      ui.carousel("tour", label: "Tour", attributes: [], slides: [
-        ui.carousel_slide([text("A")]),
-        ui.carousel_slide([text("B")]),
-      ]),
+      ui.carousel(
+        words.english(),
+        "tour",
+        label: "Tour",
+        attributes: [],
+        slides: [
+          ui.carousel_slide([text("A")]),
+          ui.carousel_slide([text("B")]),
+        ],
+      ),
     )
   assert string.contains(html, "aria-roledescription=\"carousel\"")
   assert string.contains(html, "aria-label=\"2 of 2\"")

@@ -26,6 +26,7 @@ fn delivery(purpose: auth.Purpose) -> auth.Delivery {
     purpose:,
     link: None,
     code: None,
+    locale: None,
   )
 }
 
@@ -136,6 +137,7 @@ fn user_value(email: String) -> Result(user.User, Nil) {
     group_id: "default",
     created_at: now,
     updated_at: now,
+    locale: None,
   ))
 }
 

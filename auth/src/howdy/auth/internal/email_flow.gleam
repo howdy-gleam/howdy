@@ -196,7 +196,7 @@ fn send(
     ))
     // Attributable only when the address has an account. Someone investigating
     // unexpected email can see which requests caused it and where from.
-    case owner, sending {
+    use _ <- result.try(case owner, sending {
       Some(id), True ->
         audit.event_from(
           conn,
@@ -207,14 +207,27 @@ fn send(
           client,
         )
       _, _ -> Ok(Nil)
-    }
-    |> result.map(fn(_) { sending })
+    })
+    // The owner's chosen locale wins over the request's.
+    use stored <- result.try(case owner, sending {
+      Some(id), True -> store.user_locale(conn, id)
+      _, _ -> Ok(None)
+    })
+    Ok(#(sending, common.recipient_locale(config, stored)))
   })
+  let #(sending, locale) = sending
   case sending {
     False -> Ok(Nil)
     True ->
       case
-        config.deliver(common.delivery(config, email, secret, purpose, code))
+        config.deliver(common.delivery(
+          config,
+          email,
+          secret,
+          purpose,
+          code,
+          locale,
+        ))
       {
         Ok(Nil) -> Ok(Nil)
         Error(Nil) -> {

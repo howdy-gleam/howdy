@@ -7,6 +7,7 @@ import gleam/http
 import gleam/http/response
 import gleam/json
 import gleam/list
+import howdy/problem
 import howdy/service.{FieldError}
 import howdy/testing
 import howdy_example.{app}
@@ -78,9 +79,9 @@ pub fn create_reports_every_invalid_field_test() {
   assert testing.error(res) == Ok("validation failed")
   assert testing.field_errors(res)
     == Ok([
-      FieldError("name", "must not be empty"),
-      FieldError("email", "must be a valid email address"),
-      FieldError("age", "must be at least 13"),
+      FieldError("name", problem.Blank),
+      FieldError("email", problem.NotEmail),
+      FieldError("age", problem.TooSmall(13)),
     ])
 }
 
@@ -92,7 +93,7 @@ pub fn create_rejects_taken_email_test() {
 
   assert res.status == 422
   assert testing.field_errors(res)
-    == Ok([FieldError("email", "is already taken")])
+    == Ok([FieldError("email", problem.Custom("taken", "is already taken"))])
 }
 
 pub fn create_rejects_malformed_json_test() {

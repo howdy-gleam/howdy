@@ -8,6 +8,7 @@ import gleam/list
 import gleam/option.{type Option}
 import gleam/string
 import howdy/auth.{type Auth}
+import howdy/auth/internal/codes
 import howdy/auth/internal/login_transport
 import howdy/auth/internal/provider_routes
 import howdy/auth/internal/security_routes
@@ -18,6 +19,7 @@ import howdy/context
 import howdy/controller
 import howdy/cookie
 import howdy/guard
+import howdy/locale
 import howdy/middleware
 import howdy/rate_limit
 import howdy/service
@@ -48,10 +50,25 @@ pub fn signed_in(
 /// id, applied with `auth.in_group`; see `auth.with_groups` for when it is
 /// needed. It is the client's claim about where it wants to sign in, not
 /// proof of membership: `principal.user.group_id` is the group to trust.
+/// POST /locale sets the caller's locale, `{"locale": "de"}`, or clears it
+/// with `{"locale": null}`; see `auth.set_locale`.
 /// GET /me, GET /sessions, POST /sessions/revoke and POST /logout accept either
 /// transport, never both together. Cookie writes require Origin. Other
 /// endpoints allow absent Origin for nonbrowser clients, but reject any
 /// foreign/duplicate Origin.
+///
+/// Error bodies carry a stable `code` beside the English `error`, and
+/// answers that tell the reader something carry one beside `message`, so a
+/// client can show its own words; the bundled pages do. The codes are
+/// `unauthorized`, `forbidden`, `not_found`, `invalid`, `conflict`,
+/// `validation`, `too_many_requests`, `unsupported_media_type` and
+/// `internal` from the status, the more specific `password_incorrect`,
+/// `password_unchanged`, `password_common`, `password_length`, `password_too_long`,
+/// `email_invalid`, `email_unchanged`, `email_mismatch`, `email_taken`,
+/// `mfa_enabled`, `passkey_limit`, `passkey_registered`, `passkey_name`,
+/// `provider_linked`, `credential_too_large`, `locale_unsupported` and
+/// `group_required`, and for success `token_sent`, `signup_token_sent`,
+/// `approval_sent` and `confirmation_sent`.
 ///
 /// Clients are rate limited by socket address. Behind a reverse proxy that
 /// is the proxy for everyone: use `api_limited_by` there.
@@ -137,11 +154,15 @@ pub fn api_limited_by(
   })
   |> controller.post(
     "/login",
-    strict(fn(ctx) { request_email(identity, ctx, auth.Login, client(ctx)) }),
+    strict(fn(ctx) {
+      request_email(localised(identity, ctx), ctx, auth.Login, client(ctx))
+    }),
   )
   |> controller.post(
     "/register",
-    strict(fn(ctx) { request_email(identity, ctx, auth.Register, client(ctx)) }),
+    strict(fn(ctx) {
+      request_email(localised(identity, ctx), ctx, auth.Register, client(ctx))
+    }),
   )
   |> controller.post(
     "/session",
@@ -151,7 +172,7 @@ pub fn api_limited_by(
       browser_session(
         identity,
         ctx,
-        exchange(identity, proof, client(ctx)),
+        exchange(localised(identity, ctx), proof, client(ctx)),
         required,
       )
     }),
@@ -160,7 +181,7 @@ pub fn api_limited_by(
     "/token",
     strict(fn(ctx) {
       use proof <- body.json_with_limit(ctx, body_limit, email_proof())
-      exchange(identity, proof, client(ctx))
+      exchange(localised(identity, ctx), proof, client(ctx))
       |> login_transport.bearer(identity, ctx, _)
     }),
   )
@@ -169,7 +190,7 @@ pub fn api_limited_by(
     strict(fn(ctx) {
       use credentials <- body.json_with_limit(ctx, body_limit, credentials())
       auth.register_password_from(
-        within(identity, credentials.2),
+        within(localised(identity, ctx), credentials.2),
         credentials.0,
         credentials.1,
         client(ctx),
@@ -186,7 +207,7 @@ pub fn api_limited_by(
         identity,
         ctx,
         auth.login_password_step(
-          within(identity, credentials.2),
+          within(localised(identity, ctx), credentials.2),
           credentials.0,
           credentials.1,
           client(ctx),
@@ -200,7 +221,7 @@ pub fn api_limited_by(
     strict(fn(ctx) {
       use credentials <- body.json_with_limit(ctx, body_limit, credentials())
       auth.login_password_step(
-        within(identity, credentials.2),
+        within(localised(identity, ctx), credentials.2),
         credentials.0,
         credentials.1,
         client(ctx),
@@ -255,16 +276,35 @@ pub fn api_limited_by(
     }),
   )
   |> controller.post(
+    "/locale",
+    signed_in(fn(ctx) {
+      use principal <- guard.require(ctx, required)
+      use tag <- body.json_with_limit(
+        ctx,
+        body_limit,
+        decode.field("locale", decode.optional(decode.string), decode.success),
+      )
+      auth.set_locale(identity, principal, tag)
+      |> service.no_content(ctx)
+    }),
+  )
+  |> controller.post(
     "/email/change",
     strict(fn(ctx) {
       use principal <- guard.require(ctx, required)
       use email <- body.json_with_limit(ctx, body_limit, field("email"))
-      auth.request_email_change(identity, principal, email)
+      auth.request_email_change(localised(identity, ctx), principal, email)
       |> email_change_sent(
         ctx,
         case auth.email_change_approval_enabled(identity) {
-          True -> "Check your current email address for an approval token."
-          False -> "Check your new email address for a confirmation token."
+          True -> #(
+            "approval_sent",
+            "Check your current email address for an approval token.",
+          )
+          False -> #(
+            "confirmation_sent",
+            "Check your new email address for a confirmation token.",
+          )
         },
       )
     }),
@@ -274,11 +314,11 @@ pub fn api_limited_by(
     strict(fn(ctx) {
       use principal <- guard.require(ctx, required)
       use token <- body.json_with_limit(ctx, body_limit, field("token"))
-      auth.approve_email_change(identity, principal, token)
-      |> email_change_sent(
-        ctx,
+      auth.approve_email_change(localised(identity, ctx), principal, token)
+      |> email_change_sent(ctx, #(
+        "confirmation_sent",
         "Check your new email address for a confirmation token.",
-      )
+      ))
     }),
   )
   |> controller.post(
@@ -393,10 +433,14 @@ pub fn api_limited_by(
 /// Request bodies hold an address, a token or a password; nothing larger.
 const body_limit = 4096
 
-fn email_change_sent(answer: service.Result(Nil), ctx, message: String) {
+fn email_change_sent(
+  answer: service.Result(Nil),
+  ctx,
+  message: #(String, String),
+) {
   case answer {
     Ok(Nil) ->
-      controller.json(ctx, json.object([#("message", json.string(message))]))
+      controller.json(ctx, codes.message(message.0, message.1))
       |> controller.with_status(202)
     Error(error) -> service.error_response(ctx, error)
   }
@@ -464,6 +508,12 @@ fn group() -> decode.Decoder(Option(String)) {
   decode.success(group)
 }
 
+/// The identity acting in the request's locale, so a new account and the
+/// emails it causes use it.
+fn localised(identity: Auth, ctx: controller.Context) -> Auth {
+  auth.in_locale(identity, locale.to_string(auth.request_locale(identity, ctx)))
+}
+
 fn within(identity: Auth, group: Option(String)) -> Auth {
   case group {
     option.Some(id) -> auth.in_group(identity, id)
@@ -476,9 +526,7 @@ fn email_response(result, ctx) {
     Ok(Nil) ->
       controller.json(
         ctx,
-        json.object([
-          #("message", json.string("Check your email for a sign-in token.")),
-        ]),
+        codes.message("token_sent", "Check your email for a sign-in token."),
       )
       |> controller.with_status(202)
     Error(error) -> service.error_response(ctx, error)

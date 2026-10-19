@@ -5,6 +5,7 @@
 import gleam/int
 import gleam/list
 import gleam/option.{None, Some}
+import howdy/i18n
 import howdy/ui
 import howdy/ui/alert
 import howdy/ui/attachment
@@ -38,6 +39,7 @@ import howdy/ui/tabs as tabs_module
 import howdy/ui/toast
 import howdy/ui/toggle
 import howdy/ui/uploader
+import howdy/ui/words
 import lustre/attribute
 import lustre/element.{type Element, text}
 import lustre/element/html
@@ -322,6 +324,7 @@ pub fn command_menu() -> Element(msg) {
 
 pub fn combobox() -> Element(msg) {
   ui.combobox(
+    words: words.english(),
     id: "example-country",
     name: "country",
     value: "",
@@ -341,6 +344,7 @@ pub fn combobox() -> Element(msg) {
 
 pub fn several_toppings() -> Element(msg) {
   ui.multiple_combobox(
+    words: words.english(),
     id: "example-toppings",
     name: "toppings",
     values: ["basil"],
@@ -563,7 +567,7 @@ pub fn collapsible() -> Element(msg) {
 }
 
 pub fn pagination() -> Element(msg) {
-  ui.pagination(current: 6, total: 12, href: fn(_) { "#" })
+  ui.pagination(words.english(), current: 6, total: 12, href: fn(_) { "#" })
 }
 
 pub fn table() -> Element(msg) {
@@ -673,7 +677,7 @@ pub fn alerts() -> Element(msg) {
 }
 
 pub fn toasts() -> Element(msg) {
-  ui.toast_region([attribute.style("position", "static")], [
+  ui.toast_region(words.english(), [attribute.style("position", "static")], [
     ui.toast(toast.Info, [toast.persistent()], [
       ui.toast_title([text("Saved")]),
       ui.toast_description([text("Your changes are live.")]),
@@ -698,6 +702,7 @@ pub fn loading() -> Element(msg) {
 
 pub fn conversation() -> Element(msg) {
   ui.chat_conversation(
+    words.english(),
     [attribute.aria_label("Messages"), attribute.style("height", "22rem")],
     [
       ui.chat_note([text("Today")]),
@@ -748,6 +753,7 @@ pub fn attachments() -> Element(msg) {
   ui.stack([], [
     ui.attachment_group([
       ui.attachment(
+        words: attachment.english(),
         name: "report.pdf",
         detail: "PDF · 2.4 MB",
         status: attachment.Uploading(64),
@@ -755,6 +761,7 @@ pub fn attachments() -> Element(msg) {
         actions: [],
       ),
       ui.attachment(
+        words: attachment.english(),
         name: "slides.key",
         detail: "Keynote · 18 MB",
         status: attachment.Processing,
@@ -762,6 +769,7 @@ pub fn attachments() -> Element(msg) {
         actions: [],
       ),
       ui.attachment(
+        words: attachment.english(),
         name: "archive.zip",
         detail: "ZIP · 1.1 GB",
         status: attachment.Failed("Too large: the limit is 1 GB."),
@@ -780,6 +788,7 @@ pub fn attachments() -> Element(msg) {
     ]),
     ui.attachment_group([
       attachment.styled(
+        attachment.english(),
         attachment.Tile,
         name: "sketch.svg",
         detail: "SVG · 12 KB",
@@ -808,6 +817,7 @@ pub fn attachments() -> Element(msg) {
         ],
       ),
       attachment.styled(
+        attachment.english(),
         attachment.Compact,
         name: "notes.txt",
         detail: "3 KB",
@@ -1098,7 +1108,7 @@ pub fn hover_card() -> Element(msg) {
 }
 
 pub fn breadcrumb() -> Element(msg) {
-  ui.breadcrumb([], [
+  ui.breadcrumb(words.english(), [], [
     ui.breadcrumb_link("#", [text("Home")]),
     ui.breadcrumb_ellipsis(),
     ui.breadcrumb_link("#", [text("Orders")]),
@@ -1126,17 +1136,23 @@ pub fn navigation_menu() -> Element(msg) {
 }
 
 pub fn carousel() -> Element(msg) {
-  ui.carousel("example-carousel", label: "Highlights", attributes: [], slides: [
-    ui.carousel_slide([
-      ui.card([], [ui.h3("Live views"), ui.muted("State on the server.")]),
-    ]),
-    ui.carousel_slide([
-      ui.card([], [ui.h3("Themes"), ui.muted("Records, not class names.")]),
-    ]),
-    ui.carousel_slide([
-      ui.card([], [ui.h3("Copies"), ui.muted("Components you own.")]),
-    ]),
-  ])
+  ui.carousel(
+    words.english(),
+    "example-carousel",
+    label: "Highlights",
+    attributes: [],
+    slides: [
+      ui.carousel_slide([
+        ui.card([], [ui.h3("Live views"), ui.muted("State on the server.")]),
+      ]),
+      ui.carousel_slide([
+        ui.card([], [ui.h3("Themes"), ui.muted("Records, not class names.")]),
+      ]),
+      ui.carousel_slide([
+        ui.card([], [ui.h3("Copies"), ui.muted("Components you own.")]),
+      ]),
+    ],
+  )
 }
 
 pub fn items() -> Element(msg) {
@@ -1197,30 +1213,35 @@ pub fn drawer() -> Element(msg) {
     ui.button(Outline, ui.drawer_trigger("example-drawer"), [
       text("Filters"),
     ]),
-    ui.drawer("example-drawer", [drawer_module.snap_points([45, 90])], [
-      ui.dialog_header([
-        ui.dialog_title("example-drawer", [text("Filters")]),
-        ui.dialog_description("example-drawer", [
-          text("Drag the handle to resize, or down to close."),
+    ui.drawer(
+      words.english(),
+      "example-drawer",
+      [drawer_module.snap_points([45, 90])],
+      [
+        ui.dialog_header([
+          ui.dialog_title("example-drawer", [text("Filters")]),
+          ui.dialog_description("example-drawer", [
+            text("Drag the handle to resize, or down to close."),
+          ]),
         ]),
-      ]),
-      ui.stack([], [
-        ui.choice(ui.checkbox([]), [text("Paid")]),
-        ui.choice(ui.checkbox([]), [text("Shipped")]),
-      ]),
-      ui.dialog_footer([
-        ui.button(Primary, drawer_module.close("example-drawer"), [
-          text("Apply"),
+        ui.stack([], [
+          ui.choice(ui.checkbox([]), [text("Paid")]),
+          ui.choice(ui.checkbox([]), [text("Shipped")]),
         ]),
-      ]),
-    ]),
+        ui.dialog_footer([
+          ui.button(Primary, drawer_module.close("example-drawer"), [
+            text("Apply"),
+          ]),
+        ]),
+      ],
+    ),
   ])
 }
 
 pub fn right_to_left() -> Element(msg) {
   ui.direction(direction.Rtl, [attribute.lang("ar")], [
     ui.stack([], [
-      ui.breadcrumb([], [
+      ui.breadcrumb(words.translated(i18n.new("ar")), [], [
         ui.breadcrumb_link("#", [text("الرئيسية")]),
         ui.breadcrumb_page([text("الطلبات")]),
       ]),
@@ -1272,7 +1293,7 @@ pub fn questionnaire() -> Element(msg) {
     ),
   ]
   |> questionnaire_module.start
-  |> questionnaire_module.view([attribute.method("post")])
+  |> questionnaire_module.view(words.english(), _, [attribute.method("post")])
 }
 
 pub fn menu_submenus() -> Element(msg) {
@@ -1347,6 +1368,7 @@ pub fn working() -> Element(msg) {
 
 pub fn price_range() -> Element(msg) {
   slider_module.range(
+    words: words.english(),
     label: "Price",
     min: 0,
     max: 500,
@@ -1370,6 +1392,7 @@ pub fn grouped_code() -> Element(msg) {
 
 pub fn vertical_carousel() -> Element(msg) {
   carousel_module.styled(
+    words.english(),
     "example-vertical-carousel",
     label: "Quotes",
     orientation: carousel_module.Vertical,
@@ -1391,6 +1414,7 @@ pub fn upright_sliders() -> Element(msg) {
       attribute.value("60"),
     ]),
     slider_module.thumbs(
+      words: words.english(),
       label: "Working day",
       min: 0,
       max: 24,
@@ -1399,6 +1423,7 @@ pub fn upright_sliders() -> Element(msg) {
       attributes: [],
     ),
     slider_module.thumbs(
+      words: words.english(),
       label: "Budget split",
       min: 0,
       max: 100,
@@ -1411,6 +1436,7 @@ pub fn upright_sliders() -> Element(msg) {
 
 pub fn autoplay_carousel() -> Element(msg) {
   carousel_module.styled(
+    words.english(),
     "example-autoplay",
     label: "Announcements",
     orientation: carousel_module.Horizontal,
@@ -1426,6 +1452,7 @@ pub fn autoplay_carousel() -> Element(msg) {
 
 pub fn long_history() -> Element(msg) {
   chat.conversation(
+    words.english(),
     [
       attribute.aria_label("History"),
       attribute.style("height", "14rem"),

@@ -26,6 +26,7 @@ import howdy/auth/routes
 import howdy/auth/secret
 import howdy/auth/session_store
 import howdy/auth/user
+import howdy/locale
 import howdy/migration
 import howdy/service
 import howdy/testing
@@ -133,7 +134,7 @@ fn finish(identity, start: auth.ProviderStart, code, principal) {
 
 pub fn google_registration_session_and_subject_identity_test() {
   use database, identity, _, _ <- fixture
-  let identity = configured(identity)
+  let identity = configured(identity) |> auth.in_locale("de")
   let start = begin(identity)
   assert parameter(start.url, "scope") == "openid email"
   assert parameter(start.url, "redirect_uri")
@@ -152,6 +153,7 @@ pub fn google_registration_session_and_subject_identity_test() {
     finish(identity, start, code, None)
   let assert Ok(principal) =
     auth.authenticate(identity, secret.reveal(session.token))
+  assert principal.user.locale == Some("de")
   let assert Ok([info]) = auth.sessions(identity, principal)
   assert info.method == auth.Provider("google")
   assert info.client == "client-one"
@@ -298,7 +300,7 @@ pub fn existing_email_requires_explicit_link_and_session_binding_test() {
   // A different subject cannot replace the link; users keep one per issuer.
   let assert Ok(link) =
     auth.begin_provider_link(identity, principal, "google", callback)
-  let assert Error(service.Conflict(_)) =
+  let assert Error(service.Coded(_, service.Conflict(_))) =
     finish(
       identity,
       link,
@@ -429,7 +431,12 @@ pub fn external_session_store_and_google_only_configuration_test() {
 
 pub fn browser_routes_and_starter_pages_test() {
   use _, identity, _, _ <- fixture
-  let identity = configured(identity)
+  let identity =
+    configured(identity)
+    |> auth.with_locales(
+      locale.negotiator(["en", "de"], default: "en")
+      |> locale.from_accept_language,
+    )
   let app =
     howdy.new()
     |> howdy.controller(routes.providers(
@@ -467,10 +474,13 @@ pub fn browser_routes_and_starter_pages_test() {
   let completed =
     testing.get(callback_url)
     |> testing.cookie(cookie_name, browser)
+    |> testing.header("accept-language", "de-CH, en;q=0.5")
     |> testing.send(app)
   assert response.get_header(completed, "location") == Ok("/account")
   let cookies = testing.cookies(completed)
   let assert Ok(session) = list.key_find(cookies, auth.cookie_name(identity))
+  let assert Ok(principal) = auth.authenticate(identity, session)
+  assert principal.user.locale == Some("de")
   let me =
     testing.get("/api/auth/me")
     |> testing.cookie(auth.cookie_name(identity), session)

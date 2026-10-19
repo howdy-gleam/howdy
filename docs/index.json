@@ -203,6 +203,27 @@
       ]
     },
     {
+      "slug": "i18n",
+      "title": "Internationalisation",
+      "docs": [
+        {
+          "slug": "overview",
+          "title": "Internationalisation",
+          "description": "Answer each request in the reader's language: choose a locale, translate messages, and translate Howdy's own words."
+        },
+        {
+          "slug": "catalogues",
+          "title": "Message catalogues",
+          "description": "Write messages in ICU MessageFormat catalogues, generate typed Gleam functions from them, and check them in CI."
+        },
+        {
+          "slug": "formatting",
+          "title": "Formatting",
+          "description": "Write numbers, money, dates, relative times and lists the way each locale does, from CLDR data."
+        }
+      ]
+    },
+    {
       "slug": "auth",
       "title": "Authentication",
       "docs": [

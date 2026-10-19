@@ -1,0 +1,18 @@
+{
+  "@@locale": "ja",
+  "@@x-review": "machine translation, not yet reviewed by a native speaker",
+  "blank": "空にはできません",
+  "email": "有効なメールアドレスを入力してください",
+  "file_too_large": "{maximum}以下にしてください",
+  "file_type": "次のいずれかの形式にしてください: {allowed}",
+  "integer": "整数で入力してください",
+  "one_of": "次のいずれかにしてください: {allowed}",
+  "repeated": "一度だけ指定してください",
+  "required": "必須項目です",
+  "too_few_items": "{minimum, number}件以上選択してください",
+  "too_large": "{maximum, number}以下にしてください",
+  "too_long": "{maximum, number}文字以内で入力してください",
+  "too_many_items": "{maximum, number}件以内で選択してください",
+  "too_short": "{minimum, number}文字以上で入力してください",
+  "too_small": "{minimum, number}以上にしてください"
+}

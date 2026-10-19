@@ -1,0 +1,59 @@
+{
+  "@@locale": "es",
+  "@@x-review": "machine translation, not yet reviewed by a native speaker",
+  "sign_in": {
+    "subject": "Inicia sesión en {app}",
+    "heading": "Inicia sesión en {app}",
+    "body": "Usa esto para iniciar sesión. Solo funciona una vez y caduca pronto.",
+    "action": "Iniciar sesión",
+    "closing": "Si no pediste iniciar sesión, puedes ignorar este correo."
+  },
+  "registration": {
+    "subject": "Confirma tu cuenta de {app}",
+    "heading": "Te damos la bienvenida a {app}",
+    "body": "Confirma esta dirección para terminar de crear tu cuenta.",
+    "action": "Confirmar e iniciar sesión",
+    "closing": "Si no creaste una cuenta, puedes ignorar este correo."
+  },
+  "already_registered": {
+    "subject": "Ya tienes una cuenta de {app}",
+    "heading": "Ya tienes una cuenta",
+    "body": "Alguien pidió registrar esta dirección, pero ya tiene una cuenta. Usa esto para iniciar sesión en ella.",
+    "action": "Iniciar sesión",
+    "closing": "Si no fuiste tú, puedes ignorar este correo. No ha cambiado nada."
+  },
+  "email_change": {
+    "subject": "Confirma tu nueva dirección de correo",
+    "heading": "Confirma tu nueva dirección de correo",
+    "body": "Confirma esta dirección para que sea la que usa tu cuenta de {app} para iniciar sesión.",
+    "action": "Confirmar esta dirección",
+    "closing": "Si no lo pediste, puedes ignorar este correo."
+  },
+  "email_change_approval": {
+    "subject": "Aprueba el cambio de correo de {app}",
+    "heading": "Aprueba el cambio de correo",
+    "body": "Alguien con sesión iniciada en tu cuenta pidió trasladarla a otra dirección de correo. Apruébalo con la sesión iniciada para continuar.",
+    "action": "Aprobar el cambio",
+    "closing": "Si no fuiste tú, no lo apruebes. Inicia sesión, cambia tu contraseña y cierra tus otras sesiones."
+  },
+  "email_changed": {
+    "subject": "Tu dirección de correo de {app} ha cambiado",
+    "heading": "Tu dirección de correo ha cambiado",
+    "body": "Tu cuenta ahora inicia sesión con otra dirección de correo, y esta ya no sirve para recuperarla.",
+    "closing": "Si no fuiste tú, contacta con soporte de inmediato."
+  },
+  "password_changed": {
+    "subject": "Tu contraseña de {app} ha cambiado",
+    "heading": "Tu contraseña ha cambiado",
+    "body": "Se acaba de cambiar la contraseña de tu cuenta.",
+    "closing": "Si no fuiste tú, inicia sesión con un enlace enviado por correo y establece una contraseña nueva."
+  },
+  "code_prompt": "O introduce este código:",
+  "token_prompt": "Pega este token donde se te pidió:",
+  "mfa": {
+    "subject": "Tu código de verificación de {app}",
+    "heading": "Tu código de verificación",
+    "body": "Introduce este código para terminar de iniciar sesión:",
+    "closing": "Si no estás iniciando sesión, alguien conoce tu contraseña: cámbiala."
+  }
+}

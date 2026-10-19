@@ -18,6 +18,7 @@ pub type Delivery {
     purpose: Purpose,
     link: Option(secret.Secret),
     code: Option(secret.Secret),
+    locale: Option(String),
   )
 }
 

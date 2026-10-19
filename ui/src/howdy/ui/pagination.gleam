@@ -1,7 +1,7 @@
 //// Pagination: links to the previous, next and nearby pages of a list.
 ////
 //// ```gleam
-//// pagination.pagination(current: 4, total: 12, href: fn(page) {
+//// pagination.pagination(words.english(), current: 4, total: 12, href: fn(page) {
 ////   "/orders?page=" <> int.to_string(page)
 //// })
 //// ```
@@ -10,12 +10,14 @@
 //// shown; the gaps between are marked with an ellipsis. Pages are counted
 //// from 1. Each link is an ordinary `<a>`, so it works without scripts; in
 //// a live view use `live_pagination` to get attributes such as a click
-//// handler or `live.navigate` instead of an `href`.
+//// handler or `live.navigate` instead of an `href`. `words` name the
+//// links and write the page numbers; see `howdy/ui/words`.
 
 import gleam/int
 import gleam/list
 import howdy/ui/style.{class}
 import howdy/ui/theme/tokens
+import howdy/ui/words.{type Words}
 import lustre/attribute.{type Attribute}
 import lustre/element.{type Element, text}
 import lustre/element/html
@@ -25,11 +27,12 @@ import sketch/css/length.{rem}
 /// Links to pages `1` to `total`, with `current` marked as the current
 /// page.
 pub fn pagination(
+  words words: Words,
   current current: Int,
   total total: Int,
   href href: fn(Int) -> String,
 ) -> Element(msg) {
-  live_pagination(current:, total:, attributes: fn(page) {
+  live_pagination(words:, current:, total:, attributes: fn(page) {
     [attribute.href(href(page))]
   })
 }
@@ -37,6 +40,7 @@ pub fn pagination(
 /// Like `pagination`, with the attributes of each page's `<a>` chosen by
 /// `attributes`.
 pub fn live_pagination(
+  words words: Words,
   current current: Int,
   total total: Int,
   attributes attributes: fn(Int) -> List(Attribute(msg)),
@@ -48,24 +52,27 @@ pub fn live_pagination(
         [class(link_class()), attribute.rel("prev"), ..attributes(current - 1)],
         [
           html.span([attribute.aria_hidden(True)], [text("‹ ")]),
-          text("Previous"),
+          text(words.previous_page),
         ],
       )
     False ->
       disabled([
         html.span([attribute.aria_hidden(True)], [text("‹")]),
-        text("Previous"),
+        text(words.previous_page),
       ])
   }
   let next = case current < total {
     True ->
       html.a(
         [class(link_class()), attribute.rel("next"), ..attributes(current + 1)],
-        [text("Next"), html.span([attribute.aria_hidden(True)], [text("›")])],
+        [
+          text(words.next_page),
+          html.span([attribute.aria_hidden(True)], [text("›")]),
+        ],
       )
     False ->
       disabled([
-        text("Next"),
+        text(words.next_page),
         html.span([attribute.aria_hidden(True)], [text("›")]),
       ])
   }
@@ -87,18 +94,18 @@ pub fn live_pagination(
                 attribute.aria_current("page"),
                 ..attributes(page)
               ],
-              [text(int.to_string(page))],
+              [text(words.number(page))],
             ),
           ])
         Page(page) ->
           html.li([], [
             html.a([class(link_class()), ..attributes(page)], [
-              text(int.to_string(page)),
+              text(words.number(page)),
             ]),
           ])
       }
     })
-  html.nav([class(nav_class()), attribute.aria_label("Pagination")], [
+  html.nav([class(nav_class()), attribute.aria_label(words.pagination)], [
     html.ul(
       [class(list_class())],
       list.flatten([

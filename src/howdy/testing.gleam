@@ -29,7 +29,7 @@
 ////
 ////   assert res.status == 422
 ////   assert testing.field_errors(res)
-////     == Ok([service.FieldError("name", "must not be empty")])
+////     == Ok([service.FieldError("name", problem.Blank)])
 //// }
 //// ```
 ////
@@ -52,6 +52,7 @@ import gleam/uri
 import howdy.{type App}
 import howdy/content.{type Content}
 import howdy/context.{type Body}
+import howdy/problem
 import howdy/service.{type FieldError}
 import howdy/sse
 
@@ -370,8 +371,8 @@ pub fn error(res: Response(Content)) -> Result(String, Nil) {
 pub fn field_errors(res: Response(Content)) -> Result(List(FieldError), Nil) {
   let field = {
     use field <- decode.field("field", decode.string)
-    use message <- decode.field("message", decode.string)
-    decode.success(service.FieldError(field:, message:))
+    use problem <- decode.then(problem.decoder())
+    decode.success(service.FieldError(field:, problem:))
   }
   let decoder = {
     use fields <- decode.field("fields", decode.list(field))

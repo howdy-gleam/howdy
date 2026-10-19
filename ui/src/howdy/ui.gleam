@@ -135,6 +135,7 @@ import howdy/ui/toggle
 import howdy/ui/tooltip
 import howdy/ui/typography
 import howdy/ui/uploader
+import howdy/ui/words.{type Words}
 import lustre/attribute.{type Attribute}
 import lustre/element.{type Element}
 import sketch/css.{type Class}
@@ -649,11 +650,12 @@ pub fn dialog_footer(children: List(Element(msg))) -> Element(msg) {
 /// See `howdy/ui/drawer`. Its header, title, description and footer are
 /// the dialog's.
 pub fn drawer(
+  words: Words,
   id: String,
   attributes: List(Attribute(msg)),
   children: List(Element(msg)),
 ) -> Element(msg) {
-  drawer.drawer(id, attributes, children)
+  drawer.drawer(words, id, attributes, children)
 }
 
 pub fn drawer_trigger(id: String) -> List(Attribute(msg)) {
@@ -821,10 +823,11 @@ pub fn select_group(label: String, items: List(select.Item)) -> select.Item {
 
 /// See `howdy/ui/toast`.
 pub fn toast_region(
+  words: Words,
   attributes: List(Attribute(msg)),
   toasts: List(Element(msg)),
 ) -> Element(msg) {
-  toast.region(attributes, toasts)
+  toast.region(words, attributes, toasts)
 }
 
 pub fn toast(
@@ -903,11 +906,12 @@ pub fn sidebar_button(
 
 /// See `howdy/ui/pagination`.
 pub fn pagination(
+  words words: Words,
   current current: Int,
   total total: Int,
   href href: fn(Int) -> String,
 ) -> Element(msg) {
-  pagination.pagination(current:, total:, href:)
+  pagination.pagination(words:, current:, total:, href:)
 }
 
 /// See `howdy/ui/command`.
@@ -947,15 +951,17 @@ pub fn command_empty(children: List(Element(msg))) -> Element(msg) {
 }
 
 pub fn command_dialog(
+  words: Words,
   id: String,
   shortcut shortcut: String,
   attributes attributes: List(Attribute(msg)),
   command command_element: Element(msg),
 ) -> Element(msg) {
-  command.dialog(id, shortcut:, attributes:, command: command_element)
+  command.dialog(words, id, shortcut:, attributes:, command: command_element)
 }
 
 pub fn combobox(
+  words words: Words,
   id id: String,
   name name: String,
   value value: String,
@@ -966,6 +972,7 @@ pub fn combobox(
   options options: List(Element(msg)),
 ) -> Element(msg) {
   command.combobox(
+    words:,
     id:,
     name:,
     value:,
@@ -978,6 +985,7 @@ pub fn combobox(
 }
 
 pub fn multiple_combobox(
+  words words: Words,
   id id: String,
   name name: String,
   values values: List(String),
@@ -987,6 +995,7 @@ pub fn multiple_combobox(
   options options: List(#(String, String)),
 ) -> Element(msg) {
   command.multiple_combobox(
+    words:,
     id:,
     name:,
     values:,
@@ -1042,10 +1051,11 @@ pub fn shimmer(children: List(Element(msg))) -> Element(msg) {
 
 /// See `howdy/ui/chat`.
 pub fn chat_conversation(
+  words: Words,
   attributes: List(Attribute(msg)),
   children: List(Element(msg)),
 ) -> Element(msg) {
-  chat.conversation(attributes, children)
+  chat.conversation(words, attributes, children)
 }
 
 pub fn chat_message(
@@ -1079,13 +1089,14 @@ pub fn chat_note(children: List(Element(msg))) -> Element(msg) {
 
 /// See `howdy/ui/attachment`.
 pub fn attachment(
+  words words: attachment.Words,
   name name: String,
   detail detail: String,
   status status: attachment.Status,
   media media: option.Option(Element(msg)),
   actions actions: List(Element(msg)),
 ) -> Element(msg) {
-  attachment.attachment(name:, detail:, status:, media:, actions:)
+  attachment.attachment(words:, name:, detail:, status:, media:, actions:)
 }
 
 pub fn attachment_group(attachments: List(Element(msg))) -> Element(msg) {
@@ -1163,10 +1174,11 @@ pub fn button_group(
 
 /// See `howdy/ui/breadcrumb`.
 pub fn breadcrumb(
+  words: Words,
   attributes: List(Attribute(msg)),
   items: List(Element(msg)),
 ) -> Element(msg) {
-  breadcrumb.breadcrumb(attributes, items)
+  breadcrumb.breadcrumb(words, attributes, items)
 }
 
 pub fn breadcrumb_link(
@@ -1238,12 +1250,13 @@ pub fn scroll_area(
 
 /// See `howdy/ui/carousel`.
 pub fn carousel(
+  words: Words,
   id: String,
   label label: String,
   attributes attributes: List(Attribute(msg)),
   slides slides: List(carousel.Slide(msg)),
 ) -> Element(msg) {
-  carousel.carousel(id, label:, attributes:, slides:)
+  carousel.carousel(words, id, label:, attributes:, slides:)
 }
 
 pub fn carousel_slide(children: List(Element(msg))) -> carousel.Slide(msg) {

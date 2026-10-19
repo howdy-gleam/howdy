@@ -84,7 +84,7 @@ pub fn password_change_needs_a_fresh_email_token_session_test() {
     auth.authenticate(identity, secret.reveal(session.token))
   assert auth.set_password(plain, principal, strong_password)
     == Error(service.Forbidden)
-  let assert Error(service.Invalid(_)) =
+  let assert Error(service.Coded(_, service.Invalid(_))) =
     auth.set_password(identity, principal, "short")
   let assert Ok(Nil) = auth.set_password(identity, principal, strong_password)
   // A password session proves knowledge of the old password only.
@@ -213,7 +213,7 @@ pub fn password_policy_limits_and_success_resets_attempts_test() {
         password_min_length: 20,
       ),
     )
-  let assert Error(service.Invalid(_)) =
+  let assert Error(service.Coded(_, service.Invalid(_))) =
     auth.register_password(identity, "ada@example.com", "only 16 characters")
   let assert Ok(Nil) =
     auth.register_password(identity, "ada@example.com", strong_password)

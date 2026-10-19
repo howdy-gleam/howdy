@@ -12,6 +12,7 @@ import howdy/controller
 import howdy/openapi
 import howdy/openapi/endpoint.{type Endpoint}
 import howdy/openapi/schema.{type Schema}
+import howdy/problem
 import howdy/service
 import howdy/testing
 import howdy/validate
@@ -285,10 +286,10 @@ pub fn float_constraints_test() {
   assert json.parse("2.5", schema.decoder(ratio)) == Ok(2.5)
   let assert Error(json.UnableToDecode([error])) =
     json.parse("0.25", schema.decoder(ratio))
-  assert error.expected == "must be at least 0.5"
+  assert schema.message(error) == "must be at least 0.5"
   let assert Error(json.UnableToDecode([error])) =
     json.parse("10", schema.decoder(ratio))
-  assert error.expected == "must be at most 9.5"
+  assert schema.message(error) == "must be at most 9.5"
 
   let ratios =
     controller.new("ratio")
@@ -309,10 +310,10 @@ pub fn list_constraints_test() {
   assert json.parse("[\"a\"]", schema.decoder(tags)) == Ok(["a"])
   let assert Error(json.UnableToDecode([error])) =
     json.parse("[]", schema.decoder(tags))
-  assert error.expected == "must have at least 1 item"
+  assert schema.message(error) == "must have at least 1 item"
   let assert Error(json.UnableToDecode([error])) =
     json.parse("[\"a\",\"b\",\"c\"]", schema.decoder(tags))
-  assert error.expected == "must have at most 2 items"
+  assert schema.message(error) == "must have at most 2 items"
 
   let tagged =
     controller.new("tagged")
@@ -379,7 +380,7 @@ pub fn one_of_test() {
   let res = testing.post("/shape", json.object([])) |> testing.send(app)
   assert res.status == 422
   assert testing.field_errors(res)
-    == Ok([service.FieldError("radius", "is required")])
+    == Ok([service.FieldError("radius", problem.Required)])
   assert string.contains(
     document_of(spec(), shapes),
     "\"schema\":{\"anyOf\":[{\"type\":\"object\",\"properties\":{\"radius\":{\"type\":\"number\"}},\"required\":[\"radius\"]},{\"type\":\"object\",\"properties\":{\"side\":{\"type\":\"number\"}},\"required\":[\"side\"]}]}",
@@ -420,7 +421,7 @@ pub fn example_format_and_deprecated_are_documented_test() {
   )
   assert string.ends_with(
     text,
-    "},\"deprecated\":true}}},\"components\":{\"schemas\":{\"User\":{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"integer\"},\"name\":{\"type\":\"string\"},\"role\":{\"type\":\"string\",\"enum\":[\"admin\",\"member\"]},\"nickname\":{\"type\":\"string\"}},\"required\":[\"id\",\"name\",\"role\"]},\"FieldError\":{\"type\":\"object\",\"properties\":{\"field\":{\"type\":\"string\"},\"message\":{\"type\":\"string\"}},\"required\":[\"field\",\"message\"]},\"Error\":{\"type\":\"object\",\"properties\":{\"error\":{\"type\":\"string\"},\"fields\":{\"type\":\"array\",\"items\":{\"$ref\":\"#/components/schemas/FieldError\"}}},\"required\":[\"error\"]}},\"securitySchemes\":{\"bearer\":{\"type\":\"http\",\"scheme\":\"bearer\"}}}}",
+    "},\"deprecated\":true}}},\"components\":{\"schemas\":{\"User\":{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"integer\"},\"name\":{\"type\":\"string\"},\"role\":{\"type\":\"string\",\"enum\":[\"admin\",\"member\"]},\"nickname\":{\"type\":\"string\"}},\"required\":[\"id\",\"name\",\"role\"]},\"FieldError\":{\"type\":\"object\",\"properties\":{\"field\":{\"type\":\"string\"},\"code\":{\"type\":\"string\"},\"message\":{\"type\":\"string\"},\"minimum\":{\"type\":\"integer\"},\"maximum\":{\"type\":\"integer\"},\"allowed\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}}},\"required\":[\"field\",\"code\",\"message\"]},\"Error\":{\"type\":\"object\",\"properties\":{\"error\":{\"type\":\"string\"},\"code\":{\"type\":\"string\"},\"fields\":{\"type\":\"array\",\"items\":{\"$ref\":\"#/components/schemas/FieldError\"}}},\"required\":[\"error\",\"code\"]}},\"securitySchemes\":{\"bearer\":{\"type\":\"http\",\"scheme\":\"bearer\"}}}}",
   )
 }
 
@@ -506,19 +507,21 @@ pub fn body_errors_are_field_errors_test() {
   assert res.status == 422
   assert testing.field_errors(res)
     == Ok([
-      service.FieldError("name", "must not be empty"),
-      service.FieldError("email", "must be a valid email address"),
-      service.FieldError("age", "must be an integer"),
-      service.FieldError("tags.0", "must be a string"),
+      service.FieldError("name", problem.Blank),
+      service.FieldError("email", problem.NotEmail),
+      service.FieldError("age", problem.NotInteger),
+      service.FieldError("tags.0", problem.Custom("type", "must be a string")),
     ])
 
   let res = testing.post("/user", json.object([])) |> testing.send(app())
-  let assert Ok([service.FieldError("name", "is required"), ..]) =
+  let assert Ok([service.FieldError("name", problem.Required), ..]) =
     testing.field_errors(res)
 
   let res = testing.post("/user", json.string("hi")) |> testing.send(app())
   assert testing.field_errors(res)
-    == Ok([service.FieldError("body", "must be an object")])
+    == Ok([
+      service.FieldError("body", problem.Custom("type", "must be an object")),
+    ])
 
   let res =
     testing.request(http.Post, "/user")

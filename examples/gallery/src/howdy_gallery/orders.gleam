@@ -16,6 +16,7 @@ import howdy/ui/data_table.{Ascending, Events, Sort}
 import howdy/ui/live
 import howdy/ui/pagination
 import howdy/ui/toast
+import howdy/ui/words
 import lustre
 import lustre/attribute
 import lustre/element.{type Element, text}
@@ -228,6 +229,7 @@ fn view(model: Model) -> Element(Msg) {
           html.div([live.on_value("status", FilterStatus)], [
             ui.label([attribute.for("status")], [text("Status")]),
             ui.combobox(
+              words: words.english(),
               id: "status",
               name: "status",
               value: model.status,
@@ -297,6 +299,7 @@ fn view(model: Model) -> Element(Msg) {
           |> data_table.empty([text("No orders match these filters.")])
           |> data_table.view,
         pagination.live_pagination(
+          words: words.english(),
           current: page,
           total: pages,
           attributes: fn(n) {
@@ -309,6 +312,7 @@ fn view(model: Model) -> Element(Msg) {
       ]),
     ]),
     toast.region(
+      words.english(),
       [],
       list.reverse(
         list.map(model.toasts, fn(entry) {

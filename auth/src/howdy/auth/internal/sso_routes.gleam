@@ -13,6 +13,7 @@ import howdy/controller
 import howdy/cookie
 import howdy/form
 import howdy/guard
+import howdy/locale
 import howdy/middleware
 import howdy/param
 import howdy/query
@@ -37,6 +38,11 @@ pub fn routes(
   let wrap = middleware.wrap(_, limited)
   let client = fn(ctx) { option.unwrap(key(ctx), "") }
   let finish = fn(ctx, id, state, browser, code) {
+    let identity =
+      auth.in_locale(
+        identity,
+        locale.to_string(auth.request_locale(identity, ctx)),
+      )
     let principal = auth.required_from(identity, key)(ctx) |> option.from_result
     complete(
       ctx,

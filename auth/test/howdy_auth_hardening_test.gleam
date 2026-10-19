@@ -200,7 +200,7 @@ pub fn unicode_passwords_and_legacy_hashes_are_upgraded_test() {
 pub fn common_and_application_breached_password_checks_fail_closed_test() {
   use database, identity, _, mailbox <- fixture
   let assert Ok(identity) = auth.with_passwords(identity)
-  let assert Error(service.Invalid(_)) =
+  let assert Error(service.Coded(_, service.Invalid(_))) =
     auth.register_password(identity, "new@example.com", "passwordpassword")
   let session = signup(identity, mailbox, "ada@example.com")
   let assert Ok(principal) =

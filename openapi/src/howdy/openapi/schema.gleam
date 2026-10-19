@@ -44,6 +44,7 @@ import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
+import howdy/problem.{type Problem}
 import howdy/validate
 
 /// A JSON value's description, decoder and encoder, for values of type `a`.
@@ -200,7 +201,7 @@ pub fn enum(variants: List(a), name: fn(a) -> String) -> Schema(a) {
     as "howdy/openapi/schema: enum needs at least one variant"
   let named = list.map(variants, fn(variant) { #(name(variant), variant) })
   let names = list.map(named, fn(variant) { variant.0 })
-  let message = "must be one of " <> string.join(names, ", ")
+  let message = failure(problem.NotOneOf(names))
   Schema(
     node: fn() { typed("string", [#("enum", json.array(names, json.string))]) },
     decoder: decode.then(decode.string, fn(text) {
@@ -475,9 +476,9 @@ pub fn float_minimum(schema: Schema(Float), value: Float) -> Schema(Float) {
   constrain(
     schema,
     [#("minimum", json.float(value))],
-    check(
+    validate.custom(
       fn(number) { number >=. value },
-      "must be at least " <> float.to_string(value),
+      problem.Custom("too_small", "must be at least " <> float.to_string(value)),
     ),
   )
 }
@@ -487,9 +488,9 @@ pub fn float_maximum(schema: Schema(Float), value: Float) -> Schema(Float) {
   constrain(
     schema,
     [#("maximum", json.float(value))],
-    check(
+    validate.custom(
       fn(number) { number <=. value },
-      "must be at most " <> float.to_string(value),
+      problem.Custom("too_large", "must be at most " <> float.to_string(value)),
     ),
   )
 }
@@ -500,9 +501,9 @@ pub fn min_items(schema: Schema(List(a)), count: Int) -> Schema(List(a)) {
   constrain(
     schema,
     [#("minItems", json.int(count))],
-    check(
+    validate.custom(
       fn(items) { list.length(items) >= count },
-      "must have at least " <> items(count),
+      problem.TooFewItems(count),
     ),
   )
 }
@@ -513,31 +514,15 @@ pub fn max_items(schema: Schema(List(a)), count: Int) -> Schema(List(a)) {
   constrain(
     schema,
     [#("maxItems", json.int(count))],
-    check(
+    validate.custom(
       fn(items) { list.length(items) <= count },
-      "must have at most " <> items(count),
+      problem.TooManyItems(count),
     ),
   )
 }
 
-fn items(count: Int) -> String {
-  case count {
-    1 -> "1 item"
-    _ -> int.to_string(count) <> " items"
-  }
-}
-
-fn check(valid: fn(a) -> Bool, message: String) -> validate.Rule(a) {
-  fn(value) {
-    case valid(value) {
-      True -> Ok(value)
-      False -> Error(message)
-    }
-  }
-}
-
 /// Run a `howdy/validate` rule while decoding. Rules may change the value,
-/// as `validate.trim()` does, and a failing rule reports its message for
+/// as `validate.trim()` does, and a failing rule reports its problem for
 /// the field. The document does not show what a rule checks; add a
 /// `description` if clients need to know.
 pub fn rule(schema: Schema(a), rule: validate.Rule(a)) -> Schema(a) {
@@ -555,10 +540,48 @@ fn constrain(
     decoder: decode.then(schema.decoder, fn(value) {
       case rule(value) {
         Ok(value) -> decode.success(value)
-        Error(message) -> decode.failure(value, message)
+        Error(problem) -> decode.failure(value, failure(problem))
       }
     }),
   )
+}
+
+/// A decode error's `expected` carries only a string, so a failing rule's
+/// problem travels in it as JSON behind this prefix, for `problem` to read.
+const problem_prefix = "howdy/problem:"
+
+fn failure(problem: Problem) -> String {
+  problem_prefix <> json.to_string(json.object(problem.to_json_fields(problem)))
+}
+
+/// The problem a decode error from a schema describes. A rule's problem is
+/// read back as it was; the decoders' type names become the matching
+/// problem; any other text, such as a `try_map` message, is a `Custom`
+/// problem with the code `invalid`.
+pub fn problem(error: decode.DecodeError) -> Problem {
+  let type_error = fn(message) { problem.Custom("type", message) }
+  case error.expected {
+    "String" -> type_error("must be a string")
+    "Int" -> problem.NotInteger
+    "Float" -> type_error("must be a number")
+    "Bool" -> type_error("must be true or false")
+    "List" -> type_error("must be an array")
+    "Dict" -> type_error("must be an object")
+    "Field" -> problem.Required
+    "Nil" -> type_error("must be null")
+    expected ->
+      case string.split_once(expected, problem_prefix) {
+        Ok(#("", encoded)) ->
+          json.parse(encoded, problem.decoder())
+          |> result.unwrap(problem.Custom("invalid", expected))
+        _ -> problem.Custom("invalid", expected)
+      }
+  }
+}
+
+/// The English message for a decode error from a schema.
+pub fn message(error: decode.DecodeError) -> String {
+  problem.message(problem(error), problem.english())
 }
 
 // -- Documentation -----------------------------------------------------------

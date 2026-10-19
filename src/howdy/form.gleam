@@ -82,6 +82,7 @@ import howdy/body
 import howdy/content.{type Content}
 import howdy/context
 import howdy/controller.{type GuardedContext}
+import howdy/problem.{type Problem}
 import howdy/query
 import howdy/service.{type FieldError}
 import howdy/validate.{type Rule}
@@ -307,10 +308,11 @@ pub fn uploaded_files(form: Form) -> List(#(String, UploadedFile)) {
   form.files
 }
 
-/// The message for `name` among validation errors, if it has one.
-pub fn error(errors: List(FieldError), name: String) -> Option(String) {
+/// The problem with `name` among validation errors, if it has one. Put it
+/// into words with `problem.message`.
+pub fn error(errors: List(FieldError), name: String) -> Option(Problem) {
   list.find(errors, fn(error) { error.field == name })
-  |> result.map(fn(error) { error.message })
+  |> result.map(fn(error) { error.problem })
   |> option.from_result
 }
 
@@ -428,7 +430,7 @@ pub fn files(
 pub fn max_size(bytes: Int) -> Rule(UploadedFile) {
   fn(file: UploadedFile) {
     case file.size > bytes {
-      True -> Error("must be at most " <> describe_size(bytes))
+      True -> Error(problem.FileTooLarge(bytes))
       False -> Ok(file)
     }
   }
@@ -449,63 +451,41 @@ pub fn file_type(allowed: List(String)) -> Rule(UploadedFile) {
     }
     case list.any(allowed, matches) {
       True -> Ok(file)
-      False -> Error("must be " <> or_list(allowed))
+      False -> Error(problem.FileType(allowed))
     }
   }
 }
 
-const required = "is required"
+const required = problem.Required
 
 /// The value of a field that must not repeat.
-fn single(form: Form, name: String) -> Result(Option(String), String) {
+fn single(form: Form, name: String) -> Result(Option(String), Problem) {
   case all(form, name) {
     [] -> Ok(None)
     [value] -> Ok(Some(value))
-    _ -> Error("must occur only once")
+    _ -> Error(problem.Repeated)
   }
 }
 
 fn single_file(
   form: Form,
   name: String,
-) -> Result(Option(UploadedFile), String) {
+) -> Result(Option(UploadedFile), Problem) {
   case all_files(form, name) {
     [] -> Ok(None)
     [file] -> Ok(Some(file))
-    _ -> Error("must occur only once")
+    _ -> Error(problem.Repeated)
   }
 }
 
-fn describe_size(bytes: Int) -> String {
-  let in = fn(unit, name) {
-    case bytes >= unit && bytes % unit == 0 {
-      True -> Ok(int.to_string(bytes / unit) <> " " <> name)
-      False -> Error(Nil)
-    }
-  }
-  in(1_048_576, "MB")
-  |> result.lazy_or(fn() { in(1_000_000, "MB") })
-  |> result.lazy_or(fn() { in(1024, "KB") })
-  |> result.lazy_or(fn() { in(1000, "KB") })
-  |> result.unwrap(int.to_string(bytes) <> " bytes")
-}
-
-fn or_list(items: List(String)) -> String {
-  case list.reverse(items) {
-    [] -> "nothing"
-    [only] -> only
-    [last, ..rest] -> string.join(list.reverse(rest), ", ") <> " or " <> last
-  }
-}
-
-fn optional_integer(form: Form, name: String) -> Result(Option(Int), String) {
+fn optional_integer(form: Form, name: String) -> Result(Option(Int), Problem) {
   use value <- result.try(single(form, name))
   case value {
     None | Some("") -> Ok(None)
     Some(value) ->
       case int.parse(value) {
         Ok(value) -> Ok(Some(value))
-        Error(Nil) -> Error("must be an integer")
+        Error(Nil) -> Error(problem.NotInteger)
       }
   }
 }
@@ -522,15 +502,15 @@ fn optionally(rules: List(Rule(a))) -> Rule(Option(a)) {
 
 fn field(
   name: String,
-  value: Result(a, String),
+  value: Result(a, Problem),
   placeholder: a,
   rules: List(Rule(a)),
   next: fn(a) -> validate.Result(b),
 ) -> validate.Result(b) {
   case value {
     Ok(value) -> validate.field(name, value, rules, next)
-    Error(message) ->
-      validate.field(name, placeholder, [fn(_) { Error(message) }], next)
+    Error(problem) ->
+      validate.field(name, placeholder, [fn(_) { Error(problem) }], next)
   }
 }
 

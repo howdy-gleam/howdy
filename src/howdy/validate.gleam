@@ -17,11 +17,11 @@
 
 import gleam
 import gleam/http/response.{type Response}
-import gleam/int
 import gleam/list
 import gleam/string
 import howdy/content.{type Content}
 import howdy/controller.{type GuardedContext}
+import howdy/problem.{type Problem}
 import howdy/service
 
 /// One problem with one field.
@@ -33,9 +33,9 @@ pub type Result(a) =
   gleam.Result(a, List(FieldError))
 
 /// A rule checks a value and may also normalise it, such as trimming. On
-/// failure it returns the message shown to the client.
+/// failure it returns the problem, which `howdy/problem` puts into words.
 pub type Rule(a) =
-  fn(a) -> gleam.Result(a, String)
+  fn(a) -> gleam.Result(a, Problem)
 
 /// Validate one field with a list of rules, run in order. The first failing
 /// rule produces the field's error. The continuation always runs so that
@@ -48,10 +48,10 @@ pub fn field(
 ) -> Result(b) {
   case run(rules, value) {
     Ok(value) -> next(value)
-    Error(message) ->
+    Error(problem) ->
       case next(value) {
-        Ok(_) -> Error([service.FieldError(name, message)])
-        Error(rest) -> Error([service.FieldError(name, message), ..rest])
+        Ok(_) -> Error([service.FieldError(name, problem)])
+        Error(rest) -> Error([service.FieldError(name, problem), ..rest])
       }
   }
 }
@@ -75,18 +75,19 @@ pub fn check(
 }
 
 /// Run rules against a value directly, without a field name.
-pub fn run(rules: List(Rule(a)), value: a) -> gleam.Result(a, String) {
+pub fn run(rules: List(Rule(a)), value: a) -> gleam.Result(a, Problem) {
   list.try_fold(rules, value, fn(value, rule) { rule(value) })
 }
 
 // -- Rules -------------------------------------------------------------------
 
-/// Build a rule from a predicate and the message used when it fails.
-pub fn custom(check: fn(a) -> Bool, message: String) -> Rule(a) {
+/// Build a rule from a predicate and the problem reported when it fails,
+/// such as `problem.Custom("taken", "is already taken")`.
+pub fn custom(check: fn(a) -> Bool, problem: Problem) -> Rule(a) {
   fn(value) {
     case check(value) {
       True -> Ok(value)
-      False -> Error(message)
+      False -> Error(problem)
     }
   }
 }
@@ -98,21 +99,15 @@ pub fn trim() -> Rule(String) {
 }
 
 pub fn not_empty() -> Rule(String) {
-  custom(fn(value) { value != "" }, "must not be empty")
+  custom(fn(value) { value != "" }, problem.Blank)
 }
 
 pub fn min_length(length: Int) -> Rule(String) {
-  custom(
-    fn(value) { string.length(value) >= length },
-    "must be at least " <> int.to_string(length) <> " characters",
-  )
+  custom(fn(value) { string.length(value) >= length }, problem.TooShort(length))
 }
 
 pub fn max_length(length: Int) -> Rule(String) {
-  custom(
-    fn(value) { string.length(value) <= length },
-    "must be at most " <> int.to_string(length) <> " characters",
-  )
+  custom(fn(value) { string.length(value) <= length }, problem.TooLong(length))
 }
 
 /// A light check: something before and after a single `@`, and a dot in the
@@ -130,29 +125,23 @@ pub fn email() -> Rule(String) {
         _ -> False
       }
     },
-    "must be a valid email address",
+    problem.NotEmail,
   )
 }
 
 pub fn min(minimum: Int) -> Rule(Int) {
-  custom(
-    fn(value) { value >= minimum },
-    "must be at least " <> int.to_string(minimum),
-  )
+  custom(fn(value) { value >= minimum }, problem.TooSmall(minimum))
 }
 
 pub fn max(maximum: Int) -> Rule(Int) {
-  custom(
-    fn(value) { value <= maximum },
-    "must be at most " <> int.to_string(maximum),
-  )
+  custom(fn(value) { value <= maximum }, problem.TooLarge(maximum))
 }
 
-/// The value must be one of `allowed`. `show` renders each option for the
-/// error message.
+/// The value must be one of `allowed`. `show` writes each option for the
+/// problem's `allowed`.
 pub fn one_of(allowed: List(a), show: fn(a) -> String) -> Rule(a) {
   custom(
     fn(value) { list.contains(allowed, value) },
-    "must be one of " <> string.join(list.map(allowed, show), ", "),
+    problem.NotOneOf(list.map(allowed, show)),
   )
 }

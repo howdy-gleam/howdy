@@ -4,6 +4,7 @@
 import gleam/int
 import gleam/list
 import gleam/result
+import howdy/problem
 import howdy/service
 import user/user.{type NewUser, type User, User}
 
@@ -29,7 +30,12 @@ pub fn create(input: NewUser) -> service.Result(User) {
   case list.any(users, fn(user) { user.email == input.email }) {
     True ->
       Error(
-        service.Validation([service.FieldError("email", "is already taken")]),
+        service.Validation([
+          service.FieldError(
+            "email",
+            problem.Custom("taken", "is already taken"),
+          ),
+        ]),
       )
     False ->
       Ok(User(

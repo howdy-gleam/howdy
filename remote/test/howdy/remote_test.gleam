@@ -6,6 +6,7 @@ import gleam/list
 import gleam/option.{None, Some}
 import gleam/otp/actor
 import gleam/string
+import howdy/problem
 import howdy/remote
 import howdy/service
 import howdy_remote_fixtures.{User} as fixtures
@@ -53,8 +54,14 @@ pub fn every_service_error_round_trips_test() {
     service.Unauthorized,
     service.Forbidden,
     service.UnsupportedMediaType("application/json"),
-    service.Validation([service.FieldError(field: "email", message: "taken")]),
+    service.Validation([
+      service.FieldError(
+        field: "email",
+        problem: problem.Custom("taken", "is taken"),
+      ),
+    ]),
     service.TooManyRequests(retry_after_seconds: 30),
+    service.Coded("email_taken", service.Conflict("taken")),
   ]
   let assert Ok(_) =
     remote.server()

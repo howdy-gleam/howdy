@@ -1,0 +1,18 @@
+{
+  "@@locale": "zh",
+  "@@x-review": "machine translation, not yet reviewed by a native speaker",
+  "blank": "不能为空",
+  "email": "必须是有效的电子邮件地址",
+  "file_too_large": "不能超过 {maximum}",
+  "file_type": "必须是以下类型之一：{allowed}",
+  "integer": "必须是整数",
+  "one_of": "必须是以下值之一：{allowed}",
+  "repeated": "只能出现一次",
+  "required": "必须填写",
+  "too_few_items": "至少需要 {minimum, number} 项",
+  "too_large": "不能大于 {maximum, number}",
+  "too_long": "最多只能有 {maximum, number} 个字符",
+  "too_many_items": "最多只能有 {maximum, number} 项",
+  "too_short": "至少需要 {minimum, number} 个字符",
+  "too_small": "不能小于 {minimum, number}"
+}

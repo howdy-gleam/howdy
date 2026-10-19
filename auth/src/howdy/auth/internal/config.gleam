@@ -22,6 +22,7 @@ import howdy/auth/policy.{type Policy}
 import howdy/auth/provider
 import howdy/auth/session_store.{type SessionStore}
 import howdy/auth/user.{type User, System}
+import howdy/locale.{type Negotiator}
 import howdy/migration
 import howdy/rate_limit
 import howdy/service
@@ -51,6 +52,12 @@ pub type Config {
     email_links: Option(String),
     email_codes: Bool,
     rate_limits: Option(rate_limit.Store),
+    /// The locales pages and emails are written in; see
+    /// `howdy/auth.with_locales`.
+    locales: Negotiator,
+    /// The locale of the request this value acts for, chosen with
+    /// `in_locale`: the one a new account and its emails start with.
+    locale: Option(String),
   )
 }
 
@@ -106,6 +113,8 @@ pub fn new(
     email_links: None,
     email_codes: False,
     rate_limits: None,
+    locales: locale.negotiator(["en"], default: "en"),
+    locale: None,
   ))
 }
 

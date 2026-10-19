@@ -2,6 +2,7 @@
 
 import gleam/erlang/process
 import gleam/list
+import gleam/option
 import gleam/time/timestamp
 import gloo/migration as gloo_migration
 import gloo/repo
@@ -250,7 +251,14 @@ pub fn password_migration_preserves_existing_accounts_and_sessions_test() {
   // Nothing in the audit trail says when this user was created.
   let epoch = timestamp.from_unix_seconds(0)
   assert principal.user
-    == user.User("existing", "ada@example.com", group.default_id, epoch, epoch)
+    == user.User(
+      "existing",
+      "ada@example.com",
+      group.default_id,
+      epoch,
+      epoch,
+      option.None,
+    )
   assert count(database, "SELECT COUNT(*) FROM howdy_auth_passwords") == 0
   assert migration.run(database, [auth.schema()]) == Ok(Nil)
 }

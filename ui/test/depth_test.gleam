@@ -12,6 +12,7 @@ import howdy/ui/questionnaire
 import howdy/ui/resizable
 import howdy/ui/slider
 import howdy/ui/toast
+import howdy/ui/words
 import lustre/attribute
 import lustre/element.{type Element, text}
 import lustre/element/html
@@ -49,7 +50,7 @@ pub fn questionnaire_starts_at_the_first_question_test() {
   let state = questionnaire.start(questions())
   assert questionnaire.progress(state) == #(1, 3)
   assert !questionnaire.is_complete(state)
-  let html = render(questionnaire.view(state, []))
+  let html = render(questionnaire.view(words.english(), state, []))
   assert string.contains(html, "What do you do?")
   assert string.contains(html, "value=\"next\"")
   // The first question is required and first: no skip, no back.
@@ -64,7 +65,7 @@ pub fn a_required_question_must_be_answered_test() {
       #("questionnaire-action", "next"),
     ])
   assert questionnaire.progress(state) == #(1, 3)
-  let html = render(questionnaire.view(state, []))
+  let html = render(questionnaire.view(words.english(), state, []))
   assert string.contains(html, "Answer this to go on.")
   assert string.contains(html, "aria-invalid=\"true\"")
 }
@@ -77,7 +78,7 @@ pub fn answers_are_carried_through_the_form_test() {
       #("questionnaire-action", "next"),
     ])
   assert questionnaire.progress(second) == #(2, 3)
-  let html = render(questionnaire.view(second, []))
+  let html = render(questionnaire.view(words.english(), second, []))
   assert string.contains(html, "name=\"questionnaire-answer:role\"")
   assert string.contains(html, "value=\"skip\"")
 
@@ -90,7 +91,10 @@ pub fn answers_are_carried_through_the_form_test() {
       #("questionnaire-action", "next"),
     ])
   assert questionnaire.progress(third) == #(3, 3)
-  assert string.contains(render(questionnaire.view(third, [])), "Finish")
+  assert string.contains(
+    render(questionnaire.view(words.english(), third, [])),
+    "Finish",
+  )
 
   let done =
     questionnaire.submit(questions(), [
@@ -120,7 +124,7 @@ pub fn checks_reject_answers_test() {
     ])
   assert !questionnaire.is_complete(state)
   assert string.contains(
-    render(questionnaire.view(state, [])),
+    render(questionnaire.view(words.english(), state, [])),
     "Enter a number from 10 to 19.",
   )
 }
@@ -160,7 +164,7 @@ pub fn finishing_rechecks_every_answer_test() {
   assert !questionnaire.is_complete(state)
   assert questionnaire.progress(state) == #(1, 3)
   assert string.contains(
-    render(questionnaire.view(state, [])),
+    render(questionnaire.view(words.english(), state, [])),
     "Answer this to go on.",
   )
 }
@@ -269,7 +273,14 @@ pub fn updating_a_held_toast_keeps_it_held_test() {
 pub fn updating_a_toast_restarts_its_countdown_test() {
   let #(queue, id) = toast.push(toast.queue(), toast.Success, "One", "", 0)
   let first =
-    render(toast.view(queue, on_close: fn(_) { [] }, on_hold: fn(_, _) { Nil }))
+    render(
+      toast.view(
+        words.english(),
+        queue,
+        on_close: fn(_) { [] },
+        on_hold: fn(_, _) { Nil },
+      ),
+    )
   assert !string.contains(first, "data-round=\"odd\"")
   // Faded toasts close themselves through their close button, and hover
   // or focus holds them: both are wired by the behaviour script off the
@@ -279,7 +290,14 @@ pub fn updating_a_toast_restarts_its_countdown_test() {
   assert !string.contains(first, "onfocusin")
   let queue = toast.update(queue, id, toast.Success, "Two", "", 10)
   let second =
-    render(toast.view(queue, on_close: fn(_) { [] }, on_hold: fn(_, _) { Nil }))
+    render(
+      toast.view(
+        words.english(),
+        queue,
+        on_close: fn(_) { [] },
+        on_hold: fn(_, _) { Nil },
+      ),
+    )
   assert string.contains(second, "data-round=\"odd\"")
 }
 
@@ -350,7 +368,14 @@ pub fn direction_sets_dir_test() {
 
 pub fn drawers_are_modal_dialogs_with_a_handle_test() {
   let html =
-    render(drawer.drawer("filters", [drawer.snap_points([40, 90])], []))
+    render(
+      drawer.drawer(
+        words.english(),
+        "filters",
+        [drawer.snap_points([40, 90])],
+        [],
+      ),
+    )
   assert string.contains(html, "<dialog")
   assert string.contains(html, "data-snaps=\"40,90\"")
   assert string.contains(html, "data-howdy-drawer-handle")
@@ -375,6 +400,7 @@ pub fn range_sliders_submit_two_values_test() {
   let html =
     render(
       slider.range(
+        words: words.english(),
         label: "Price",
         min: 0,
         max: 100,
@@ -395,6 +421,7 @@ pub fn multiple_combobox_sends_a_field_per_value_test() {
   let html =
     render(
       command.multiple_combobox(
+        words: words.english(),
         id: "tags",
         name: "tags",
         values: ["a, b"],
@@ -422,6 +449,7 @@ pub fn slider_thumbs_stay_in_order_test() {
   let html =
     render(
       slider.thumbs(
+        words: words.english(),
         label: "Day",
         min: 0,
         max: 24,
@@ -440,6 +468,7 @@ pub fn carousels_can_play_by_themselves_test() {
   let html =
     render(
       carousel.carousel(
+        words.english(),
         "tour",
         label: "Tour",
         attributes: [carousel.autoplay(200)],

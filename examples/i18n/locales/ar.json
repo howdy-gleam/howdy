@@ -1,0 +1,18 @@
+{
+  "@@locale": "ar",
+  "title": "Howdy بلغات عديدة",
+  "greeting": "مرحبًا يا {name}!",
+  "cart": "{count, plural, =0 {سلتك فارغة.} zero {سلتك فارغة.} one {في سلتك عنصر واحد.} two {في سلتك عنصران.} few {في سلتك # عناصر.} many {في سلتك # عنصرًا.} other {في سلتك # عنصر.}}",
+  "total": "المجموع: {amount}",
+  "updated": "آخر تغيير للأسعار {ago}.",
+  "today": "اليوم {date, date, full}.",
+  "team": "من إعداد {names}.",
+  "language": "اللغة",
+  "change": "تغيير",
+  "signup.heading": "إنشاء حساب",
+  "signup.name": "الاسم",
+  "signup.email": "البريد الإلكتروني",
+  "signup.password": "كلمة المرور",
+  "signup.submit": "إنشاء الحساب",
+  "signup.welcome": "أهلًا بك يا {name}!"
+}

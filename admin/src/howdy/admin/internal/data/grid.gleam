@@ -20,6 +20,7 @@ import howdy/ui/badge
 import howdy/ui/button
 import howdy/ui/live
 import howdy/ui/pagination
+import howdy/ui/words
 import lustre
 import lustre/attribute
 import lustre/effect.{type Effect}
@@ -407,6 +408,7 @@ fn view(model: Model) -> Element(Msg) {
     case pages > 1 {
       True ->
         pagination.live_pagination(
+          words: words.english(),
           current: page(model),
           total: pages,
           attributes: fn(page) {

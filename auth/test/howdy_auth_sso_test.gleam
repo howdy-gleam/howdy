@@ -26,6 +26,7 @@ import howdy/auth/mfa
 import howdy/auth/routes
 import howdy/auth/secret
 import howdy/auth/user
+import howdy/locale
 import howdy/service
 import howdy/testing
 import support.{count, fixture, signup}
@@ -206,7 +207,7 @@ pub fn a_first_sign_in_provisions_the_user_without_public_registration_test() {
   // Never `allow_registration`: the connection is what lets its users in.
   let assert Ok(closed) =
     auth.new(database, "https://example.test", fn(_) { Ok(Nil) })
-  let identity = with_sso(closed, discovery([]))
+  let identity = with_sso(closed, discovery([])) |> auth.in_locale("de")
   connect(identity, "acme", group.default_id, ["acme.com"])
   let start = begin(identity, "acme")
   assert string.starts_with(start.url, issuer <> "/authorize?")
@@ -218,6 +219,7 @@ pub fn a_first_sign_in_provisions_the_user_without_public_registration_test() {
     finish(identity, "acme", start, [], None)
   assert session.user.email == "ada@acme.com"
   assert session.user.group_id == group.default_id
+  assert principal_of(identity, session).user.locale == Some("de")
   let assert Ok([info]) =
     auth.sessions(identity, principal_of(identity, session))
   assert info.method == auth.Provider("sso:acme")
@@ -266,7 +268,7 @@ pub fn a_covered_members_existing_account_is_taken_up_test() {
     == 1
   // The account now answers to that subject alone: another person at the
   // provider asserting the same address does not get it too.
-  let assert Error(service.Conflict(_)) =
+  let assert Error(service.Coded(_, service.Conflict(_))) =
     finish(
       identity,
       "acme",
@@ -609,6 +611,12 @@ pub fn provider_requests_connect_to_the_vetted_address_test() {
 
 pub fn browser_routes_test() {
   use _, identity, _ <- acme
+  let identity =
+    auth.with_locales(
+      identity,
+      locale.negotiator(["en", "de"], default: "en")
+        |> locale.from_accept_language,
+    )
   let app =
     howdy.new()
     |> howdy.controller(routes.sso(
@@ -672,10 +680,13 @@ pub fn browser_routes_test() {
   let completed =
     testing.get(callback_url)
     |> testing.cookie(cookie_name, browser_two)
+    |> testing.header("accept-language", "de-CH, en;q=0.5")
     |> testing.send(app)
   assert response.get_header(completed, "location") == Ok("/account")
   let assert Ok(session) =
     list.key_find(testing.cookies(completed), auth.cookie_name(identity))
+  let assert Ok(principal) = auth.authenticate(identity, session)
+  assert principal.user.locale == Some("de")
   let me =
     testing.get("/api/auth/me")
     |> testing.cookie(auth.cookie_name(identity), session)

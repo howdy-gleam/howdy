@@ -30,6 +30,7 @@ fn user_columns(conn: Repo) -> String {
   <> db.read_time(conn, "u.created_at")
   <> ", "
   <> db.read_time(conn, "u.updated_at")
+  <> ", u.locale"
 }
 
 /// The columns `group.row` decodes, from the groups table under alias `g`.
@@ -425,16 +426,17 @@ pub fn insert_user(
   email email: String,
   group_id group_id: String,
   login_key login_key: String,
+  locale locale: Option(String),
 ) -> service.Result(User) {
   let now = token.now()
   use _ <- result.try(
     db.execute(
       conn,
-      "INSERT INTO howdy_auth_users(id, email, group_id, login_key, created_at, updated_at) VALUES ($1, $2, $3, $4, "
+      "INSERT INTO howdy_auth_users(id, email, group_id, login_key, created_at, updated_at, locale) VALUES ($1, $2, $3, $4, "
         <> db.write_time(conn, "$5")
         <> ", "
         <> db.write_time(conn, "$6")
-        <> ")",
+        <> ", $7)",
       [
         sql.string(id),
         sql.string(email),
@@ -442,6 +444,7 @@ pub fn insert_user(
         sql.string(login_key),
         sql.int(now),
         sql.int(now),
+        sql.nullable(sql.string, locale),
       ],
     ),
   )
@@ -453,7 +456,7 @@ pub fn insert_user(
     ),
   )
   let at = timestamp.from_unix_seconds(now)
-  Ok(user.User(id, email, group_id, at, at))
+  Ok(user.User(id, email, group_id, at, at, locale))
 }
 
 /// The active user owning a verified email address, row-locked.
@@ -537,8 +540,8 @@ pub fn password_candidates(
 ) -> service.Result(List(#(User, String, Bool))) {
   let row = {
     use found <- decode.then(user.row())
-    use hash <- decode.field(5, decode.string)
-    use normalized <- decode.field(6, decode.int)
+    use hash <- decode.field(6, decode.string)
+    use normalized <- decode.field(7, decode.int)
     decode.success(#(found, hash, normalized == 1))
   }
   db.query(
@@ -671,9 +674,9 @@ pub fn session_user(
 ) -> service.Result(List(#(User, Int, Int, Int))) {
   let row = {
     use found <- decode.then(user.row())
-    use last_seen_at <- decode.field(5, decode.int)
-    use created_at <- decode.field(6, decode.int)
-    use expires_at <- decode.field(7, decode.int)
+    use last_seen_at <- decode.field(6, decode.int)
+    use created_at <- decode.field(7, decode.int)
+    use expires_at <- decode.field(8, decode.int)
     decode.success(#(found, last_seen_at, created_at, expires_at))
   }
   db.query(
@@ -919,7 +922,7 @@ pub fn active_user_version(
     [sql.string(user_id)],
     {
       use user <- decode.then(user.row())
-      use version <- decode.field(5, decode.int)
+      use version <- decode.field(6, decode.int)
       decode.success(#(user, version))
     },
   )
@@ -1462,5 +1465,36 @@ pub fn insert_permissions(
         <> rows,
       args,
     )
+  })
+}
+
+/// Set or clear the locale a user's pages and emails use.
+pub fn set_locale(
+  conn: Repo,
+  user_id: String,
+  locale: Option(String),
+) -> service.Result(Nil) {
+  db.execute(conn, "UPDATE howdy_auth_users SET locale = $1 WHERE id = $2", [
+    sql.nullable(sql.string, locale),
+    sql.string(user_id),
+  ])
+}
+
+/// The locale a user chose or registered with, if any.
+pub fn user_locale(
+  conn: Repo,
+  user_id: String,
+) -> service.Result(Option(String)) {
+  db.query(
+    conn,
+    "SELECT locale FROM howdy_auth_users WHERE id = $1",
+    [sql.string(user_id)],
+    decode.field(0, decode.optional(decode.string), decode.success),
+  )
+  |> result.map(fn(rows) {
+    case rows {
+      [locale] -> locale
+      _ -> option.None
+    }
   })
 }

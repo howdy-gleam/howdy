@@ -62,13 +62,22 @@ pub type Selection {
   Multiple(List(Date))
 }
 
-/// The words a calendar uses. `month_names` run from January and
-/// `weekday_names` from Monday; `date_label` writes a date out in full.
+/// The words a calendar uses. `weekday_names` and `weekday_abbreviations`
+/// run from Monday; `heading` writes a month and year, given the year and
+/// the month, as at the top of the calendar; `date_label` writes a date out
+/// in full; `day_number` writes the number on each day; `first_day` is the
+/// day weeks start on, from 1 for Monday to 7 for Sunday.
+///
+/// `english` is the default. `howdy/ui/words` holds one of these for its
+/// locale, with names and formats from CLDR.
 pub type Locale {
   Locale(
-    month_names: List(String),
     weekday_names: List(String),
+    weekday_abbreviations: List(String),
+    heading: fn(Int, Int) -> String,
     date_label: fn(Date) -> String,
+    day_number: fn(Int) -> String,
+    first_day: Int,
     previous_month: String,
     next_month: String,
     choose_date: String,
@@ -76,16 +85,16 @@ pub type Locale {
 }
 
 pub fn english() -> Locale {
+  let weekday_names = [
+    "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday",
+  ]
   Locale(
-    month_names: [
-      "January", "February", "March", "April", "May", "June", "July", "August",
-      "September", "October", "November", "December",
-    ],
-    weekday_names: [
-      "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday",
-      "Sunday",
-    ],
+    weekday_names:,
+    weekday_abbreviations: list.map(weekday_names, string.slice(_, 0, 2)),
+    heading: fn(year, month) { month_name(month) <> " " <> int.to_string(year) },
     date_label: long_date,
+    day_number: int.to_string,
+    first_day: 1,
     previous_month: "Previous month",
     next_month: "Next month",
     choose_date: "Choose a date",
@@ -102,7 +111,7 @@ pub opaque type Calendar(msg) {
     selection: Selection,
     today: Option(Date),
     disabled: fn(Date) -> Bool,
-    monday_first: Bool,
+    first_day: Option(Int),
     previous: List(Attribute(msg)),
     next: List(Attribute(msg)),
     name: Option(String),
@@ -121,7 +130,7 @@ pub fn new(id: String, year year: Int, month month: Int) -> Calendar(msg) {
     selection: Single(None),
     today: None,
     disabled: fn(_) { False },
-    monday_first: True,
+    first_day: None,
     previous: [],
     next: [],
     name: None,
@@ -167,12 +176,23 @@ pub fn disabled(
   Calendar(..calendar, disabled:)
 }
 
-/// Start weeks on Sunday instead of Monday.
+/// Start weeks on Sunday, whatever the locale's custom.
 pub fn sunday_first(calendar: Calendar(msg)) -> Calendar(msg) {
-  Calendar(..calendar, monday_first: False)
+  first_day(calendar, 7)
 }
 
-/// Name the months, weekdays and buttons in another language.
+/// Start weeks on this day, from 1 for Monday to 7 for Sunday, whatever
+/// the locale's custom.
+pub fn first_day(calendar: Calendar(msg), day: Int) -> Calendar(msg) {
+  Calendar(..calendar, first_day: Some(int.clamp(day, 1, 7)))
+}
+
+fn week_start(calendar: Calendar(msg)) -> Int {
+  option.unwrap(calendar.first_day, calendar.locale.first_day)
+}
+
+/// Name the months, weekdays and buttons in another language, and start
+/// weeks on the locale's first day unless `first_day` says otherwise.
 pub fn locale(calendar: Calendar(msg), locale: Locale) -> Calendar(msg) {
   Calendar(..calendar, locale:)
 }
@@ -363,10 +383,7 @@ fn month(
 ) -> Element(msg) {
   let caption =
     calendar.id <> "-caption-" <> int.to_string(first.year * 12 + first.month)
-  let title =
-    name_of_month(calendar.locale, first.month)
-    <> " "
-    <> int.to_string(first.year)
+  let title = calendar.locale.heading(first.year, first.month)
   let shown = case calendar.previous, calendar.next {
     [], [] -> False
     _, _ -> True
@@ -386,10 +403,9 @@ fn month(
     True -> [nav_button(calendar.next, calendar.locale.next_month, "›", "next")]
     False -> []
   }
-  let weekdays = case calendar.monday_first {
-    True -> [1, 2, 3, 4, 5, 6, 7]
-    False -> [7, 1, 2, 3, 4, 5, 6]
-  }
+  let start = week_start(calendar)
+  let weekdays =
+    list.map([0, 1, 2, 3, 4, 5, 6], fn(index) { { start - 1 + index } % 7 + 1 })
   html.div([], [
     html.div([class(heading_class())], [
       html.div([class(nav_class())], previous),
@@ -421,7 +437,7 @@ fn month(
                   attribute.attribute("scope", "col"),
                   attribute.attribute("abbr", name),
                 ],
-                [text(string.slice(name, 0, 2))],
+                [text(nth(calendar.locale.weekday_abbreviations, day))],
               )
             }),
           ),
@@ -435,15 +451,13 @@ fn month(
   ])
 }
 
-fn name_of_month(locale: Locale, month: Int) -> String {
-  case list.drop(locale.month_names, month - 1) {
-    [name, ..] -> name
-    [] -> int.to_string(month)
-  }
+fn name_of_weekday(locale: Locale, day: Int) -> String {
+  nth(locale.weekday_names, day)
 }
 
-fn name_of_weekday(locale: Locale, day: Int) -> String {
-  case list.drop(locale.weekday_names, day - 1) {
+/// The `day`th name, counting from 1.
+fn nth(names: List(String), day: Int) -> String {
+  case list.drop(names, day - 1) {
     [name, ..] -> name
     [] -> int.to_string(day)
   }
@@ -470,10 +484,7 @@ fn nav_button(
 /// The days shown: whole weeks from the one holding the 1st to the one
 /// holding the last day of the month.
 fn weeks(calendar: Calendar(msg), first: Date) -> List(List(Date)) {
-  let offset = case calendar.monday_first {
-    True -> weekday(first) - 1
-    False -> weekday(first) % 7
-  }
+  let offset = { weekday(first) - week_start(calendar) + 7 } % 7
   let start = add_days(first, -offset)
   let length = offset + days_in_month(first.year, first.month)
   let count = { length + 6 } / 7
@@ -584,7 +595,7 @@ fn week(
                 }),
                 ..flags
               ],
-              [text(int.to_string(date.day))],
+              [text(calendar.locale.day_number(date.day))],
             ),
           ])
         }

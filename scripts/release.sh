@@ -42,6 +42,7 @@ packages=(
   "howdy_telemetry:telemetry"
   "howdy_openapi:openapi"
   "howdy_flags:flags"
+  "howdy_i18n:i18n"
 )
 
 echo "== Checking versions"

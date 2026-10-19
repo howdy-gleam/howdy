@@ -78,7 +78,7 @@ fails:
 - A body that cannot be read or is not JSON answers `400`.
 - A body that does not match its schema answers `422` with every field
   error, as `howdy/validate` does:
-  `{"error":"validation failed","fields":[{"field":"age","message":"must be at least 13"}]}`.
+  `{"error":"validation failed","code":"validation","fields":[{"field":"age","code":"too_small","message":"must be at least 13","minimum":13}]}`.
   Nested fields are named by path, such as `address.city` or `tags.0`.
 
 An endpoint is documented by running its inputs with placeholder values,

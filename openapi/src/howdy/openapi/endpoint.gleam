@@ -52,6 +52,7 @@ import howdy/controller.{
 }
 import howdy/openapi/internal/annotation
 import howdy/openapi/schema.{type Schema}
+import howdy/problem
 import howdy/query
 import howdy/service
 
@@ -381,9 +382,14 @@ fn body_errors(
           [] -> "body"
           path -> string.join(path, ".")
         }
-        service.FieldError(field:, message: message(error))
+        service.FieldError(field:, problem: schema.problem(error))
       })
-    False -> [service.FieldError(field: "body", message: "must be an object")]
+    False -> [
+      service.FieldError(
+        field: "body",
+        problem: problem.Custom("type", "must be an object"),
+      ),
+    ]
   }
 }
 
@@ -426,24 +432,8 @@ fn optional_step(
 
 fn first_message(errors: List(decode.DecodeError)) -> String {
   case errors {
-    [error, ..] -> message(error)
+    [error, ..] -> schema.message(error)
     [] -> "is invalid"
-  }
-}
-
-/// A decode error as the message a client sees. Schema constraints fail
-/// with their message already; the decoders' type names are translated.
-fn message(error: decode.DecodeError) -> String {
-  case error.expected {
-    "String" -> "must be a string"
-    "Int" -> "must be an integer"
-    "Float" -> "must be a number"
-    "Bool" -> "must be true or false"
-    "List" -> "must be an array"
-    "Dict" -> "must be an object"
-    "Field" -> "is required"
-    "Nil" -> "must be null"
-    expected -> expected
   }
 }
 
@@ -503,7 +493,11 @@ pub fn security(scheme: String) -> Doc {
 }
 
 type ErrorBody {
-  ErrorBody(error: String, fields: Option(List(service.FieldError)))
+  ErrorBody(
+    error: String,
+    code: String,
+    fields: Option(List(service.FieldError)),
+  )
 }
 
 fn error_schema() -> Schema(ErrorBody) {
@@ -514,26 +508,83 @@ fn error_schema() -> Schema(ErrorBody) {
         schema.string(),
         fn(e: service.FieldError) { e.field },
       )
+      use code <- schema.field(
+        "code",
+        schema.string(),
+        fn(e: service.FieldError) { problem.code(e.problem) },
+      )
       use message <- schema.field(
         "message",
         schema.string(),
-        fn(e: service.FieldError) { e.message },
+        fn(e: service.FieldError) {
+          problem.message(e.problem, problem.english())
+        },
       )
-      schema.success(service.FieldError(field:, message:))
+      use minimum <- schema.optional_field("minimum", schema.int(), detail(
+        _,
+        "minimum",
+        decode.int,
+      ))
+      use maximum <- schema.optional_field("maximum", schema.int(), detail(
+        _,
+        "maximum",
+        decode.int,
+      ))
+      use allowed <- schema.optional_field(
+        "allowed",
+        schema.list(schema.string()),
+        detail(_, "allowed", decode.list(decode.string)),
+      )
+      let fields =
+        [
+          #("code", json.string(code)),
+          #("message", json.string(message)),
+        ]
+        |> list.append(
+          option.values([
+            option.map(minimum, fn(n) { #("minimum", json.int(n)) }),
+            option.map(maximum, fn(n) { #("maximum", json.int(n)) }),
+            option.map(allowed, fn(names) {
+              #("allowed", json.array(names, json.string))
+            }),
+          ]),
+        )
+      let problem =
+        json.parse(json.to_string(json.object(fields)), problem.decoder())
+        |> result.unwrap(problem.Custom(code, message))
+      schema.success(service.FieldError(field:, problem:))
     }
     |> schema.named("FieldError")
   {
     use error <- schema.field("error", schema.string(), fn(body: ErrorBody) {
       body.error
     })
+    use code <- schema.field("code", schema.string(), fn(body: ErrorBody) {
+      body.code
+    })
     use fields <- schema.optional_field(
       "fields",
       schema.list(field_error),
       fn(body: ErrorBody) { body.fields },
     )
-    schema.success(ErrorBody(error:, fields:))
+    schema.success(ErrorBody(error:, code:, fields:))
   }
   |> schema.named("Error")
+}
+
+/// One of a problem's details, as its JSON fields hold it, so the schema
+/// and the error responses cannot disagree.
+fn detail(
+  error: service.FieldError,
+  name: String,
+  decoder: decode.Decoder(a),
+) -> Option(a) {
+  problem.to_json_fields(error.problem)
+  |> list.key_find(name)
+  |> result.try(fn(value) {
+    json.parse(json.to_string(value), decoder) |> result.replace_error(Nil)
+  })
+  |> option.from_result
 }
 
 // -- Rendering ---------------------------------------------------------------

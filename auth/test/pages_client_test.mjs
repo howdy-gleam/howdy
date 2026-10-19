@@ -9,9 +9,25 @@ const gleam = readFileSync(new URL('../src/howdy/auth/pages.gleam', import.meta.
 const encoded = gleam.slice(gleam.indexOf('const script = "') + 'const script = '.length).trim();
 const script = JSON.parse(encoded.replaceAll('\n', '\\n'));
 const settle = () => new Promise(resolve => setImmediate(resolve));
+// The English words the server puts in each page's JSON block, as
+// pages.words builds them from the catalogue.
+const catalogue = JSON.parse(readFileSync(new URL('../locales/pages/en.json', import.meta.url), 'utf8'));
+const words = {
+  ...catalogue.client,
+  passkey_name: catalogue.page.passkey_name_label,
+  ...Object.fromEntries(Object.entries(catalogue.error).map(([code, text]) => ['error.' + code, text])),
+  ...Object.fromEntries(Object.entries(catalogue.message).map(([code, text]) => ['message.' + code, text])),
+};
+const wordsBlock = {textContent: JSON.stringify(words)};
+// Every page carries its words; a test's document gains them.
+const withWords = document => document && {
+  ...document,
+  getElementById: id => id === 'auth-words' ? wordsBlock : document.getElementById(id),
+};
 // Browser globals every page has, under whatever a test supplies.
 const run = context => vm.runInNewContext(script, {
   URLSearchParams, history: {replaceState() {}}, ...context,
+  document: withWords(context.document),
   location: {search: '', hash: '', ...context.location},
 });
 
@@ -27,7 +43,7 @@ class Element {
   reset() { for (const input of Object.values(this.elements)) input.value = ''; }
 }
 
-function accountPage({ lifecycle = false, fail = null, approval = false } = {}) {
+function accountPage({ lifecycle = false, fail = null, approval = false, wrong = false } = {}) {
   const ids = Object.fromEntries(['account', 'status', 'sessions', 'refresh-sessions', 'password-change', 'password-current', 'logout'].map(id => [id, new Element()]));
   if (lifecycle) {
     for (const id of ['linked-providers', 'email-change', 'email-confirm', 'account-delete']) ids[id] = new Element();
@@ -62,6 +78,8 @@ function accountPage({ lifecycle = false, fail = null, approval = false } = {}) 
     fetch: async (url, options) => {
       calls.push({ url, ...options });
       if (fail && url.endsWith(fail)) return {status: 403, ok: false, json: async () => ({error: 'Sign in again'})};
+      if (url.endsWith('/password/change') && wrong) return {status: 400, ok: false, json: async () => ({code: 'password_incorrect', error: 'current password is incorrect'})};
+      if (url.endsWith('/password') && wrong) return {status: 400, ok: false, json: async () => ({code: 'some_new_code', error: 'raw server text'})};
       if (url.endsWith('/providers')) return {status: 200, ok: true, json: async () => [{provider: 'google', issuer: 'https://accounts.google.com'}]};
       if (url.endsWith('/email/change') || url.endsWith('/email/approve')) return {status: 202, ok: true, json: async () => ({message: 'Check your new email address'})};
       if (url.endsWith('/sessions')) return { status: 200, ok: true, json: async () => sessions };
@@ -86,6 +104,15 @@ test('account password change sends the current and new password', async () => {
     current: 'old synthetic test password',
     password: 'new synthetic test password',
   });
+});
+
+test('errors show the page words for their code, or the server text for unknown codes', async () => {
+  const { ids } = accountPage({wrong: true});
+  await settle();
+  await ids['password-current'].fire('submit');
+  assert.equal(ids.status.textContent, words['error.password_incorrect']);
+  await ids['password-change'].fire('submit');
+  assert.equal(ids.status.textContent, 'raw server text');
 });
 
 test('account password reset handles 204, clears the input and refreshes sessions', async () => {
@@ -390,11 +417,11 @@ test('passkey signup creates the credential before asking for the emailed token'
 
 test('recovery codes render on separate lines and enrollment secrets are cleared', () => {
   const ids = Object.fromEntries(['status', 'sessions', 'recovery-codes', 'mfa-setup-key'].map(id => [id, new Element()]));
-  const context = {document: {getElementById: id => ids[id] || null}, URLSearchParams, location: {search: '', hash: ''}};
+  const context = {document: withWords({getElementById: id => ids[id] || null}), URLSearchParams, location: {search: '', hash: ''}};
   vm.createContext(context);
   vm.runInContext(script, context);
   vm.runInContext("signedOut = message => { document.getElementById('status').textContent = message; }", context);
-  vm.runInContext("showRecovery({recovery_codes: ['ONE', 'TWO']}, 'Enabled.')", context);
+  vm.runInContext("showRecovery({recovery_codes: ['ONE', 'TWO']}, words.mfa_enabled)", context);
   assert.equal(ids['recovery-codes'].textContent, 'ONE\nTWO');
   assert.equal(ids['mfa-setup-key'].textContent, '');
   assert.match(ids.status.textContent, /Save your recovery codes/);

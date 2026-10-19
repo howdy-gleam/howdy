@@ -5,12 +5,14 @@ import gleam/dynamic/decode
 import gleam/json
 import gleam/option.{None, Some}
 import howdy/auth
+import howdy/auth/internal/codes
 import howdy/auth/internal/login_transport as login
 import howdy/auth/passkey
 import howdy/auth/secret
 import howdy/body
 import howdy/controller
 import howdy/guard
+import howdy/locale
 import howdy/service
 
 pub fn add(
@@ -103,19 +105,23 @@ pub fn add(
         credential(),
       )
       case
-        auth.finish_passkey_signup(identity, challenge, credential, client(ctx))
+        auth.finish_passkey_signup(
+          auth.in_locale(
+            identity,
+            locale.to_string(auth.request_locale(identity, ctx)),
+          ),
+          challenge,
+          credential,
+          client(ctx),
+        )
       {
         Ok(Nil) ->
           controller.json(
             ctx,
-            json.object([
-              #(
-                "message",
-                json.string(
-                  "Check your email for a token to finish creating your account.",
-                ),
-              ),
-            ]),
+            codes.message(
+              "signup_token_sent",
+              "Check your email for a token to finish creating your account.",
+            ),
           )
           |> controller.with_status(202)
         Error(error) -> service.error_response(ctx, error)

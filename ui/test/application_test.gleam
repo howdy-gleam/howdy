@@ -11,6 +11,7 @@ import howdy/ui/internal/stylesheet
 import howdy/ui/live
 import howdy/ui/pagination
 import howdy/ui/toast
+import howdy/ui/words
 import lustre/attribute
 import lustre/element.{type Element, text}
 import lustre/element/html
@@ -103,9 +104,12 @@ pub fn a_picker_shows_the_choice_or_placeholder_test() {
 // -- Pagination --------------------------------------------------------------
 
 fn page_labels(current: Int, total: Int) -> List(String) {
-  pagination.pagination(current:, total:, href: fn(page) {
-    "?page=" <> int.to_string(page)
-  })
+  pagination.pagination(
+    words: words.english(),
+    current:,
+    total:,
+    href: fn(page) { "?page=" <> int.to_string(page) },
+  )
   |> render
   |> string.split("<li>")
   |> list.drop(2)
@@ -137,7 +141,7 @@ pub fn pagination_shows_the_ends_and_the_neighbourhood_test() {
 
 pub fn pagination_marks_the_current_page_and_ends_test() {
   let html =
-    pagination.pagination(current: 1, total: 3, href: fn(page) {
+    pagination.pagination(words.english(), current: 1, total: 3, href: fn(page) {
       "/p/" <> int.to_string(page)
     })
     |> render
@@ -297,7 +301,7 @@ pub fn colours_follow_the_series_not_its_position_test() {
 pub fn toasts_live_in_a_polite_region_test() {
   let #(html, css) =
     stylesheet.scoped(fn() {
-      toast.region([], [
+      toast.region(words.english(), [], [
         toast.toast(toast.Info, [toast.duration(8000), toast.persistent()], [
           toast.title([text("Saved")]),
           toast.close([attribute.aria_label("Dismiss")]),
@@ -328,6 +332,7 @@ pub fn command_menus_are_comboboxes_over_listboxes_test() {
 
   let html =
     ui.command_dialog(
+      words.english(),
       "search",
       shortcut: "K",
       attributes: [],

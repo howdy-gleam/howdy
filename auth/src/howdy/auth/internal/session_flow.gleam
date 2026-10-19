@@ -4,7 +4,7 @@
 //// starts from. `howdy/auth` is the public face.
 
 import gleam/http
-import gleam/http/request
+import gleam/http/request.{type Request}
 import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
@@ -37,7 +37,7 @@ import howdy/auth/session_store.{type Entry, Entry}
 import howdy/auth/user.{
   type Actor, type Principal, type User, Acting, Principal, System,
 }
-import howdy/context.{type Context}
+import howdy/context.{type Body, type Context}
 import howdy/service
 import howdy/trace
 
@@ -361,6 +361,21 @@ pub fn required_from(
       }
       _, _ -> Error(service.Unauthorized)
     }
+  }
+}
+
+/// The principal for a request's session cookie, without the origin check a
+/// write would need: only for reading, such as the user's locale.
+pub fn cookie_principal(
+  config: Config,
+  request: Request(Body),
+) -> service.Result(Principal) {
+  case
+    request.get_cookies(request)
+    |> list.filter(fn(c) { c.0 == common.cookie_name(config) })
+  {
+    [#(_, secret)] -> authenticate_from(config, secret, "")
+    _ -> Error(service.Unauthorized)
   }
 }
 
