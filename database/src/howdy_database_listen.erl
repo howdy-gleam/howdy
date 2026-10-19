@@ -2,8 +2,9 @@
 %% howdy/database/postgres.listen.
 %%
 %% The listener is linked to the process that started it and stops when that
-%% process exits. It holds a `pgo_notifications` connection of its own, not
-%% one of the pool's. pgo reconnects that connection when it drops and
+%% process exits. It holds a notification connection of its own, not one of
+%% the pool's: `howdy_database_notifications`, pgo's `pgo_notifications`
+%% with fixes. pgo reconnects that connection when it drops and
 %% listens again; if the pgo process itself exits, the listener starts a new
 %% one. Notifications sent while it was not connected are missed, which is
 %% why callers keep a slower poll as well.
@@ -155,10 +156,10 @@ init(Parent, Ready, Settings, Channel, Notify) ->
 %% the background, so this answers `ok` once listening, or `eventually`
 %% when the server cannot be reached yet: pgo listens when it gets there.
 connect(Settings, Channel, Failures) ->
-    Started = try pgo_notifications:start_link(Settings) catch _:_ -> error end,
+    Started = try howdy_database_notifications:start_link(Settings) catch _:_ -> error end,
     case Started of
         {ok, Conn} ->
-            Listening = try pgo_notifications:listen(Conn, Channel) catch _:_ -> error end,
+            Listening = try howdy_database_notifications:listen(Conn, Channel) catch _:_ -> error end,
             case Listening of
                 {Tag, _} when Tag =:= ok; Tag =:= eventually ->
                     Conn;

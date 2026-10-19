@@ -548,14 +548,21 @@ pub fn notify(
     Error(service.Invalid(listen_error_to_string(InvalidChannel))),
   )
   // NOTIFY takes no parameters, so the payload is written as a literal.
+  // The channel is quoted, so one that is also a keyword works.
   database.execute(
     repo,
-    "NOTIFY " <> channel <> ", '" <> string.replace(payload, "'", "''") <> "'",
+    "NOTIFY \""
+      <> channel
+      <> "\", '"
+      <> string.replace(payload, "'", "''")
+      <> "'",
     [],
   )
 }
 
-/// Channels are written into SQL unquoted, so they are kept to plain names.
+/// Channels are written into SQL in double quotes, so they are kept to
+/// plain names that need no escaping. Lowercase, because PostgreSQL folds
+/// unquoted names to lowercase and quoted ones are taken as written.
 fn valid_channel(channel: String) -> Bool {
   let length = string.length(channel)
   length > 0

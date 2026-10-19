@@ -151,10 +151,6 @@ fn literals(texts: List(String)) -> String {
   "(" <> list.map(texts, literal) |> string.join(", ") <> ")"
 }
 
-fn ids(ids: List(Int)) -> String {
-  "(" <> list.map(ids, int.to_string) |> string.join(", ") <> ")"
-}
-
 /// Run an UPDATE or DELETE on `howdy_jobs` and say how many rows it
 /// changed. Gloo's SQLite adapter counts only the rows a statement returns,
 /// so the statement returns them.
@@ -336,7 +332,6 @@ pub fn complete(
   |> result.map(fn(n) { n > 0 })
 }
 
-/// Make the job available again at `at`, with its errors so far.
 /// Put a job back to wait, unless it is unique while waiting and a newer
 /// job with its key already waits: that one will do the work, so this one
 /// is cancelled instead, rather than breaking the key's uniqueness.
@@ -355,6 +350,22 @@ fn wait_again(now: Int) -> String {
   <> " ELSE NULL END"
 }
 
+/// When job `id` is unique while waiting and a newer job with its key
+/// waits, that one will do the work `id` was to do again at `at`: make it
+/// due no later than that. Does nothing for any other job.
+fn bring_forward(conn: Repo, id: Int, at: Int) -> service.Result(Nil) {
+  database.execute(
+    conn,
+    "UPDATE howdy_jobs SET scheduled_at = CASE WHEN scheduled_at > $1
+       THEN $2 ELSE scheduled_at END
+     WHERE unique_waiting = 1 AND state = 'available' AND id <> $3
+       AND unique_key = (SELECT unique_key FROM howdy_jobs
+         WHERE id = $4 AND unique_waiting = 1)",
+    [sql.int(at), sql.int(at), sql.int(id), sql.int(id)],
+  )
+}
+
+/// Make the job available again at `at`, with its errors so far.
 pub fn reschedule(
   conn: Repo,
   id: Int,
@@ -364,6 +375,7 @@ pub fn reschedule(
   now: Int,
 ) -> service.Result(Bool) {
   use conn <- database.connect(conn)
+  use _ <- result.try(bring_forward(conn, id, at))
   affected(
     conn,
     "UPDATE howdy_jobs SET " <> wait_again(now) <> ", scheduled_at = $1,
@@ -385,6 +397,7 @@ pub fn snooze(
   now: Int,
 ) -> service.Result(Bool) {
   use conn <- database.connect(conn)
+  use _ <- result.try(bring_forward(conn, id, at))
   affected(
     conn,
     "UPDATE howdy_jobs SET " <> wait_again(now) <> ", scheduled_at = $1,
@@ -424,6 +437,7 @@ pub fn release(
 ) -> service.Result(Nil) {
   use conn <- database.connect(conn)
   list.try_each(jobs, fn(job) {
+    use _ <- result.try(bring_forward(conn, job.0, now))
     affected(
       conn,
       "UPDATE howdy_jobs SET " <> wait_again(now) <> ", attempt = attempt - 1,
@@ -433,14 +447,29 @@ pub fn release(
   })
 }
 
-/// Push back the lease on jobs this node is still running.
-pub fn extend(conn: Repo, jobs: List(Int), until: Int) -> service.Result(Nil) {
+/// Push back the lease on jobs this node is still running, by id and
+/// attempt: a job rescued from this node and claimed again elsewhere is
+/// that node's to renew.
+pub fn extend(
+  conn: Repo,
+  jobs: List(#(Int, Int)),
+  until: Int,
+) -> service.Result(Nil) {
   case jobs {
     [] -> Ok(Nil)
     _ -> {
+      let owned =
+        list.map(jobs, fn(job) {
+          "(id = "
+          <> int.to_string(job.0)
+          <> " AND attempt = "
+          <> int.to_string(job.1)
+          <> ")"
+        })
+        |> string.join(" OR ")
       use conn <- database.connect(conn)
       affected(conn, "UPDATE howdy_jobs SET lease_until = $1
-         WHERE state = 'executing' AND id IN " <> ids(jobs), [sql.int(until)])
+         WHERE state = 'executing' AND (" <> owned <> ")", [sql.int(until)])
       |> result.replace(Nil)
     }
   }

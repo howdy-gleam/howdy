@@ -10,6 +10,7 @@ import gleam/string
 import gleeunit
 import gloo/adapter/sqlite
 import gloo/repo.{type Repo}
+import gloo/sql
 import howdy/database
 import howdy/database/postgres
 import howdy/jobs.{
@@ -17,6 +18,7 @@ import howdy/jobs.{
   Failed, GiveUp, Inserted, Retry, RetryIn, Scheduled, Snooze,
 }
 import howdy/jobs/cron
+import howdy/jobs/internal/store
 import howdy/migration
 import howdy/service
 
@@ -826,21 +828,103 @@ pub fn a_superseded_waiting_job_is_cancelled_rather_than_retried_test() {
       case text {
         "old" -> {
           process.send(started, Nil)
-          // Another job with the key is queued while this one runs.
+          // Another job with the key is queued while this one runs, for
+          // much later.
           let assert Ok(_) =
             jobs.insert(
-              jobs.new(echo_job(), "new") |> jobs.unique_while_waiting("k"),
+              jobs.new(echo_job(), "new")
+                |> jobs.unique_while_waiting("k")
+                |> jobs.after(3_600_000),
               db,
             )
-          Retry("down")
+          RetryIn(30_000, "down")
         }
         _ -> Done
       }
     })
   let old =
     queue(db, jobs.new(echo_job(), "old") |> jobs.unique_while_waiting("k"))
-  assert drained(runner).completed == 1
+  assert drained(runner).retried == 1
   let assert Ok(Nil) = process.receive(started, 0)
-  let superseded = record(db, old)
-  assert superseded.state == Cancelled
+  assert record(db, old).state == Cancelled
+  // The waiting one does the work when the retry would have, not an hour
+  // later.
+  advance(clock, 30_000)
+  assert drained(runner).completed == 1
+}
+
+// -- Found in review ---------------------------------------------------------------
+
+pub fn a_timed_out_attempt_is_stopped_while_the_database_is_busy_test() {
+  let db = open()
+  let started = process.new_subject()
+  let effects = process.new_subject()
+  let slow = tally_job() |> jobs.timeout(100)
+  let runner =
+    jobs.runner(db)
+    |> jobs.handle(slow, fn(_, _) {
+      process.send(started, Nil)
+      process.sleep(400)
+      // Past its timeout: this must never happen.
+      process.send(effects, Nil)
+      Done
+    })
+  let _ = queue(db, jobs.new(slow, 1))
+  let assert Ok(_) = jobs.start(runner)
+  let assert Ok(Nil) = process.receive(started, 2000)
+  // Something else holds the database when the timeout comes due, which
+  // on SQLite makes recording it wait.
+  process.spawn_unlinked(fn() {
+    database.transaction(db, fn(_) {
+      process.sleep(800)
+      Ok(Nil)
+    })
+  })
+  assert process.receive(effects, 1000) == Error(Nil)
+  jobs.stop(runner)
+}
+
+pub fn an_old_attempt_cannot_renew_a_new_attempts_lease_test() {
+  let db = open()
+  let id = queue(db, jobs.new(echo_job(), "x"))
+  let now = now_ms()
+  let assert Ok([first]) =
+    store.claim(
+      db,
+      queue: "default",
+      names: ["echo"],
+      limit: 1,
+      now:,
+      lease_until: now + 1000,
+      node: "old",
+    )
+  // The old node goes quiet; its job is rescued and claimed elsewhere.
+  let assert Ok(1) =
+    jobs.rescue_expired(jobs.runner(db) |> jobs.with_clock(fn() { now + 2000 }))
+  let assert Ok([second]) =
+    store.claim(
+      db,
+      queue: "default",
+      names: ["echo"],
+      limit: 1,
+      now: now + 2000,
+      lease_until: now + 3000,
+      node: "new",
+    )
+  assert second.attempt == first.attempt + 1
+  let lease = fn() {
+    let assert Ok([until]) =
+      database.query(
+        db,
+        "SELECT lease_until FROM howdy_jobs WHERE id = $1",
+        [sql.int(id)],
+        decode.field(0, decode.int, decode.success),
+      )
+    until
+  }
+  // The old node wakes and renews what it thinks it still runs.
+  let assert Ok(Nil) = store.extend(db, [#(id, first.attempt)], now + 60_000)
+  assert lease() == now + 3000
+  let assert Ok(Nil) = store.extend(db, [#(id, second.attempt)], now + 60_000)
+  assert lease() == now + 60_000
 }
