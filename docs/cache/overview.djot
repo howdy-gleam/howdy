@@ -10,7 +10,7 @@ Add it to `[dependencies]` in `gleam.toml`, from the same release as your
 app's other Howdy packages:
 
 ```toml
-howdy_cache = { git = "https://github.com/mikeyjones/howdy.git", ref = "v2.1.1", path = "cache" }
+howdy_cache = { git = "https://github.com/mikeyjones/howdy.git", ref = "v1.0.0", path = "cache" }
 ```
 
 ## Fetch or compute

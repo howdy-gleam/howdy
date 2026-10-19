@@ -1,11 +1,11 @@
 # howdy_notifications
 
-Notifications for [howdy](https://github.com/mikeyjones/howdy/blob/v2.1.1/README.md) apps: an inbox kept until read,
+Notifications for [howdy](https://github.com/mikeyjones/howdy/blob/v1.0.0/README.md) apps: an inbox kept until read,
 pushed live to every page the user has open, with email, digests and Web
 Push.
 
 ```toml
-howdy_notifications = { git = "https://github.com/mikeyjones/howdy.git", ref = "v2.1.1", path = "notifications" }
+howdy_notifications = { git = "https://github.com/mikeyjones/howdy.git", ref = "v1.0.0", path = "notifications" }
 ```
 
 ## Sending
@@ -60,10 +60,10 @@ the browser's own notifications, encrypted for each browser (RFC 8291) and
 signed with your VAPID keys (RFC 8292); `gleam run -m
 howdy/notifications/web_push` makes the keys.
 
-Email and push are [background jobs](https://github.com/mikeyjones/howdy/blob/v2.1.1/jobs/README.md), queued in the
+Email and push are [background jobs](https://github.com/mikeyjones/howdy/blob/v1.0.0/jobs/README.md), queued in the
 transaction that saves the notification: add them to your app's runner with
 `jobs.runner(db) |> notifications.handle_jobs(notifier)`. They are retried
 when they fail, and runners on several nodes share the work.
 
-See the [notifications docs](https://github.com/mikeyjones/howdy/tree/v2.1.1/docs/notifications) and
+See the [notifications docs](https://github.com/mikeyjones/howdy/tree/v1.0.0/docs/notifications) and
 `examples/notifications`.

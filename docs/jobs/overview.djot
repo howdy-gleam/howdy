@@ -21,7 +21,7 @@ your app.
 Add the package to `gleam.toml`, next to `howdy` and `howdy_database`:
 
 ```toml
-howdy_jobs = { git = "https://github.com/mikeyjones/howdy.git", ref = "v2.1.1", path = "jobs" }
+howdy_jobs = { git = "https://github.com/mikeyjones/howdy.git", ref = "v1.0.0", path = "jobs" }
 ```
 
 Its tables are created by a migration package, like any other:

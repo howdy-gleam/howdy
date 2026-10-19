@@ -5,7 +5,7 @@
 interactive reference for it.
 
 ```toml
-howdy_openapi = { git = "https://github.com/mikeyjones/howdy.git", ref = "v2.1.1", path = "openapi" }
+howdy_openapi = { git = "https://github.com/mikeyjones/howdy.git", ref = "v1.0.0", path = "openapi" }
 ```
 
 Gleam cannot look inside a decoder or a handler, so there is nothing to read
@@ -203,5 +203,5 @@ How a client asks for a version is documented the way OpenAPI expects:
 `openapi.version_document(spec, app, "v2")` gives one version's document as
 JSON, and `openapi.versions(app)` lists the versions.
 
-See [`examples/openapi`](https://github.com/mikeyjones/howdy/tree/v2.1.1/examples/openapi)
+See [`examples/openapi`](https://github.com/mikeyjones/howdy/tree/v1.0.0/examples/openapi)
 for a complete API.

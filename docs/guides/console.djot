@@ -184,6 +184,6 @@ session runs in the same VM, so leave none in code you deploy.
 
 ## More examples
 
-The [authentication examples](https://github.com/mikeyjones/howdy/tree/v2.1.1/examples/auth)
+The [authentication examples](https://github.com/mikeyjones/howdy/tree/v1.0.0/examples/auth)
 expose their services this way and include a `console` module for users,
 roles and sessions.

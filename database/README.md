@@ -2,7 +2,7 @@
 
 Package-owned migrations and portable transactions over
 [Gloo](https://hexdocs.pm/gloo) for Howdy apps, on PostgreSQL and SQLite.
-[`howdy_auth`](https://github.com/mikeyjones/howdy/blob/v2.1.1/auth/README.md) is built on it, and applications can use it
+[`howdy_auth`](https://github.com/mikeyjones/howdy/blob/v1.0.0/auth/README.md) is built on it, and applications can use it
 for their own tables, with or without auth.
 
 ```sh

@@ -18,7 +18,7 @@ form post, use [flash messages](/docs/controllers/flash-messages) instead.
 Add the package to `gleam.toml`, next to `howdy`:
 
 ```toml
-howdy_notifications = { git = "https://github.com/mikeyjones/howdy.git", ref = "v2.1.1", path = "notifications" }
+howdy_notifications = { git = "https://github.com/mikeyjones/howdy.git", ref = "v1.0.0", path = "notifications" }
 ```
 
 It keeps its tables in your app's database, through

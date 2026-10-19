@@ -43,14 +43,14 @@ and the bound URL. Keep the calling process alive while serving requests.
 For anything beyond a script, run the server under a supervisor as an OTP
 application with `howdy.supervised` and `howdy.start_application`, so a crash
 is restarted and `SIGTERM` lets open requests finish; see
-[docs/guides/supervision.djot](https://github.com/mikeyjones/howdy/blob/v2.1.1/docs/guides/supervision.djot).
+[docs/guides/supervision.djot](https://github.com/mikeyjones/howdy/blob/v1.0.0/docs/guides/supervision.djot).
 Howdy runs on the [ewe](https://hexdocs.pm/ewe/) server, but your code never
 needs to name it. For ewe options `howdy.start` does not offer, pass
 `howdy.handler(app)` to `ewe.new` yourself.
 
 HTTP/2 is always on. Add `howdy.tls(cert: "priv/cert.pem", key: "priv/key.pem")`
 to serve HTTPS, which is also what lets browsers use HTTP/2. See
-[docs/guides/supervision.djot](https://github.com/mikeyjones/howdy/blob/v2.1.1/docs/guides/supervision.djot) for running the
+[docs/guides/supervision.djot](https://github.com/mikeyjones/howdy/blob/v1.0.0/docs/guides/supervision.djot) for running the
 app as a release, and check a deployed instance with `scripts/smoke.sh`, which
 probes HTTP/1.1, HTTP/2, forwarded headers and WebSocket origins.
 
@@ -162,7 +162,7 @@ nothing stops the request from arriving. An attacker cannot read the
 response, so this is about writes, not disclosure.
 
 Two defences already apply. `cookie.defaults()` sets `SameSite=Lax`, which
-keeps cookies off cross-site writes, and [`howdy_auth`](https://github.com/mikeyjones/howdy/blob/v2.1.1/auth/README.md)
+keeps cookies off cross-site writes, and [`howdy_auth`](https://github.com/mikeyjones/howdy/blob/v1.0.0/auth/README.md)
 requires a matching `Origin` on cookie-authenticated writes, both on its own
 routes and on any route behind its guard. An application that uses that guard
 for every write is already protected.
@@ -289,7 +289,7 @@ toast.region(w, [], toast.flashed(w, messages))
 
 ## Authentication and authorization
 
-[`howdy_auth`](https://github.com/mikeyjones/howdy/blob/v2.1.1/auth/README.md) is an optional package with email-token, opt-in password
+[`howdy_auth`](https://github.com/mikeyjones/howdy/blob/v1.0.0/auth/README.md) is an optional package with email-token, opt-in password
 and built-in Google login and registration, browser cookie sessions, bearer-token API routes, and optional
 starter pages. Custom pages can call the same JSON endpoints or use the headless
 operations directly. Separate role-based authorization supports simple role
@@ -297,10 +297,10 @@ checks and permissions scoped to an application or organization.
 
 The package accepts a configured Gloo Repo (PostgreSQL or SQLite), owns its
 schema, and ships explicit, checksummed migrations.
-[`howdy_database`](https://github.com/mikeyjones/howdy/blob/v2.1.1/database/README.md) provides those migrations and the
+[`howdy_database`](https://github.com/mikeyjones/howdy/blob/v1.0.0/database/README.md) provides those migrations and the
 portable transactions beneath them, and applications can use it for their own
 tables, with or without auth.
-See [the runnable example](https://github.com/mikeyjones/howdy/blob/v2.1.1/examples/auth/README.md) and the package documentation
+See [the runnable example](https://github.com/mikeyjones/howdy/blob/v1.0.0/examples/auth/README.md) and the package documentation
 for setup and current scope; enterprise federation is not yet
 implemented.
 
@@ -397,7 +397,7 @@ howdy.new()
 ```
 
 See
-[docs/guides/health-checks.djot](https://github.com/mikeyjones/howdy/blob/v2.1.1/docs/guides/health-checks.djot)
+[docs/guides/health-checks.djot](https://github.com/mikeyjones/howdy/blob/v1.0.0/docs/guides/health-checks.djot)
 for liveness and readiness probes.
 
 ## CORS
@@ -617,7 +617,7 @@ For one long body sent a piece at a time, such as a CSV export,
 ## Pages and live components
 
 Web pages, themes and Lustre server components live in a separate package,
-[`howdy_ui`](https://github.com/mikeyjones/howdy/blob/v2.1.1/ui/README.md), so howdy itself stays free of Lustre and Sketch.
+[`howdy_ui`](https://github.com/mikeyjones/howdy/blob/v1.0.0/ui/README.md), so howdy itself stays free of Lustre and Sketch.
 
 ```gleam
 import howdy/ui
@@ -660,7 +660,7 @@ use body <- rich_text.field(fields, "body", [rich_text.not_empty()])
 ```
 
 Mount `ui.rich_text()`, which serves the editor's browser code. See
-[docs/ui/rich-text.djot](https://github.com/mikeyjones/howdy/blob/v2.1.1/docs/ui/rich-text.djot).
+[docs/ui/rich-text.djot](https://github.com/mikeyjones/howdy/blob/v1.0.0/docs/ui/rich-text.djot).
 
 ### Islands
 
@@ -680,11 +680,11 @@ page.body([island.mount(counter.island, with: 5)])
 
 Mount `ui.islands()`, which builds the islands on demand in development.
 For a release, `gleam run -m howdy/ui export` bundles them and exports the
-app. See [docs/ui/islands.djot](https://github.com/mikeyjones/howdy/blob/v2.1.1/docs/ui/islands.djot).
+app. See [docs/ui/islands.djot](https://github.com/mikeyjones/howdy/blob/v1.0.0/docs/ui/islands.djot).
 
 ## Calling other services
 
-[`howdy_remote`](https://github.com/mikeyjones/howdy/blob/v2.1.1/remote/README.md) is an optional package for typed calls
+[`howdy_remote`](https://github.com/mikeyjones/howdy/blob/v1.0.0/remote/README.md) is an optional package for typed calls
 between services. Define a procedure once in a module both services share,
 serve it from the service that owns the data, and call it from anywhere:
 
@@ -709,7 +709,7 @@ only the target changes. See `examples/remote` for two services calling each oth
 
 ## Hot reload
 
-[`howdy_dev`](https://github.com/mikeyjones/howdy/blob/v2.1.1/howdy_dev/README.md) is a dev dependency that rebuilds and
+[`howdy_dev`](https://github.com/mikeyjones/howdy/blob/v1.0.0/howdy_dev/README.md) is a dev dependency that rebuilds and
 reloads the app when a file under `src` changes, and refreshes open pages.
 Put an entry point in `dev/` and run it with `gleam dev`:
 
@@ -728,7 +728,7 @@ macOS. Nothing from it reaches a `gleam export erlang-shipment`.
 
 ## Development admin
 
-[`howdy_admin`](https://github.com/mikeyjones/howdy/blob/v2.1.1/admin/README.md) is a dev dependency that mounts an admin
+[`howdy_admin`](https://github.com/mikeyjones/howdy/blob/v1.0.0/admin/README.md) is a dev dependency that mounts an admin
 area at `/_howdy` from the same `dev/` entry point: the tables of the app's
 database in a grid that follows changes, its users and groups, and its
 roles and permissions, with a button to sign in to the app as any user. The app registers what it has,
@@ -747,7 +747,7 @@ See `examples/admin` for a working app.
 
 ## Telemetry
 
-[`howdy_telemetry`](https://github.com/mikeyjones/howdy/blob/v2.1.1/telemetry/README.md) switches on OpenTelemetry. Howdy
+[`howdy_telemetry`](https://github.com/mikeyjones/howdy/blob/v1.0.0/telemetry/README.md) switches on OpenTelemetry. Howdy
 opens a span for every request, query, remote call, email and sign-in with
 `howdy/trace`, but they go nowhere until the app starts telemetry, so apps
 that do not want it pay next to nothing. Send traces to any OTLP collector
@@ -762,7 +762,7 @@ let assert Ok(Nil) =
 
 ## Email
 
-[`howdy_mail`](https://github.com/mikeyjones/howdy/blob/v2.1.1/mail/README.md) writes email with
+[`howdy_mail`](https://github.com/mikeyjones/howdy/blob/v1.0.0/mail/README.md) writes email with
 [smail](https://hexdocs.pm/smail) templates and sends it over SMTP, Resend,
 SendGrid or an adapter of your own. In development an outbox keeps the mail
 instead, and the admin shows it as it arrives, along with previews of every
@@ -784,7 +784,7 @@ mail.message()
 
 ## File storage
 
-[`howdy_storage`](https://github.com/mikeyjones/howdy/blob/v2.1.1/storage/README.md) keeps files, such as uploads from
+[`howdy_storage`](https://github.com/mikeyjones/howdy/blob/v1.0.0/storage/README.md) keeps files, such as uploads from
 `howdy/form`, behind one API: an S3-compatible bucket (AWS S3, Cloudflare R2,
 Tigris, MinIO, Garage and others), a local folder for development and single
 servers, or memory for tests. Browsers fetch files through signed URLs that
@@ -803,7 +803,7 @@ storage.url(files, key, expires_in: 3600)
 
 Core's `howdy/locale` works out which locale a request wants, from the URL, a
 cookie, a saved preference or `accept-language`.
-[`howdy_i18n`](https://github.com/mikeyjones/howdy/blob/v2.1.1/i18n/README.md) turns ICU MessageFormat catalogues into
+[`howdy_i18n`](https://github.com/mikeyjones/howdy/blob/v1.0.0/i18n/README.md) turns ICU MessageFormat catalogues into
 typed Gleam functions, and writes numbers, money, dates, relative times and
 lists from CLDR data. Validation problems, Howdy UI and Howdy Auth follow the
 same locale:
@@ -819,7 +819,7 @@ problem.message(problem.TooShort(8), problem.translated(l))
 
 ## Feature flags
 
-[`howdy_flags`](https://github.com/mikeyjones/howdy/blob/v2.1.1/flags/README.md) keeps feature flags defined in code and
+[`howdy_flags`](https://github.com/mikeyjones/howdy/blob/v1.0.0/flags/README.md) keeps feature flags defined in code and
 switched at runtime: a kill switch, users, organizations and groups a flag is
 allowed or blocked for, and a rollout to a share of users that only ever adds
 people as it grows, raised by hand or step by step on a schedule. Checks read
@@ -839,7 +839,7 @@ flags.enabled(features, new_checkout(), for: flags.user(user.id))
 
 ## Background jobs
 
-[`howdy_jobs`](https://github.com/mikeyjones/howdy/blob/v2.1.1/jobs/README.md) keeps work to be done later in the app's
+[`howdy_jobs`](https://github.com/mikeyjones/howdy/blob/v1.0.0/jobs/README.md) keeps work to be done later in the app's
 database, on PostgreSQL or SQLite, and does it outside the request. A job is
 queued inside the transaction that makes it necessary, so it exists only if
 that commits; it is retried with a growing delay when it fails, and can be
@@ -866,7 +866,7 @@ jobs.runner(db)
 
 ## Notifications
 
-[`howdy_notifications`](https://github.com/mikeyjones/howdy/blob/v2.1.1/notifications/README.md) tells users what happened: each
+[`howdy_notifications`](https://github.com/mikeyjones/howdy/blob/v1.0.0/notifications/README.md) tells users what happened: each
 notification is kept in an inbox in the app's database until read, pushed
 straight away to every page the user has open, and emailed or sent as a browser
 notification (Web Push) when the kind and the user's preferences ask for it.
@@ -894,7 +894,7 @@ use <- conditional.when(ctx, conditional.etag(["note", id, version]))
 controller.json(ctx, note_to_json(note))
 ```
 
-[`howdy_cache`](https://github.com/mikeyjones/howdy/blob/v2.1.1/cache/README.md) keeps the results of expensive work, in memory or
+[`howdy_cache`](https://github.com/mikeyjones/howdy/blob/v1.0.0/cache/README.md) keeps the results of expensive work, in memory or
 the app's database, and drops them by tag when the data changes. Errors are
 never cached, invalidations inside a transaction wait for it to end, and a
 failing store falls back to computing:
@@ -949,7 +949,7 @@ pub fn blank_name_is_rejected_test() {
   message in `{"error": "..."}`, `field_errors` for a `422`, and `cookies` for
   the name and value pairs the response sets.
 
-Both [example applications](https://github.com/mikeyjones/howdy/tree/v2.1.1/examples) have a test suite written this way.
+Both [example applications](https://github.com/mikeyjones/howdy/tree/v1.0.0/examples) have a test suite written this way.
 
 ## Development
 

@@ -1,6 +1,6 @@
 # howdy_dev
 
-Hot reload for [howdy](https://github.com/mikeyjones/howdy/blob/v2.1.1/README.md) apps in development.
+Hot reload for [howdy](https://github.com/mikeyjones/howdy/blob/v1.0.0/README.md) apps in development.
 
 ```sh
 gleam add --dev howdy_dev
