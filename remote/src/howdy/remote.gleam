@@ -5,7 +5,7 @@
 ////
 //// ```gleam
 //// pub fn get_user() -> remote.Procedure(Int, User) {
-////   remote.procedure("users.get", input: remote.int(), output: user_codec())
+////   remote.procedure("users.get", input: codec.int(), output: user_codec())
 //// }
 //// ```
 ////
@@ -59,6 +59,7 @@ import gleam/otp/supervision
 import gleam/result
 import gleam/string
 import howdy/body
+import howdy/codec as howdy_codec
 import howdy/content.{type Content}
 import howdy/controller.{type Context, type Controller}
 import howdy/service
@@ -67,53 +68,60 @@ import logging
 
 // -- Procedures ----------------------------------------------------------------
 
-/// How to turn a value into JSON and back.
-pub type Codec(a) {
-  Codec(encode: fn(a) -> Json, decoder: Decoder(a))
-}
+/// How to turn a value into JSON and back. The same type as
+/// `howdy/codec.Codec`, which has the constructors.
+pub type Codec(a) =
+  howdy_codec.Codec(a)
 
-/// A codec from an encoder and a decoder that agree with each other.
+/// The same as `codec.new` in `howdy/codec`, kept so code written before
+/// that module existed still compiles.
 pub fn codec(
   encode encode: fn(a) -> Json,
   decoder decoder: Decoder(a),
 ) -> Codec(a) {
-  Codec(encode:, decoder:)
+  howdy_codec.new(encode:, decoder:)
 }
 
+/// The same as `codec.int` in `howdy/codec`, kept so code written before
+/// that module existed still compiles.
 pub fn int() -> Codec(Int) {
-  Codec(encode: json.int, decoder: decode.int)
+  howdy_codec.int()
 }
 
+/// The same as `codec.float` in `howdy/codec`, kept so code written before
+/// that module existed still compiles.
 pub fn float() -> Codec(Float) {
-  Codec(encode: json.float, decoder: decode.float)
+  howdy_codec.float()
 }
 
+/// The same as `codec.string` in `howdy/codec`, kept so code written before
+/// that module existed still compiles.
 pub fn string() -> Codec(String) {
-  Codec(encode: json.string, decoder: decode.string)
+  howdy_codec.string()
 }
 
+/// The same as `codec.bool` in `howdy/codec`, kept so code written before
+/// that module existed still compiles.
 pub fn bool() -> Codec(Bool) {
-  Codec(encode: json.bool, decoder: decode.bool)
+  howdy_codec.bool()
 }
 
-/// For procedures that take no input or return nothing useful.
+/// The same as `codec.nil` in `howdy/codec`, kept so code written before
+/// that module existed still compiles.
 pub fn nil() -> Codec(Nil) {
-  Codec(encode: fn(_) { json.null() }, decoder: decode.success(Nil))
+  howdy_codec.nil()
 }
 
+/// The same as `codec.list` in `howdy/codec`, kept so code written before
+/// that module existed still compiles.
 pub fn list(of item: Codec(a)) -> Codec(List(a)) {
-  Codec(
-    encode: fn(items) { json.array(items, item.encode) },
-    decoder: decode.list(item.decoder),
-  )
+  howdy_codec.list(item)
 }
 
-/// `None` is encoded as `null`.
+/// The same as `codec.optional` in `howdy/codec`, kept so code written before
+/// that module existed still compiles.
 pub fn optional(of item: Codec(a)) -> Codec(Option(a)) {
-  Codec(
-    encode: fn(value) { json.nullable(value, item.encode) },
-    decoder: decode.optional(item.decoder),
-  )
+  howdy_codec.optional(item)
 }
 
 /// A named function one service offers another, taking an `input` and

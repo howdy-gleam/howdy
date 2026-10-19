@@ -312,6 +312,46 @@ jobs:
           HOWDY_FLAGS_TEST_POSTGRES_URL: postgres://howdy_flags_test@localhost/postgres
       - run: gleam format --check src test
 
+  cache:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: howdy_cache_test
+          POSTGRES_DB: postgres
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U howdy_cache_test -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    defaults:
+      run:
+        working-directory: cache
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cache/gleam
+            cache/build/packages
+          key: gleam-cache-${{ hashFiles('**/gleam.toml', '**/manifest.toml') }}
+          restore-keys: gleam-cache-
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "29"
+          gleam-version: "1.18.1"
+          rebar3-version: "3"
+      - run: $GITHUB_WORKSPACE/scripts/ci-deps.sh
+      - run: gleam test
+      - run: gleam test
+        env:
+          HOWDY_CACHE_TEST_POSTGRES_URL: postgres://howdy_cache_test@localhost/postgres
+      - run: gleam format --check src test
+
   admin:
     runs-on: ubuntu-latest
     services:

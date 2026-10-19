@@ -3,9 +3,10 @@ import gleam/dynamic/decode
 import gleam/erlang/process
 import gleam/json
 import gleam/list
-import gleam/option.{None, Some}
+
 import gleam/otp/actor
 import gleam/string
+import howdy/codec
 import howdy/remote
 import howdy/service
 import howdy_remote_fixtures.{User} as fixtures
@@ -45,7 +46,7 @@ pub fn call_passes_service_errors_through_test() {
 
 pub fn every_service_error_round_trips_test() {
   let echo_error =
-    remote.procedure("errors.echo", input: remote.int(), output: remote.nil())
+    remote.procedure("errors.echo", input: codec.int(), output: codec.nil())
   let errors = [
     service.NotFound("gone"),
     service.Invalid("bad"),
@@ -71,7 +72,7 @@ pub fn every_service_error_round_trips_test() {
 
 pub fn internal_detail_stays_on_the_server_test() {
   let failing =
-    remote.procedure("internal.fail", input: remote.nil(), output: remote.nil())
+    remote.procedure("internal.fail", input: codec.nil(), output: codec.nil())
   let assert Ok(_) =
     remote.server()
     |> remote.handle(failing, fn(_) {
@@ -101,7 +102,7 @@ pub fn missing_handler_test() {
 
 pub fn crashing_handler_test() {
   let crashing =
-    remote.procedure("crash.now", input: remote.nil(), output: remote.nil())
+    remote.procedure("crash.now", input: codec.nil(), output: codec.nil())
   let assert Ok(_) =
     remote.server()
     |> remote.handle(crashing, fn(_) { crash() })
@@ -116,7 +117,7 @@ pub fn crashing_handler_test() {
 
 pub fn slow_handler_times_out_test() {
   let slow =
-    remote.procedure("slow.sleep", input: remote.int(), output: remote.int())
+    remote.procedure("slow.sleep", input: codec.int(), output: codec.int())
   let assert Ok(_) =
     remote.server()
     |> remote.handle(slow, fn(ms) {
@@ -135,7 +136,7 @@ pub fn calls_run_concurrently_test() {
   // another, the first would wait for the rest forever.
   let gate = gate(10)
   let meet =
-    remote.procedure("meet.parallel", input: remote.nil(), output: remote.int())
+    remote.procedure("meet.parallel", input: codec.nil(), output: codec.int())
   let assert Ok(_) =
     remote.server()
     |> remote.handle(meet, fn(_) { Ok(process.call(gate, 1000, Arrive)) })
@@ -182,8 +183,8 @@ pub fn mismatched_output_is_a_bad_response_test() {
   let expecting_int =
     remote.procedure(
       "mismatch.users.get",
-      input: remote.int(),
-      output: remote.int(),
+      input: codec.int(),
+      output: codec.int(),
     )
   let assert Error(remote.BadResponse(reason)) =
     remote.call(remote.cluster(), expecting_int, 1, timeout: 1000)
@@ -195,7 +196,7 @@ pub fn mismatched_input_is_invalid_test() {
   let sending_string =
     remote.procedure(
       "bad_input.users.get",
-      input: remote.string(),
+      input: codec.string(),
       output: fixtures.user(),
     )
   assert remote.call(remote.cluster(), sending_string, "1", timeout: 1000)
@@ -209,11 +210,7 @@ pub fn mismatched_input_is_invalid_test() {
 pub fn cast_runs_without_waiting_test() {
   let seen = process.new_subject()
   let notify =
-    remote.procedure(
-      "cast.notify",
-      input: remote.string(),
-      output: remote.nil(),
-    )
+    remote.procedure("cast.notify", input: codec.string(), output: codec.nil())
   let assert Ok(_) =
     remote.server()
     |> remote.handle(notify, fn(text) {
@@ -357,18 +354,12 @@ pub fn apply_refuses_a_module_or_function_this_node_has_never_seen_test() {
 @external(erlang, "erlang", "unique_integer")
 fn erlang_unique() -> Int
 
-pub fn codecs_round_trip_test() {
-  let round_trip = fn(codec: remote.Codec(a), value: a) {
-    json.parse(json.to_string(codec.encode(value)), codec.decoder)
-  }
-  assert round_trip(remote.int(), 3) == Ok(3)
-  assert round_trip(remote.float(), 1.5) == Ok(1.5)
-  assert round_trip(remote.bool(), True) == Ok(True)
-  assert round_trip(remote.string(), "hi") == Ok("hi")
-  assert round_trip(remote.nil(), Nil) == Ok(Nil)
-  assert round_trip(remote.list(remote.int()), [1, 2]) == Ok([1, 2])
-  assert round_trip(remote.optional(remote.int()), Some(1)) == Ok(Some(1))
-  assert round_trip(remote.optional(remote.int()), None) == Ok(None)
+// The constructors that lived here before `howdy/codec` still work.
+pub fn codec_compatibility_test() {
+  let wrapped: remote.Codec(Int) = remote.int()
+  assert json.to_string(wrapped.encode(3)) == "3"
+  let custom = remote.codec(encode: json.string, decoder: decode.string)
+  assert json.parse("\"hi\"", custom.decoder) == Ok("hi")
 }
 
 pub fn to_service_error_test() {

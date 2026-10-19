@@ -46,6 +46,18 @@ pub fn find_user_test() {
     == Ok(User(2, "Grace", "grace@example.com", 45))
 }
 
+pub fn unchanged_user_is_not_modified_test() {
+  let first = testing.get("/user/1") |> testing.send(app())
+  let assert Ok(etag) = response.get_header(first, "etag")
+
+  let again =
+    testing.get("/user/1")
+    |> testing.header("if-none-match", etag)
+    |> testing.send(app())
+  assert again.status == 304
+  assert testing.text(again) == ""
+}
+
 pub fn unknown_user_is_not_found_test() {
   let res = testing.get("/user/9") |> testing.send(app())
 

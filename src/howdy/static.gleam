@@ -32,13 +32,13 @@ import ewe
 import filepath
 import gleam/bytes_tree
 import gleam/http
-import gleam/http/request
 import gleam/http/response.{type Response}
 import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
+import howdy/conditional
 import howdy/content.{type Content}
 import howdy/context
 import howdy/controller.{type Controller, type GuardedContext}
@@ -123,7 +123,7 @@ pub fn build(files: Files) -> Controller {
 /// from `build` is the safe way to serve user-chosen paths.
 pub fn file(ctx: GuardedContext(guarded), path: String) -> Response(Content) {
   case simplifile.is_file(path) {
-    Ok(True) -> send(ctx, path)
+    Ok(True) -> send(ctx, path, None)
     _ -> not_found(ctx)
   }
 }
@@ -133,16 +133,16 @@ fn respond(
   files: Files,
   path: String,
 ) -> Response(Content) {
-  let response = case safe_segments(path) {
+  case safe_segments(path) {
     Ok(segments) -> {
       case resolve(files.root, segments, files.index) {
-        Found(path) -> send(ctx, path)
+        Found(path) -> send(ctx, path, files.max_age)
         Rejected -> not_found(ctx)
         Missing | Directory ->
           case files.fallback {
             Some(name) ->
               case walk(files.root, string.split(name, "/")) {
-                Found(path) -> send(ctx, path)
+                Found(path) -> send(ctx, path, files.max_age)
                 _ -> not_found(ctx)
               }
             None -> not_found(ctx)
@@ -150,15 +150,6 @@ fn respond(
       }
     }
     Error(Nil) -> not_found(ctx)
-  }
-  case files.max_age, response.status {
-    Some(seconds), 200 ->
-      response.set_header(
-        response,
-        "cache-control",
-        "public, max-age=" <> int.to_string(seconds),
-      )
-    _, _ -> response
   }
 }
 
@@ -228,67 +219,38 @@ fn valid_relative_name(name: String) -> Bool {
   })
 }
 
-fn send(ctx: GuardedContext(guarded), path: String) -> Response(Content) {
+fn send(
+  ctx: GuardedContext(guarded),
+  path: String,
+  max_age: Option(Int),
+) -> Response(Content) {
   // Validators from the file's size and modification time, so a browser
   // that already has the file gets a `304` instead of the bytes again.
-  let validators = case simplifile.file_info(path) {
-    Ok(info) ->
-      Some(#(
-        "\""
+  case simplifile.file_info(path) {
+    Ok(info) -> {
+      let validators =
+        conditional.quoted_etag(
+          "\""
           <> int.to_string(info.size)
           <> "-"
           <> int.to_string(info.mtime_seconds)
           <> "\"",
-        http_date(info.mtime_seconds),
-        info.mtime_seconds,
-      ))
-    Error(_) -> None
-  }
-  case validators {
-    Some(#(etag, last_modified, mtime)) ->
-      case not_modified(ctx.request, etag, mtime) {
-        True ->
-          response.new(304)
-          |> response.set_header("etag", etag)
-          |> response.set_header("last-modified", last_modified)
-          |> response.set_body(content.Empty)
-        False ->
-          send_bytes(ctx, path)
-          |> response.set_header("etag", etag)
-          |> response.set_header("last-modified", last_modified)
+        )
+        |> conditional.last_modified(info.mtime_seconds)
+      let validators = case max_age {
+        Some(seconds) ->
+          conditional.cache_control(
+            validators,
+            conditional.public() |> conditional.max_age(seconds),
+          )
+        None -> conditional.without_cache_control(validators)
       }
-    None -> send_bytes(ctx, path)
+      use <- conditional.when(ctx, validators)
+      send_bytes(ctx, path)
+    }
+    Error(_) -> send_bytes(ctx, path)
   }
 }
-
-/// `If-None-Match` wins when present; otherwise `If-Modified-Since` at
-/// whole-second precision, which is all the header carries.
-fn not_modified(req: request.Request(a), etag: String, mtime: Int) -> Bool {
-  case request.get_header(req, "if-none-match") {
-    Ok(tags) ->
-      tags
-      |> string.split(",")
-      |> list.any(fn(tag) {
-        let tag = string.trim(tag)
-        tag == etag || tag == "*" || tag == "W/" <> etag
-      })
-    Error(Nil) ->
-      case request.get_header(req, "if-modified-since") {
-        Ok(since) ->
-          case parse_http_date(since) {
-            Ok(seconds) -> mtime <= seconds
-            Error(Nil) -> False
-          }
-        Error(Nil) -> False
-      }
-  }
-}
-
-@external(erlang, "howdy_static_ffi", "http_date")
-fn http_date(seconds: Int) -> String
-
-@external(erlang, "howdy_static_ffi", "parse_http_date")
-fn parse_http_date(date: String) -> Result(Int, Nil)
 
 fn send_bytes(ctx: GuardedContext(guarded), path: String) -> Response(Content) {
   let body = case context.connection(ctx.request.body) {

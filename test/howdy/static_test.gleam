@@ -163,6 +163,15 @@ pub fn max_age_test() {
   let res = testing.get("/css/site.css") |> testing.send(app)
   assert response.get_header(res, "cache-control") == Ok("public, max-age=3600")
 
+  // A `304` repeats the policy, so a cache that revalidated keeps it.
+  let assert Ok(etag) = response.get_header(res, "etag")
+  let res =
+    testing.get("/css/site.css")
+    |> request.set_header("if-none-match", etag)
+    |> testing.send(app)
+  assert res.status == 304
+  assert response.get_header(res, "cache-control") == Ok("public, max-age=3600")
+
   let res = testing.get("/nope") |> testing.send(app)
   assert response.get_header(res, "cache-control") == Error(Nil)
 }

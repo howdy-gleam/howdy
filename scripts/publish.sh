@@ -31,6 +31,7 @@ packages=(
   "howdy_ui:ui"
   "howdy_remote:remote"
   "howdy_flags:flags"
+  "howdy_cache:cache"
   "howdy_dev:howdy_dev"
   "howdy_auth:auth"
   "howdy_admin:admin"

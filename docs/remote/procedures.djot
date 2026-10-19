@@ -17,6 +17,7 @@ A procedure is a name, a codec for its input and a codec for its output:
 ```gleam
 import gleam/dynamic/decode
 import gleam/json
+import howdy/codec
 import howdy/remote
 
 pub type User {
@@ -24,19 +25,19 @@ pub type User {
 }
 
 pub fn get_user() -> remote.Procedure(Int, User) {
-  remote.procedure("users.get", input: remote.int(), output: user())
+  remote.procedure("users.get", input: codec.int(), output: user())
 }
 
 pub fn list_users() -> remote.Procedure(Nil, List(User)) {
-  remote.procedure("users.list", input: remote.nil(), output: remote.list(user()))
+  remote.procedure("users.list", input: codec.nil(), output: codec.list(user()))
 }
 
 pub fn user_to_json(user: User) -> json.Json {
   json.object([#("id", json.int(user.id)), #("name", json.string(user.name))])
 }
 
-fn user() -> remote.Codec(User) {
-  remote.codec(encode: user_to_json, decoder: {
+fn user() -> codec.Codec(User) {
+  codec.new(encode: user_to_json, decoder: {
     use id <- decode.field("id", decode.int)
     use name <- decode.field("name", decode.string)
     decode.success(User(id:, name:))
@@ -48,9 +49,11 @@ Put these in a module both services import. A small package that both
 depend on works best: the caller and the server then always agree on names
 and types.
 
-`remote.int`, `float`, `string`, `bool` and `nil` cover the simple cases,
-and `remote.list(of:)` and `remote.optional(of:)` build on them. For your
-own types, `remote.codec` pairs a JSON encoder with a decoder.
+Codecs come from `howdy/codec` in the core package. `codec.int`, `float`,
+`string`, `bool` and `nil` cover the simple cases, and `codec.list(of:)` and
+`codec.optional(of:)` build on them. For your own types, `codec.new` pairs a
+JSON encoder with a decoder. The same codecs work for
+[caching](/docs/cache/overview).
 
 The name is all that crosses the wire, so it must be unique among the
 procedures a server handles. Prefix it with the service, as in

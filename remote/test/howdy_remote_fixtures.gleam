@@ -5,6 +5,7 @@ import gleam/dynamic/decode
 import gleam/erlang/process
 import gleam/json
 import gleam/list
+import howdy/codec
 import howdy/remote
 import howdy/service
 
@@ -12,8 +13,8 @@ pub type User {
   User(id: Int, name: String)
 }
 
-pub fn user() -> remote.Codec(User) {
-  remote.codec(
+pub fn user() -> codec.Codec(User) {
+  codec.new(
     encode: fn(user: User) {
       json.object([
         #("id", json.int(user.id)),
@@ -29,15 +30,15 @@ pub fn user() -> remote.Codec(User) {
 }
 
 pub fn get_user(prefix: String) -> remote.Procedure(Int, User) {
-  remote.procedure(prefix <> ".users.get", input: remote.int(), output: user())
+  remote.procedure(prefix <> ".users.get", input: codec.int(), output: user())
 }
 
 /// Which node served the call.
 pub fn whoami(prefix: String) -> remote.Procedure(Nil, String) {
   remote.procedure(
     prefix <> ".whoami",
-    input: remote.nil(),
-    output: remote.string(),
+    input: codec.nil(),
+    output: codec.string(),
   )
 }
 

@@ -1,0 +1,188 @@
+# Caching
+
+`howdy_cache` keeps the result of expensive work for a while and throws it
+away when the data it came from changes: a report built from several
+queries, a call to another service, a rendered page. It is the Howdy
+version of Rails' `Rails.cache.fetch` or Laravel's `Cache::remember`, with
+tags for invalidation like Next.js's `revalidateTag`.
+
+Add it to `[dependencies]` in `gleam.toml`, from the same release as your
+app's other Howdy packages:
+
+```toml
+howdy_cache = { git = "https://github.com/mikeyjones/howdy.git", ref = "v2.1.1", path = "cache" }
+```
+
+## Fetch or compute
+
+Create one cache when the app starts and share it, like a database Repo:
+
+```gleam
+import howdy/cache
+import howdy/cache/memory
+
+let app_cache = cache.new(memory.new(max_entries: 50_000))
+```
+
+Then wrap the work in `cache.fetch`. It returns the stored value if there
+is a current one. Otherwise it runs the function, stores an `Ok` result,
+and returns it:
+
+```gleam
+import gleam/int
+import howdy/cache
+import howdy/codec
+
+pub fn dashboard(app_cache: cache.Cache, team: Int) -> service.Result(Dashboard) {
+  let entry = cache.entry("dashboard:" <> int.to_string(team), ttl: 300)
+  use <- cache.fetch(app_cache, entry, dashboard_codec())
+  build_dashboard(db, team)
+}
+```
+
+`ttl` is how many seconds to keep the value. Errors are never stored, so a
+failed query is tried again on the next request.
+
+Values are stored as JSON, through a codec from `howdy/codec`, the same
+codecs [remote procedures](/docs/remote/procedures) use:
+
+```gleam
+fn dashboard_codec() -> codec.Codec(Dashboard) {
+  codec.new(encode: dashboard_to_json, decoder: dashboard_decoder())
+}
+```
+
+Every store encodes, the memory store included, so a codec that does not
+read back what it wrote fails in development, not first in production. A
+stored value that no longer decodes, because a deploy changed its type,
+counts as missing and is replaced.
+
+## Invalidating with tags
+
+Expiry alone means users see old data until the time runs out. Tag each
+entry with the data it was built from, then invalidate a tag when that
+data changes:
+
+```gleam
+let entry =
+  cache.entry("dashboard:" <> int.to_string(team), ttl: 3600)
+  |> cache.tags(["team:" <> int.to_string(team), "projects"])
+
+// Later, when a project changes:
+let assert Ok(Nil) = cache.invalidate(app_cache, ["projects"])
+```
+
+Every entry carrying `projects` is treated as missing from then on, and the
+next `fetch` rebuilds it.
+
+Tags are safe against a race that simple deletion has. Request A starts
+building the dashboard and reads the projects. Request B changes a project
+and invalidates. A finishes and stores what it built, which is already out
+of date. Each tag has a version that `invalidate` raises, and `fetch` reads
+the versions before it computes and stores them with the value. A's value
+was built under the old version, so it is never served.
+
+### Inside transactions
+
+Call `invalidate` where you change the data, inside the transaction if
+there is one:
+
+```gleam
+use tx <- database.transaction(db)
+use Nil <- result.try(projects.rename(tx, id, name))
+cache.invalidate(app_cache, ["projects"])
+```
+
+Inside a `howdy/database` transaction, `invalidate` and `delete` wait until
+the outermost transaction has ended. If they ran straight away, another
+request could read the old data, still uncommitted, and cache it again
+before the commit. `put` inside a transaction does not store its value: the
+value might come from a savepoint that rolls back, so the key is deleted
+once the transaction ends, and the next `fetch` computes it afresh.
+
+Prefer tags to `delete` for data that changes. A request that read the old
+data just before the change can still store it just after a `delete`, and
+it is then served until it expires; a tag's version rules that out.
+
+`fetch` inside a transaction skips the cache and just computes. A cached
+value would not show the transaction's own changes, and a computed one
+might be built from changes that are about to roll back.
+
+## Stores
+
+- `howdy/cache/memory` keeps entries in this node's memory. It is the
+  fastest, and right for an app on one node. Each node has its own entries
+  and its own invalidations, so with several nodes, use the database store
+  for anything you invalidate by tag. Create it in `main`: its tables
+  belong to the process that created it.
+- `howdy/cache/database` keeps entries in your database, PostgreSQL or
+  SQLite, shared by every node. A read is one query, so it pays off for work
+  that costs more than one query. On PostgreSQL the tables are `UNLOGGED`,
+  which makes writes cheaper; a crash empties them, which for a cache only
+  means a cold start.
+
+The database store has migrations, like the other Howdy packages:
+
+```gleam
+import howdy/cache/database as cache_database
+import howdy/migration
+
+let assert Ok(Nil) = migration.run(db, [cache_database.schema()])
+let assert Ok(store) = cache_database.store(db)
+let app_cache = cache.new(store)
+```
+
+Expired rows are deleted every five minutes by a process that lives as
+long as the process that called `store`. `cache_database.sweep(db)` does
+it on demand.
+
+Any other store, Redis for example, is a value built with `cache.store`
+from seven functions: read, versions, write, delete, invalidate, clear and
+a name. Deferred work calls them as a transaction ends, while
+`howdy/database` still counts it as open, so a store on the app's database
+should use `howdy/database` functions rather than open a pool transaction
+of its own.
+
+## When the store fails
+
+The cache never takes the app down with it. If the store cannot be
+reached, `fetch` logs a warning and computes the value as if the cache were
+empty. `invalidate`, `delete`, `put` and `clear` return the error instead,
+since a failed invalidation can leave stale data behind.
+
+## Many requests at once
+
+When a popular entry expires, every request for it misses at the same
+moment. On each node, one of them computes the value and the others wait
+for it, so the database sees one query rather than a hundred. If it fails,
+they all get its error. Nodes do not wait for each other, and a request
+that starts after an invalidation never waits for a value computed before
+it.
+
+Don't call `fetch` from inside a `database.connect` callback on SQLite: the
+request waiting for a value would hold the connection the request
+computing it needs.
+
+## Other settings
+
+- `cache.namespace(app_cache, "v2")` keeps keys and tags apart from other
+  caches sharing a store. Changing it starts the cache afresh without
+  deleting anything.
+- `cache.max_value_bytes` sets the largest value stored, 1 MiB by default.
+  Larger values are returned but not kept.
+- `cache.entry_ms` gives the time to keep a value in milliseconds.
+- `cache.get`, `cache.put`, `cache.delete` and `cache.clear` work on single
+  entries, and the whole store, directly.
+- `cache.with_clock` replaces the clock, so tests can expire entries
+  without sleeping.
+
+Each `fetch` is a `cache.fetch` span in [traces](/docs/telemetry/tracing),
+recording whether it was a hit.
+
+## Caching in the browser too
+
+`howdy_cache` saves the server work. To save sending the response at all,
+answer `304 Not Modified` with [conditional
+requests](/docs/controllers/conditional-requests). The two work together:
+the cache makes finding out the version cheap, and the `304` skips
+rendering and sending.

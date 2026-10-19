@@ -92,6 +92,11 @@
           "description": "Send text, HTML and JSON, set status codes and headers, and redirect from a Howdy handler."
         },
         {
+          "slug": "conditional-requests",
+          "title": "Conditional requests",
+          "description": "Answer 304 Not Modified when the client already has the current version, refuse writes to an old version with 412, and choose who may cache a response."
+        },
+        {
           "slug": "guards",
           "title": "Guards",
           "description": "Protect routes with guards that reject a request or hand the handler a typed value, such as the signed-in user."
@@ -199,6 +204,17 @@
           "slug": "overview",
           "title": "Howdy Storage",
           "description": "Keep files in an S3-compatible bucket, a local folder or memory with the optional howdy_storage package, and let browsers fetch and upload them directly through signed URLs."
+        }
+      ]
+    },
+    {
+      "slug": "cache",
+      "title": "Cache",
+      "docs": [
+        {
+          "slug": "overview",
+          "title": "Caching",
+          "description": "Keep the results of expensive work with howdy_cache, in memory or the database, and invalidate them by tag when the data changes."
         }
       ]
     },
