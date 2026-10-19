@@ -4,6 +4,7 @@ import gleam/string
 import gleeunit
 import gloo/adapter/sqlite
 import howdy/database
+import howdy/jobs
 import howdy/mail
 import howdy/mail/outbox
 import howdy/migration
@@ -19,7 +20,8 @@ pub fn main() {
 fn services() -> example.Services {
   let assert Ok(repo) = sqlite.start(sqlite.memory())
   let assert Ok(Nil) = database.sqlite_defaults(repo)
-  let assert Ok(Nil) = migration.run(repo, [notifications.schema()])
+  let assert Ok(Nil) =
+    migration.run(repo, [jobs.schema(), notifications.schema()])
   example.services(
     repo,
     mail.mailer(outbox.adapter(outbox.start())),

@@ -38,6 +38,7 @@ import howdy/database
 import howdy/env
 import howdy/flash
 import howdy/form
+import howdy/jobs
 import howdy/mail
 import howdy/mail/outbox
 import howdy/migration
@@ -74,16 +75,18 @@ pub fn main() -> Nil {
   let assert Ok(Nil) = simplifile.create_directory_all("tmp")
   let assert Ok(repo) = sqlite.start(sqlite.file("tmp/notifications.db"))
   let assert Ok(Nil) = database.sqlite_defaults(repo)
-  let assert Ok(Nil) = migration.run(repo, [notifications.schema()])
+  let assert Ok(Nil) =
+    migration.run(repo, [jobs.schema(), notifications.schema()])
   let assert Ok(box) = outbox.start_in("tmp/mail")
   let services = services(repo, mail.mailer(outbox.adapter(box)), keys())
 
   // Supervised inside an OTP application: restarted on a crash, drained on
-  // SIGTERM. The worker sends email and push; the server comes last, so it
-  // stops first. A local demo, so it listens on 127.0.0.1:8792 only.
+  // SIGTERM. The jobs runner sends email and push; the server comes last,
+  // so it stops first. A local demo, so it listens on 127.0.0.1:8792 only.
+  let runner = jobs.runner(repo) |> notifications.handle_jobs(services.notifier)
   let assert Ok(_) =
     supervisor.new(supervisor.OneForOne)
-    |> supervisor.add(notifications.supervised(services.notifier))
+    |> supervisor.add(jobs.supervised(runner))
     |> supervisor.add(howdy.supervised(
       app(services) |> howdy.bind(to: "127.0.0.1") |> howdy.listening(on: 8792),
     ))

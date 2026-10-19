@@ -14,6 +14,7 @@ gloo = ">= 1.0.2 and < 2.0.0"
 simplifile = ">= 2.3.0 and < 3.0.0"
 howdy = { path = "../.." }
 howdy_database = { path = "../../database" }
+howdy_jobs = { path = "../../jobs" }
 howdy_mail = { path = "../../mail" }
 howdy_notifications = { path = "../../notifications" }
 howdy_ui = { path = "../../ui" }

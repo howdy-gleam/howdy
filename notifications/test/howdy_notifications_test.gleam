@@ -14,11 +14,12 @@ import howdy
 import howdy/controller
 import howdy/database
 import howdy/database/postgres
+import howdy/jobs.{Drained}
 import howdy/mail
 import howdy/migration
 import howdy/notifications.{
-  Delivered, Delivery, EmailDigest, EmailNow, GiveUp, NoEmail, Received, Report,
-  Retry, Unread,
+  Delivered, Delivery, EmailDigest, EmailNow, GiveUp, NoEmail, Received, Retry,
+  Unread,
 }
 import howdy/service
 import howdy/sse
@@ -39,7 +40,8 @@ fn open() -> Repo {
     Error(Nil) -> {
       let assert Ok(db) = sqlite.start(sqlite.memory())
       let assert Ok(Nil) = database.sqlite_defaults(db)
-      let assert Ok(Nil) = migration.run(db, [notifications.schema()])
+      let assert Ok(Nil) =
+        migration.run(db, [jobs.schema(), notifications.schema()])
       let assert Ok(Nil) = migration.check(db, notifications.schema())
       db
     }
@@ -63,13 +65,15 @@ fn open() -> Repo {
               db,
               "DROP TABLE IF EXISTS howdy_notifications_items,
                 howdy_notifications_preferences, howdy_notifications_digests,
-                howdy_notifications_push_subscriptions;
+                howdy_notifications_push_subscriptions, howdy_jobs,
+                howdy_jobs_queues, howdy_jobs_schedules;
               CREATE TABLE IF NOT EXISTS howdy_migrations (package TEXT NOT NULL, version BIGINT NOT NULL, checksum TEXT NOT NULL, PRIMARY KEY(package, version));
               CREATE TABLE IF NOT EXISTS howdy_migration_schemas (package TEXT PRIMARY KEY NOT NULL, fingerprint TEXT NOT NULL);
-              DELETE FROM howdy_migrations WHERE package = 'howdy_notifications';
-              DELETE FROM howdy_migration_schemas WHERE package = 'howdy_notifications'",
+              DELETE FROM howdy_migrations WHERE package IN ('howdy_notifications', 'howdy_jobs');
+              DELETE FROM howdy_migration_schemas WHERE package IN ('howdy_notifications', 'howdy_jobs')",
             )
-          let assert Ok(Nil) = migration.run(db, [notifications.schema()])
+          let assert Ok(Nil) =
+            migration.run(db, [jobs.schema(), notifications.schema()])
           let assert Ok(Nil) = migration.check(db, notifications.schema())
           keep(db)
           db
@@ -79,7 +83,8 @@ fn open() -> Repo {
         database.exec(
           db,
           "TRUNCATE howdy_notifications_items, howdy_notifications_preferences,
-            howdy_notifications_digests, howdy_notifications_push_subscriptions",
+            howdy_notifications_digests, howdy_notifications_push_subscriptions,
+            howdy_jobs, howdy_jobs_queues, howdy_jobs_schedules",
         )
       db
     }
@@ -101,6 +106,16 @@ fn advance(milliseconds: Int) -> Nil
 
 fn notifier() -> notifications.Notifier {
   notifications.new(open()) |> notifications.with_clock(clock)
+}
+
+/// Do every delivery job that is due by the test's clock.
+fn deliver(notifier: notifications.Notifier) -> jobs.Drained {
+  let assert Ok(drained) =
+    jobs.runner(notifications.repo(notifier))
+    |> jobs.with_clock(clock)
+    |> notifications.handle_jobs(notifier)
+    |> jobs.drain
+  drained
 }
 
 fn send(notifier, to: String, title: String) -> notifications.Notification {
@@ -309,7 +324,7 @@ pub fn email_only_notifications_stay_out_of_the_inbox_test() {
   assert notifications.unread_count(notifier, "u1") == Ok(0)
   assert notifications.get(notifier, "u1", n.id)
     == Error(service.NotFound("notification not found"))
-  assert notifications.deliver_due(notifier) == Ok(Report(1, 0, 0, 0))
+  assert deliver(notifier).completed == 1
   assert sent_subjects(outbox) == ["Hi"]
 }
 
@@ -537,11 +552,11 @@ fn sent_subjects(outbox: process.Subject(mail.Outgoing)) -> List(String) {
 pub fn emails_are_sent_once_test() {
   let #(notifier, outbox) = with_mail(notifier())
   let _ = send(notifier, "u1", "Hello")
-  assert notifications.deliver_due(notifier) == Ok(Report(1, 0, 0, 0))
+  assert deliver(notifier) == Drained(1, 0, 0, 0, 0)
   let assert Ok(outgoing) = process.receive(outbox, 0)
   assert outgoing.to == [mail.address("u1@example.com")]
   assert outgoing.subject == "Hello"
-  assert notifications.deliver_due(notifier) == Ok(Report(0, 0, 0, 0))
+  assert deliver(notifier) == Drained(0, 0, 0, 0, 0)
   assert sent_subjects(outbox) == []
 }
 
@@ -550,10 +565,11 @@ pub fn email_after_skips_what_was_read_first_test() {
   let notifier = notifications.email_after(notifier, 60)
   let read = send(notifier, "u1", "Read in the app")
   let _ = send(notifier, "u1", "Not read")
-  assert notifications.deliver_due(notifier) == Ok(Report(0, 0, 0, 0))
+  assert deliver(notifier) == Drained(0, 0, 0, 0, 0)
   assert notifications.mark_read(notifier, "u1", read.id) == Ok(Nil)
   advance(60_000)
-  assert notifications.deliver_due(notifier) == Ok(Report(1, 0, 0, 0))
+  // The read one's job is cancelled rather than sent.
+  assert deliver(notifier) == Drained(1, 0, 0, 1, 0)
   assert sent_subjects(outbox) == ["Not read"]
 }
 
@@ -569,48 +585,44 @@ pub fn failed_emails_are_retried_then_given_up_test() {
   let _ = send(notifier, "u1", "Flaky")
   let _ = send(notifier, "u1", "Refused")
   let _ = send(notifier, "nobody", "No address")
-  // Two give up straight away; the flaky one is tried four more times.
-  assert notifications.deliver_due(notifier) == Ok(Report(0, 0, 0, 3))
-  assert notifications.deliver_due(notifier) == Ok(Report(0, 0, 0, 0))
+  // Two give up straight away; the flaky one is tried four more times,
+  // 30 seconds after the first and doubling.
+  assert deliver(notifier) == Drained(0, 1, 0, 0, 2)
+  assert deliver(notifier) == Drained(0, 0, 0, 0, 0)
   advance(30_000)
-  assert notifications.deliver_due(notifier) == Ok(Report(0, 0, 0, 1))
+  assert deliver(notifier) == Drained(0, 1, 0, 0, 0)
   advance(60_000)
-  assert notifications.deliver_due(notifier) == Ok(Report(0, 0, 0, 1))
+  assert deliver(notifier) == Drained(0, 1, 0, 0, 0)
   advance(120_000)
-  assert notifications.deliver_due(notifier) == Ok(Report(0, 0, 0, 1))
+  assert deliver(notifier) == Drained(0, 1, 0, 0, 0)
   advance(240_000)
-  assert notifications.deliver_due(notifier) == Ok(Report(0, 0, 0, 1))
+  assert deliver(notifier) == Drained(0, 0, 0, 0, 1)
   advance(10_000_000)
-  assert notifications.deliver_due(notifier) == Ok(Report(0, 0, 0, 0))
+  assert deliver(notifier) == Drained(0, 0, 0, 0, 0)
   assert sent_subjects(outbox) == []
 }
 
-pub fn a_claimed_email_is_left_alone_until_its_lease_ends_test() {
+pub fn a_notification_deleted_before_its_email_goes_is_not_sent_test() {
   let #(notifier, outbox) = with_mail(notifier())
-  let _ = send(notifier, "u1", "Hello")
-  // Another worker claims it, and its node dies while sending.
-  let sending = process.new_subject()
-  let stuck =
-    notifier
-    |> notifications.with_email(
-      mail.mailer(
-        mail.adapter(named: "stuck", send: fn(_) {
-          process.send(sending, Nil)
-          process.sleep_forever()
-          Error(mail.Unavailable("never reached"))
-        }),
-      )
-        |> mail.default_from(mail.address("app@example.com")),
-      address: fn(user) { Ok(mail.address(user <> "@example.com")) },
-      render: fn(n) { mail.message() |> mail.subject(n.title) |> mail.text("") },
+  let notifier = notifications.email_after(notifier, 60)
+  let gone = send(notifier, "u1", "Deleted")
+  assert notifications.delete(notifier, "u1", gone.id) == Ok(Nil)
+  advance(60_000)
+  assert deliver(notifier) == Drained(0, 0, 0, 1, 0)
+  assert sent_subjects(outbox) == []
+}
+
+pub fn digests_sent_in_a_burst_are_queued_once_test() {
+  let #(notifier, _) = with_digest(notifier())
+  let _ = send(notifier, "u1", "One")
+  let _ = send(notifier, "u1", "Two")
+  let _ = send(notifier, "u1", "Three")
+  let assert Ok(waiting) =
+    jobs.list(
+      notifications.repo(notifier),
+      jobs.listing() |> jobs.named("howdy_notifications.digest"),
     )
-  let worker = process.spawn_unlinked(fn() { notifications.deliver_due(stuck) })
-  let assert Ok(Nil) = process.receive(sending, 1000)
-  process.kill(worker)
-  assert notifications.deliver_due(notifier) == Ok(Report(0, 0, 0, 0))
-  advance(120_000)
-  assert notifications.deliver_due(notifier) == Ok(Report(1, 0, 0, 0))
-  assert sent_subjects(outbox) == ["Hello"]
+  assert list.length(waiting) == 1
 }
 
 pub fn a_render_that_crashes_gives_up_on_that_email_only_test() {
@@ -635,10 +647,10 @@ pub fn a_render_that_crashes_gives_up_on_that_email_only_test() {
     )
   let _ = send(notifier, "u1", "Bad")
   let _ = send(notifier, "u1", "Good")
-  assert notifications.deliver_due(notifier) == Ok(Report(1, 0, 0, 1))
+  assert deliver(notifier) == Drained(1, 0, 0, 0, 1)
   assert sent_subjects(outbox) == ["Good"]
   advance(10_000_000)
-  assert notifications.deliver_due(notifier) == Ok(Report(0, 0, 0, 0))
+  assert deliver(notifier) == Drained(0, 0, 0, 0, 0)
 }
 
 fn with_digest(notifier) {
@@ -667,28 +679,31 @@ pub fn digests_gather_unread_notifications_test() {
   let _ = send(notifier, "u2", "Other")
   assert notifications.mark_read(notifier, "u1", read.id) == Ok(Nil)
 
-  // The first digest goes at once; read ones are left out.
-  assert notifications.deliver_due(notifier) == Ok(Report(0, 2, 0, 0))
+  // The first digest goes at once, one per user however many were sent;
+  // read ones are left out.
+  assert deliver(notifier) == Drained(2, 0, 0, 0, 0)
   assert list.sort(sent_subjects(outbox), string.compare)
     == ["One, Two", "Other"]
 
   // The next waits an hour.
   let _ = send(notifier, "u1", "Three")
-  assert notifications.deliver_due(notifier) == Ok(Report(0, 0, 0, 0))
+  let _ = send(notifier, "u1", "Four")
+  assert deliver(notifier) == Drained(0, 0, 0, 0, 0)
   advance(3_600_000)
-  assert notifications.deliver_due(notifier) == Ok(Report(0, 1, 0, 0))
-  assert sent_subjects(outbox) == ["Three"]
+  assert deliver(notifier) == Drained(1, 0, 0, 0, 0)
+  assert sent_subjects(outbox) == ["Three, Four"]
   // Nothing waiting, nothing sent.
   advance(3_600_000)
-  assert notifications.deliver_due(notifier) == Ok(Report(0, 0, 0, 0))
+  assert deliver(notifier) == Drained(0, 0, 0, 0, 0)
 }
 
 pub fn a_digest_of_only_read_notifications_is_not_sent_test() {
   let #(notifier, outbox) = with_digest(notifier())
   let read = send(notifier, "u1", "Read")
   assert notifications.mark_read(notifier, "u1", read.id) == Ok(Nil)
-  assert notifications.deliver_due(notifier) == Ok(Report(0, 0, 0, 0))
-  assert notifications.deliver_due(notifier) == Ok(Report(0, 0, 0, 0))
+  // The digest job finds nothing to send.
+  assert deliver(notifier) == Drained(1, 0, 0, 0, 0)
+  assert deliver(notifier) == Drained(0, 0, 0, 0, 0)
   assert sent_subjects(outbox) == []
 }
 
@@ -699,7 +714,7 @@ pub fn without_a_digest_digest_kinds_are_emailed_one_by_one_test() {
       Delivery(..notifications.default_delivery, email: EmailDigest)
     })
   let _ = send(notifier, "u1", "Alone")
-  assert notifications.deliver_due(notifier) == Ok(Report(1, 0, 0, 0))
+  assert deliver(notifier).completed == 1
   assert sent_subjects(outbox) == ["Alone"]
 }
 
@@ -739,10 +754,10 @@ pub fn pushes_go_to_the_push_deliverer_test() {
       Delivery(inbox: True, email: NoEmail, push: False),
     )
   let _ = send(notifier, "u2", "Not pushed")
-  assert notifications.deliver_due(notifier) == Ok(Report(0, 0, 1, 2))
+  assert deliver(notifier) == Drained(1, 1, 0, 0, 1)
   assert list.sort(drain(pushed), string.compare) == ["Gone", "Hello", "Later"]
   advance(30_000)
-  assert notifications.deliver_due(notifier) == Ok(Report(0, 0, 0, 1))
+  assert deliver(notifier) == Drained(0, 1, 0, 0, 0)
   assert drain(pushed) == ["Later"]
 }
 
@@ -753,17 +768,20 @@ fn drain(subject: process.Subject(a)) -> List(a) {
   }
 }
 
-// -- The worker --------------------------------------------------------------
+// -- Running for real ------------------------------------------------------
 
-pub fn the_worker_delivers_soon_after_a_send_test() {
+pub fn a_running_runner_delivers_soon_after_a_send_test() {
   let #(notifier, outbox) = with_mail(notifications.new(open()))
   // A long interval, so only the wake-up from `send` can explain a quick
   // delivery.
-  let notifier = notifications.check_every(notifier, 600_000)
-  let assert Ok(_) = notifications.start(notifier)
+  let runner =
+    jobs.runner(notifications.repo(notifier))
+    |> jobs.check_every(600_000)
+    |> notifications.handle_jobs(notifier)
+  let assert Ok(_) = jobs.start(runner)
   let assert Ok(Some(_)) =
     notifications.draft("x", "Quick") |> notifications.send(notifier, to: "u1")
   let assert Ok(outgoing) = process.receive(outbox, 2000)
   assert outgoing.subject == "Quick"
-  notifications.stop(notifier)
+  jobs.stop(runner)
 }

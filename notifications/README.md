@@ -22,7 +22,8 @@ notifications.draft("comment.created", "Ana commented on your post")
 ```
 
 The notification is saved first, in the package's tables in your database
-(`notifications.schema()` is its migrations, for PostgreSQL and SQLite),
+(`notifications.schema()` is its migrations, for PostgreSQL and SQLite,
+alongside `jobs.schema()`),
 then announced to the recipient's open pages on every node of the cluster.
 A page that was closed reads the inbox when it next connects, so nothing is
 missed.
@@ -59,9 +60,10 @@ the browser's own notifications, encrypted for each browser (RFC 8291) and
 signed with your VAPID keys (RFC 8292); `gleam run -m
 howdy/notifications/web_push` makes the keys.
 
-Email and push are sent by a worker you add to your supervision tree with
-`notifications.supervised(notifier)`. It retries what fails, and workers on
-several nodes share the work through the database.
+Email and push are [background jobs](https://github.com/mikeyjones/howdy/blob/v2.1.1/jobs/README.md), queued in the
+transaction that saves the notification: add them to your app's runner with
+`jobs.runner(db) |> notifications.handle_jobs(notifier)`. They are retried
+when they fail, and runners on several nodes share the work.
 
 See the [notifications docs](https://github.com/mikeyjones/howdy/tree/v2.1.1/docs/notifications) and
 `examples/notifications`.

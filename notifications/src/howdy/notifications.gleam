@@ -24,8 +24,10 @@
 //// gathered into a digest, and to the browser's own notifications with
 //// `howdy/notifications/web_push`. Users choose per kind with
 //// `set_preference`, and the app sets the defaults with `with_defaults`.
-//// Email and push are sent by a worker the app runs under its supervisor
-//// (`supervised`), which retries what fails.
+//// Email and push are background jobs of
+//// [howdy_jobs](https://hexdocs.pm/howdy_jobs/howdy/jobs.html), queued in
+//// the transaction that saves the notification and done by the app's
+//// runner (`handle_jobs`), which retries what fails.
 ////
 //// Recipients are user IDs as strings, such as `howdy_auth` user IDs. The
 //// package does not check them against any table, so it works with any
@@ -36,15 +38,13 @@ import gleam/bool
 import gleam/crypto
 import gleam/dict.{type Dict}
 import gleam/dynamic/decode
-import gleam/erlang/process.{type Name, type Pid, type Subject}
+import gleam/erlang/process.{type Pid, type Subject}
 import gleam/http/request
 import gleam/http/response.{type Response}
 import gleam/int
 import gleam/json.{type Json}
 import gleam/list
 import gleam/option.{type Option, None, Some}
-import gleam/otp/actor
-import gleam/otp/supervision
 import gleam/result
 import gleam/string
 import gloo/migration as gloo_migration
@@ -53,13 +53,13 @@ import gloo/sql
 import howdy/content.{type Content}
 import howdy/controller.{type Context, type Controller}
 import howdy/database
+import howdy/jobs
 import howdy/mail
 import howdy/migration
 import howdy/param
 import howdy/query
 import howdy/service
 import howdy/sse
-import logging
 
 // -- Notifications -----------------------------------------------------------
 
@@ -174,8 +174,6 @@ pub opaque type Notifier {
     push: Option(fn(Notification) -> Outcome),
     base_url: String,
     email_after: Int,
-    interval: Int,
-    worker: Name(WorkerMessage),
     clock: fn() -> Int,
   )
 }
@@ -212,8 +210,6 @@ pub fn new(repo: Repo) -> Notifier {
     push: None,
     base_url: "",
     email_after: 0,
-    interval: 10_000,
-    worker: process.new_name("howdy_notifications"),
     clock: now_ms,
   )
 }
@@ -236,18 +232,12 @@ pub fn schema() -> migration.Package {
          created_at BIGINT NOT NULL,
          read_at BIGINT,
          email TEXT NOT NULL,
-         email_due BIGINT,
-         email_attempts INTEGER NOT NULL DEFAULT 0,
-         push TEXT NOT NULL,
-         push_due BIGINT,
-         push_attempts INTEGER NOT NULL DEFAULT 0
+         push TEXT NOT NULL
        );
        CREATE INDEX howdy_notifications_items_user
          ON howdy_notifications_items (user_id, created_at);
-       CREATE INDEX howdy_notifications_items_email
-         ON howdy_notifications_items (email, email_due);
-       CREATE INDEX howdy_notifications_items_push
-         ON howdy_notifications_items (push, push_due);
+       CREATE INDEX howdy_notifications_items_digest
+         ON howdy_notifications_items (user_id, email);
        CREATE TABLE howdy_notifications_preferences (
          user_id TEXT NOT NULL,
          kind TEXT NOT NULL,
@@ -358,13 +348,6 @@ pub fn with_base_url(notifier: Notifier, base_url: String) -> Notifier {
   Notifier(..notifier, base_url:)
 }
 
-/// How often the worker looks for email and push that is due, in
-/// milliseconds. It also looks straight away whenever a notification is
-/// sent from this node. Defaults to ten seconds.
-pub fn check_every(notifier: Notifier, milliseconds: Int) -> Notifier {
-  Notifier(..notifier, interval: int.max(milliseconds, 100))
-}
-
 /// The full URL of a notification's link, using `with_base_url`; the base
 /// URL itself when it has none. A link that is already a full URL is kept.
 pub fn url(notifier: Notifier, notification: Notification) -> String {
@@ -415,59 +398,56 @@ pub fn send(
           created_at: now,
           read_at: None,
         )
-      let #(email, email_due) = case delivery.email, notifier.email {
-        _, None | NoEmail, _ -> #("none", None)
-        EmailNow, Some(_) -> #("now", Some(now + notifier.email_after))
+      let email = case delivery.email, notifier.email {
+        _, None | NoEmail, _ -> "none"
+        EmailNow, Some(_) -> "now"
         EmailDigest, Some(_) ->
           case notifier.digest {
-            Some(_) -> #("digest", None)
-            None -> #("now", Some(now + notifier.email_after))
+            Some(_) -> "digest"
+            None -> "now"
           }
       }
-      let #(push, push_due) = case delivery.push, notifier.push {
-        True, Some(_) -> #("pending", Some(now))
-        _, _ -> #("none", None)
-      }
+      let push = delivery.push && option.is_some(notifier.push)
+      // The notification and the jobs that deliver it are saved together.
       // Gloo binds SQLite parameters by position and handles at most nine,
       // so the numbers and fixed words go in the statement itself.
-      use _ <- result.try(
-        database.execute(
-          notifier.repo,
-          "INSERT INTO howdy_notifications_items (id, user_id, kind, title, body,
-           link, data, inbox, created_at, email, email_due, push, push_due)
+      use _ <- result.try({
+        use conn <- database.transaction(notifier.repo)
+        use _ <- result.try(
+          database.execute(
+            conn,
+            "INSERT INTO howdy_notifications_items (id, user_id, kind, title, body,
+           link, data, inbox, created_at, email, push)
          VALUES ($1, $2, $3, $4, $5, $6, $7, "
-            <> int.to_string(flag(delivery.inbox))
-            <> ", "
-            <> int.to_string(now)
-            <> ", '"
-            <> email
-            <> "', "
-            <> nullable_int(email_due)
-            <> ", '"
-            <> push
-            <> "', "
-            <> nullable_int(push_due)
-            <> ")",
-          [
-            sql.string(notification.id),
-            sql.string(recipient),
-            sql.string(notification.kind),
-            sql.string(notification.title),
-            sql.string(notification.body),
-            sql.nullable(sql.string, notification.link),
-            sql.string(encode_data(draft.data)),
-          ],
-        ),
-      )
+              <> int.to_string(flag(delivery.inbox))
+              <> ", "
+              <> int.to_string(now)
+              <> ", '"
+              <> email
+              <> "', '"
+              <> case push {
+              True -> "pending"
+              False -> "none"
+            }
+              <> "')",
+            [
+              sql.string(notification.id),
+              sql.string(recipient),
+              sql.string(notification.kind),
+              sql.string(notification.title),
+              sql.string(notification.body),
+              sql.nullable(sql.string, notification.link),
+              sql.string(encode_data(draft.data)),
+            ],
+          ),
+        )
+        queue_deliveries(notifier, conn, notification, email, push)
+      })
       case delivery.inbox {
         True -> {
           announce(recipient, Received(notification))
           announce_unread(notifier, recipient)
         }
-        False -> Nil
-      }
-      case email != "none" || push != "none" {
-        True -> wake(notifier)
         False -> Nil
       }
       Ok(Some(notification))
@@ -712,13 +692,6 @@ fn encode_data(data: List(#(String, String))) -> String {
 fn decode_data(data: String) -> Dict(String, String) {
   json.parse(data, decode.dict(decode.string, decode.string))
   |> result.unwrap(dict.new())
-}
-
-fn nullable_int(value: Option(Int)) -> String {
-  case value {
-    Some(value) -> int.to_string(value)
-    None -> "NULL"
-  }
 }
 
 fn flag(on: Bool) -> Int {
@@ -1080,282 +1053,411 @@ fn local_path(path: String) -> Bool {
   }
 }
 
-// -- The worker --------------------------------------------------------------
+// -- Delivery ----------------------------------------------------------------
+// Email, digests and push are background jobs of `howdy/jobs`, queued in the
+// transaction that saves the notification and done by the app's runner.
 
-type WorkerMessage {
-  Tick
-  Wake
-  Stop
-}
+/// The queue the delivery jobs go to.
+pub const queue = "notifications"
 
-type Worker {
-  Worker(notifier: Notifier, self: Subject(WorkerMessage), awake: Bool)
-}
-
-/// The worker that sends email and push, as a child of the app's
-/// supervisor. Run one on each node: they share the work through the
-/// database without sending anything twice, unless a node dies mid-send.
-///
-/// ```gleam
-/// supervisor.new(supervisor.OneForOne)
-/// |> supervisor.add(notifications.supervised(notifier))
-/// |> supervisor.add(howdy.supervised(app(notifier)))
-/// ```
-pub fn supervised(notifier: Notifier) -> supervision.ChildSpecification(Nil) {
-  supervision.worker(fn() { start(notifier) })
-}
-
-/// Start the worker linked to the caller. Prefer `supervised`.
-pub fn start(notifier: Notifier) -> actor.StartResult(Nil) {
-  actor.new_with_initialiser(1000, fn(subject) {
-    process.send_after(subject, notifier.interval, Tick)
-    let selector = process.new_selector() |> process.select(subject)
-    actor.initialised(Worker(notifier:, self: subject, awake: False))
-    |> actor.selecting(selector)
-    |> actor.returning(Nil)
-    |> Ok
-  })
-  |> actor.named(notifier.worker)
-  |> actor.on_message(work)
-  |> actor.start
-}
-
-/// Stop the worker started for this notifier on this node, if any.
-pub fn stop(notifier: Notifier) -> Nil {
-  case process.named(notifier.worker) {
-    Ok(_) -> process.send(process.named_subject(notifier.worker), Stop)
-    Error(Nil) -> Nil
-  }
-}
-
-fn wake(notifier: Notifier) -> Nil {
-  case process.named(notifier.worker) {
-    Ok(_) -> process.send(process.named_subject(notifier.worker), Wake)
-    Error(Nil) -> Nil
-  }
-}
-
-fn work(
-  worker: Worker,
-  message: WorkerMessage,
-) -> actor.Next(Worker, WorkerMessage) {
-  case message {
-    Stop -> actor.stop()
-    // Sends often come in bursts; one pass a moment later covers them all.
-    Wake if worker.awake -> actor.continue(worker)
-    Wake -> {
-      process.send_after(worker.self, 20, Tick)
-      actor.continue(Worker(..worker, awake: True))
-    }
-    Tick -> {
-      case deliver_due(worker.notifier) {
-        Ok(_) -> Nil
-        Error(error) ->
-          logging.log(
-            logging.Warning,
-            "howdy/notifications: delivery pass failed: "
-              <> service.message(error),
-          )
-      }
-      case worker.awake {
-        True -> Nil
-        False -> {
-          process.send_after(worker.self, worker.notifier.interval, Tick)
-          Nil
-        }
-      }
-      actor.continue(Worker(..worker, awake: False))
-    }
-  }
-}
-
-/// What one pass of `deliver_due` did.
-pub type Report {
-  Report(emails: Int, digests: Int, pushes: Int, failed: Int)
-}
-
-/// Send every email, digest and push that is due now, and return what was
-/// done. The worker calls this; call it yourself to deliver without one,
-/// such as from a scheduled job, or in tests.
-pub fn deliver_due(notifier: Notifier) -> service.Result(Report) {
-  let report = Report(0, 0, 0, 0)
-  use report <- result.try(deliver_emails(notifier, report))
-  use report <- result.try(deliver_digests(notifier, report))
-  deliver_pushes(notifier, report)
-}
-
-const batch = 50
-
-const lease = 120_000
-
+/// How many times a delivery is tried in all.
 const attempts = 5
 
-/// Claim up to a batch of rows whose `state` column is `waiting` and whose
-/// `due` column has passed, by moving their due time a lease into the
-/// future, so another node's worker leaves them alone while they are sent.
-fn claim(
-  notifier: Notifier,
-  state: String,
-  waiting: String,
-  due: String,
-  tried: String,
-) -> service.Result(List(#(Notification, Int))) {
-  let now = notifier.clock()
-  use conn <- database.write_transaction(
-    notifier.repo,
-    touching: "howdy_notifications_items",
+fn email_job() -> jobs.Job(String) {
+  jobs.define(
+    "howdy_notifications.email",
+    encode: json.string,
+    decoder: decode.string,
   )
-  use claimed <- result.try(
-    database.query(
-      conn,
-      "SELECT "
-        <> columns
-        <> ", "
-        <> tried
-        <> " FROM howdy_notifications_items n
-     WHERE "
-        <> state
-        <> " = $1 AND "
-        <> due
-        <> " <= $2
-     ORDER BY "
-        <> due
-        <> " LIMIT $3"
-        <> database.for_update(conn, "n"),
-      [sql.string(waiting), sql.int(now), sql.int(batch)],
-      {
-        use notification <- decode.then(notification_decoder())
-        use tried <- decode.field(9, decode.int)
-        decode.success(#(notification, tried))
-      },
-    ),
-  )
-  use _ <- result.map(
-    list.try_each(claimed, fn(row) {
-      database.execute(
-        conn,
-        "UPDATE howdy_notifications_items SET "
-          <> due
-          <> " = $1, "
-          <> tried
-          <> " = $2
-         WHERE id = $3",
-        [sql.int(now + lease), sql.int(row.1 + 1), sql.string({ row.0 }.id)],
-      )
-    }),
-  )
-  list.map(claimed, fn(row) { #(row.0, row.1 + 1) })
+  |> jobs.on_queue(queue)
+  |> jobs.max_attempts(attempts)
 }
 
-/// Record what became of an attempt: done, tried again after a delay that
-/// doubles each time, or given up.
-fn settle(
+fn push_job() -> jobs.Job(String) {
+  jobs.define(
+    "howdy_notifications.push",
+    encode: json.string,
+    decoder: decode.string,
+  )
+  |> jobs.on_queue(queue)
+  |> jobs.max_attempts(attempts)
+}
+
+fn digest_job() -> jobs.Job(String) {
+  jobs.define(
+    "howdy_notifications.digest",
+    encode: json.string,
+    decoder: decode.string,
+  )
+  |> jobs.on_queue(queue)
+  |> jobs.max_attempts(attempts)
+}
+
+/// Teach the app's jobs runner to send notifications' email, digests and
+/// push. They run on the `notifications` queue, ten at a time unless the
+/// runner says otherwise with `jobs.queue`. Every node running the runner
+/// shares the work.
+///
+/// ```gleam
+/// let runner =
+///   jobs.runner(db)
+///   |> notifications.handle_jobs(notifier)
+///
+/// supervisor.new(supervisor.OneForOne)
+/// |> supervisor.add(jobs.supervised(runner))
+/// |> supervisor.add(howdy.supervised(app(notifier)))
+/// ```
+///
+/// In tests, `jobs.drain(runner)` sends whatever is due.
+pub fn handle_jobs(runner: jobs.Runner, notifier: Notifier) -> jobs.Runner {
+  runner
+  |> jobs.handle(email_job(), fn(id, attempt) {
+    deliver_email(notifier, id, attempt)
+  })
+  |> jobs.handle(push_job(), fn(id, attempt) {
+    deliver_push(notifier, id, attempt)
+  })
+  |> jobs.handle(digest_job(), fn(recipient, attempt) {
+    deliver_digest(notifier, recipient, attempt)
+  })
+}
+
+/// The jobs a new notification needs, queued on `conn`.
+fn queue_deliveries(
   notifier: Notifier,
+  conn: Repo,
   notification: Notification,
-  tried: Int,
-  outcome: Outcome,
-  state: String,
-  done: String,
-  due: String,
-) -> service.Result(Bool) {
-  let #(set, args, ok) = case outcome {
-    Delivered -> #(
-      state <> " = $1, " <> due <> " = NULL",
-      [sql.string(done)],
-      True,
-    )
-    Retry(reason) if tried < attempts -> {
-      log_failure(notification, state, reason)
-      let delay = 30_000 * int.bitwise_shift_left(1, tried - 1)
-      #(due <> " = $1", [sql.int(notifier.clock() + delay)], False)
-    }
-    Retry(reason) | GiveUp(reason) -> {
-      log_failure(notification, state, reason)
-      #(state <> " = $1, " <> due <> " = NULL", [sql.string("failed")], False)
+  email: String,
+  push: Bool,
+) -> service.Result(Nil) {
+  let now = notifier.clock()
+  use _ <- result.try(case email {
+    "now" ->
+      jobs.new(email_job(), notification.id)
+      |> jobs.at(now + notifier.email_after)
+      |> jobs.insert(into: conn)
+      |> result.replace(Nil)
+    "digest" -> queue_digest(notifier, conn, notification.recipient, now)
+    _ -> Ok(Nil)
+  })
+  case push {
+    True ->
+      jobs.new(push_job(), notification.id)
+      |> jobs.at(now)
+      |> jobs.insert(into: conn)
+      |> result.replace(Nil)
+    False -> Ok(Nil)
+  }
+}
+
+/// Queue the recipient's next digest for when it is due: now, or the
+/// digest interval after the last one. One waits at a time, so a burst of
+/// notifications makes one digest; one sent while a digest is being sent
+/// queues the next.
+fn queue_digest(
+  notifier: Notifier,
+  conn: Repo,
+  recipient: String,
+  now: Int,
+) -> service.Result(Nil) {
+  case notifier.digest {
+    None -> Ok(Nil)
+    Some(digest) -> {
+      use last <- result.try(database.query(
+        conn,
+        "SELECT sent_at FROM howdy_notifications_digests WHERE user_id = $1",
+        [sql.string(recipient)],
+        decode.field(0, decode.int, decode.success),
+      ))
+      let due = case last {
+        [sent_at, ..] -> int.max(now, sent_at + digest.every)
+        [] -> now
+      }
+      jobs.new(digest_job(), recipient)
+      |> jobs.at(due)
+      |> jobs.unique_while_waiting("howdy_notifications.digest:" <> recipient)
+      |> jobs.insert(into: conn)
+      |> result.replace(Nil)
     }
   }
-  database.execute(
-    notifier.repo,
-    "UPDATE howdy_notifications_items SET " <> set <> " WHERE id = $2",
-    list.append(args, [sql.string(notification.id)]),
-  )
-  |> result.replace(ok)
 }
 
-fn log_failure(notification: Notification, channel: String, reason: String) {
-  logging.log(
-    logging.Warning,
-    "howdy/notifications: "
-      <> channel
-      <> " for notification "
-      <> notification.id
-      <> " failed: "
-      <> reason,
-  )
+/// What the job says after a delivery went as `outcome`, having recorded it
+/// with `record`, which is given the notification's new state. Retries
+/// wait 30 seconds, doubling each time.
+fn after_delivery(
+  outcome: Outcome,
+  attempt: jobs.Attempt,
+  what: String,
+  record: fn(String) -> service.Result(Nil),
+) -> jobs.Outcome {
+  let recorded = fn(state, then) {
+    case record(state) {
+      Ok(Nil) -> then
+      Error(error) -> jobs.Retry(service.message(error))
+    }
+  }
+  case outcome {
+    Delivered -> recorded("sent", jobs.Done)
+    Retry(reason) ->
+      case jobs.is_last(attempt) {
+        True -> recorded("failed", jobs.Retry(what <> ": " <> reason))
+        False ->
+          jobs.RetryIn(
+            30_000 * int.bitwise_shift_left(1, attempt.number - 1),
+            what <> ": " <> reason,
+          )
+      }
+    GiveUp(reason) -> recorded("failed", jobs.GiveUp(what <> ": " <> reason))
+  }
 }
 
-fn deliver_emails(
+fn deliver_email(
   notifier: Notifier,
-  report: Report,
-) -> service.Result(Report) {
-  case notifier.email {
-    None -> Ok(report)
-    Some(setup) -> {
-      use claimed <- result.try(claim(
-        notifier,
-        "email",
-        "now",
-        "email_due",
-        "email_attempts",
-      ))
-      list.try_fold(claimed, report, fn(report, row) {
-        let #(notification, tried) = row
-        case read_since(notifier, notification) {
-          // Read in the inbox before the email went: no need to send it.
-          True ->
-            database.execute(
-              notifier.repo,
-              "UPDATE howdy_notifications_items
-               SET email = 'skipped', email_due = NULL WHERE id = $1",
-              [sql.string(notification.id)],
-            )
-            |> result.replace(report)
-          False -> {
-            let outcome =
-              guarded(fn() {
-                email(setup, notification.recipient, setup.render(notification))
-              })
-            use ok <- result.map(settle(
-              notifier,
-              notification,
-              tried,
-              outcome,
-              "email",
-              "sent",
-              "email_due",
-            ))
-            case ok {
-              True -> Report(..report, emails: report.emails + 1)
-              False -> Report(..report, failed: report.failed + 1)
+  id: String,
+  attempt: jobs.Attempt,
+) -> jobs.Outcome {
+  case notifier.email, find(notifier, id) {
+    None, _ -> jobs.GiveUp("the notifier sends no email: see with_email")
+    _, Error(service.NotFound(_)) -> jobs.Cancel("the notification is gone")
+    _, Error(error) -> jobs.Retry(service.message(error))
+    Some(_), Ok(#(_, state, _)) if state != "now" -> jobs.Done
+    Some(_), Ok(#(notification, _, _)) if notification.read_at != None ->
+      // Read in the inbox before the email went: no need to send it.
+      case set_state(notifier, "email", id, "skipped") {
+        Ok(Nil) -> jobs.Cancel("read in the app before the email was due")
+        Error(error) -> jobs.Retry(service.message(error))
+      }
+    Some(setup), Ok(#(notification, _, _)) ->
+      guarded(fn() {
+        email(setup, notification.recipient, setup.render(notification))
+      })
+      |> after_delivery(attempt, "email", set_state(notifier, "email", id, _))
+  }
+}
+
+fn deliver_push(
+  notifier: Notifier,
+  id: String,
+  attempt: jobs.Attempt,
+) -> jobs.Outcome {
+  case notifier.push, find(notifier, id) {
+    None, _ -> jobs.GiveUp("the notifier sends no push: see with_push")
+    _, Error(service.NotFound(_)) -> jobs.Cancel("the notification is gone")
+    _, Error(error) -> jobs.Retry(service.message(error))
+    Some(_), Ok(#(_, _, state)) if state != "pending" -> jobs.Done
+    Some(deliver), Ok(#(notification, _, _)) ->
+      guarded(fn() { deliver(notification) })
+      |> after_delivery(attempt, "push", set_state(notifier, "push", id, _))
+  }
+}
+
+/// One email of the recipient's unread digest notifications, if their last
+/// digest went at least the digest's interval ago; otherwise the job waits
+/// until then. Notifications read meanwhile are left out, and a recipient
+/// with only read ones gets no email.
+fn deliver_digest(
+  notifier: Notifier,
+  recipient: String,
+  attempt: jobs.Attempt,
+) -> jobs.Outcome {
+  case notifier.email, notifier.digest {
+    Some(setup), Some(digest) -> {
+      let now = notifier.clock()
+      case claim_digest(notifier, digest, recipient, now) {
+        Error(error) -> jobs.Retry(service.message(error))
+        Ok(NotYet(due)) -> jobs.Snooze(due - now)
+        Ok(Nothing) -> jobs.Done
+        Ok(Claimed(previous, notifications)) -> {
+          let ids = list.map(notifications, fn(n) { n.id })
+          let outcome =
+            guarded(fn() {
+              email(setup, recipient, digest.render(notifications))
+            })
+          // Sent or failed for good. A digest that was not sent gives the
+          // recipient their stamp back, so the next one is not held up.
+          let finish = fn(state) {
+            use conn <- database.transaction(notifier.repo)
+            use _ <- result.try(set_digest_state(conn, ids, state))
+            case state {
+              // More waited than one email holds: the rest go next time.
+              "sent" ->
+                case list.length(notifications) >= digest_size {
+                  True -> queue_digest(notifier, conn, recipient, now)
+                  False -> Ok(Nil)
+                }
+              _ -> restore_digest(conn, recipient, previous)
             }
           }
+          case outcome, jobs.is_last(attempt) {
+            Retry(_), False -> {
+              let restored = {
+                use conn <- database.transaction(notifier.repo)
+                restore_digest(conn, recipient, previous)
+              }
+              case restored {
+                Ok(Nil) -> after_delivery(outcome, attempt, "digest", finish)
+                Error(error) -> jobs.Retry(service.message(error))
+              }
+            }
+            _, _ -> after_delivery(outcome, attempt, "digest", finish)
+          }
         }
-      })
+      }
+    }
+    _, _ -> jobs.GiveUp("the notifier sends no digests: see with_digest")
+  }
+}
+
+/// The most notifications one digest holds.
+const digest_size = 100
+
+type DigestClaim {
+  /// The last digest went too recently: the next is due then.
+  NotYet(due: Int)
+  /// Nothing unread is waiting.
+  Nothing
+  /// Stamped as sent now, so no other job sends it too, with the stamp it
+  /// had before, to put back if sending fails.
+  Claimed(previous: Option(Int), notifications: List(Notification))
+}
+
+/// Take a recipient's digest for sending: check it is due, mark
+/// notifications read meanwhile as skipped, and stamp the digest as sent
+/// now.
+fn claim_digest(
+  notifier: Notifier,
+  digest: DigestSetup,
+  recipient: String,
+  now: Int,
+) -> service.Result(DigestClaim) {
+  use conn <- database.write_transaction(
+    notifier.repo,
+    touching: "howdy_notifications_digests",
+  )
+  use previous <- result.try(database.query(
+    conn,
+    "SELECT sent_at FROM howdy_notifications_digests d WHERE user_id = $1"
+      <> database.for_update(conn, "d"),
+    [sql.string(recipient)],
+    decode.field(0, decode.int, decode.success),
+  ))
+  let previous = list.first(previous) |> option.from_result
+  case previous {
+    Some(sent_at) if sent_at + digest.every > now ->
+      Ok(NotYet(sent_at + digest.every))
+    _ -> {
+      use _ <- result.try(
+        database.execute(
+          conn,
+          "UPDATE howdy_notifications_items SET email = 'skipped'
+         WHERE user_id = $1 AND email = 'digest' AND read_at IS NOT NULL",
+          [sql.string(recipient)],
+        ),
+      )
+      use notifications <- result.try(database.query(
+        conn,
+        "SELECT " <> columns <> " FROM howdy_notifications_items
+         WHERE user_id = $1 AND email = 'digest'
+         ORDER BY created_at, id LIMIT " <> int.to_string(digest_size),
+        [sql.string(recipient)],
+        notification_decoder(),
+      ))
+      case notifications {
+        [] -> Ok(Nothing)
+        _ -> {
+          use _ <- result.try(
+            database.execute(
+              conn,
+              "DELETE FROM howdy_notifications_digests WHERE user_id = $1",
+              [sql.string(recipient)],
+            ),
+          )
+          use _ <- result.map(
+            database.execute(
+              conn,
+              "INSERT INTO howdy_notifications_digests (user_id, sent_at)
+             VALUES ($1, $2)",
+              [sql.string(recipient), sql.int(now)],
+            ),
+          )
+          Claimed(previous, notifications)
+        }
+      }
     }
   }
 }
 
-/// Whether a claimed notification has been read since it was claimed:
-/// `claim` reads it inside the lock, but the inbox can change meanwhile.
-fn read_since(notifier: Notifier, notification: Notification) -> Bool {
-  case notification.read_at {
-    Some(_) -> True
+fn set_digest_state(
+  conn: Repo,
+  ids: List(String),
+  state: String,
+) -> service.Result(Nil) {
+  list.try_each(ids, fn(id) {
+    database.execute(
+      conn,
+      "UPDATE howdy_notifications_items SET email = $1 WHERE id = $2",
+      [sql.string(state), sql.string(id)],
+    )
+  })
+}
+
+fn restore_digest(
+  conn: Repo,
+  recipient: String,
+  previous: Option(Int),
+) -> service.Result(Nil) {
+  case previous {
+    Some(sent_at) ->
+      database.execute(
+        conn,
+        "UPDATE howdy_notifications_digests SET sent_at = $1 WHERE user_id = $2",
+        [sql.int(sent_at), sql.string(recipient)],
+      )
     None ->
-      case get(notifier, notification.recipient, notification.id) {
-        Ok(Notification(read_at: Some(_), ..)) -> True
-        _ -> False
-      }
+      database.execute(
+        conn,
+        "DELETE FROM howdy_notifications_digests WHERE user_id = $1",
+        [sql.string(recipient)],
+      )
   }
+}
+
+/// A notification by id, whoever it is for, with its email and push states.
+fn find(
+  notifier: Notifier,
+  id: String,
+) -> service.Result(#(Notification, String, String)) {
+  use conn <- database.connect(notifier.repo)
+  database.one(
+    conn,
+    "SELECT " <> columns <> ", email, push FROM howdy_notifications_items
+     WHERE id = $1",
+    [sql.string(id)],
+    {
+      use notification <- decode.then(notification_decoder())
+      use email <- decode.field(9, decode.string)
+      use push <- decode.field(10, decode.string)
+      decode.success(#(notification, email, push))
+    },
+    or: service.NotFound("notification not found"),
+  )
+}
+
+/// Record what became of a notification's email or push. `column` is
+/// trusted text.
+fn set_state(
+  notifier: Notifier,
+  column: String,
+  id: String,
+  state: String,
+) -> service.Result(Nil) {
+  use conn <- database.connect(notifier.repo)
+  database.execute(
+    conn,
+    "UPDATE howdy_notifications_items SET " <> column <> " = $1 WHERE id = $2",
+    [sql.string(state), sql.string(id)],
+  )
 }
 
 fn email(
@@ -1374,196 +1476,6 @@ fn email(
             False -> GiveUp(mail.error_to_string(error))
           }
       }
-  }
-}
-
-fn deliver_pushes(
-  notifier: Notifier,
-  report: Report,
-) -> service.Result(Report) {
-  case notifier.push {
-    None -> Ok(report)
-    Some(deliver) -> {
-      use claimed <- result.try(claim(
-        notifier,
-        "push",
-        "pending",
-        "push_due",
-        "push_attempts",
-      ))
-      list.try_fold(claimed, report, fn(report, row) {
-        let #(notification, tried) = row
-        use ok <- result.map(settle(
-          notifier,
-          notification,
-          tried,
-          guarded(fn() { deliver(notification) }),
-          "push",
-          "sent",
-          "push_due",
-        ))
-        case ok {
-          True -> Report(..report, pushes: report.pushes + 1)
-          False -> Report(..report, failed: report.failed + 1)
-        }
-      })
-    }
-  }
-}
-
-/// One email per user with digest notifications waiting, if their last
-/// digest went at least the digest's interval ago. Notifications read
-/// meanwhile are skipped, and a user with only read ones gets no email.
-fn deliver_digests(
-  notifier: Notifier,
-  report: Report,
-) -> service.Result(Report) {
-  case notifier.email, notifier.digest {
-    Some(setup), Some(digest) -> {
-      let now = notifier.clock()
-      use waiting <- result.try(database.query(
-        notifier.repo,
-        "SELECT DISTINCT n.user_id FROM howdy_notifications_items n
-         LEFT JOIN howdy_notifications_digests d ON d.user_id = n.user_id
-         WHERE n.email = 'digest' AND (d.sent_at IS NULL OR d.sent_at <= $1)
-         LIMIT $2",
-        [sql.int(now - digest.every), sql.int(batch)],
-        decode.field(0, decode.string, decode.success),
-      ))
-      list.try_fold(waiting, report, fn(report, recipient) {
-        use claimed <- result.try(claim_digest(notifier, digest, recipient, now))
-        case claimed {
-          None -> Ok(report)
-          Some(#(_, [])) -> Ok(report)
-          Some(#(previous, notifications)) -> {
-            let outcome =
-              guarded(fn() {
-                email(setup, recipient, digest.render(notifications))
-              })
-            let ids = list.map(notifications, fn(n) { n.id })
-            case outcome {
-              Delivered ->
-                set_digest_state(notifier, ids, "sent")
-                |> result.replace(Report(..report, digests: report.digests + 1))
-              Retry(reason) -> {
-                // Put the last digest time back, so the next pass tries
-                // again.
-                logging.log(
-                  logging.Warning,
-                  "howdy/notifications: digest failed: " <> reason,
-                )
-                restore_digest(notifier, recipient, previous)
-                |> result.replace(Report(..report, failed: report.failed + 1))
-              }
-              GiveUp(reason) -> {
-                logging.log(
-                  logging.Warning,
-                  "howdy/notifications: digest failed: " <> reason,
-                )
-                set_digest_state(notifier, ids, "failed")
-                |> result.replace(Report(..report, failed: report.failed + 1))
-              }
-            }
-          }
-        }
-      })
-    }
-    _, _ -> Ok(report)
-  }
-}
-
-/// Take a user's digest for sending: check it is still due, stamp it as
-/// sent now so no other worker takes it, mark notifications read meanwhile
-/// as skipped, and return the unread ones with the previous stamp.
-fn claim_digest(
-  notifier: Notifier,
-  digest: DigestSetup,
-  recipient: String,
-  now: Int,
-) -> service.Result(Option(#(Option(Int), List(Notification)))) {
-  use conn <- database.write_transaction(
-    notifier.repo,
-    touching: "howdy_notifications_digests",
-  )
-  use previous <- result.try(database.query(
-    conn,
-    "SELECT sent_at FROM howdy_notifications_digests d WHERE user_id = $1"
-      <> database.for_update(conn, "d"),
-    [sql.string(recipient)],
-    decode.field(0, decode.int, decode.success),
-  ))
-  let previous = list.first(previous) |> option.from_result
-  let due = case previous {
-    Some(sent) -> sent <= now - digest.every
-    None -> True
-  }
-  use <- bool.guard(!due, Ok(None))
-  use _ <- result.try(
-    database.execute(
-      conn,
-      "UPDATE howdy_notifications_items SET email = 'skipped'
-     WHERE user_id = $1 AND email = 'digest' AND read_at IS NOT NULL",
-      [sql.string(recipient)],
-    ),
-  )
-  use notifications <- result.try(database.query(
-    conn,
-    "SELECT " <> columns <> " FROM howdy_notifications_items
-     WHERE user_id = $1 AND email = 'digest'
-     ORDER BY created_at, id LIMIT 100",
-    [sql.string(recipient)],
-    notification_decoder(),
-  ))
-  use <- bool.guard(notifications == [], Ok(Some(#(previous, []))))
-  use _ <- result.try(
-    database.execute(
-      conn,
-      "DELETE FROM howdy_notifications_digests WHERE user_id = $1",
-      [sql.string(recipient)],
-    ),
-  )
-  use _ <- result.map(
-    database.execute(
-      conn,
-      "INSERT INTO howdy_notifications_digests (user_id, sent_at) VALUES ($1, $2)",
-      [sql.string(recipient), sql.int(now)],
-    ),
-  )
-  Some(#(previous, notifications))
-}
-
-fn set_digest_state(
-  notifier: Notifier,
-  ids: List(String),
-  state: String,
-) -> service.Result(Nil) {
-  list.try_each(ids, fn(id) {
-    database.execute(
-      notifier.repo,
-      "UPDATE howdy_notifications_items SET email = $1 WHERE id = $2",
-      [sql.string(state), sql.string(id)],
-    )
-  })
-}
-
-fn restore_digest(
-  notifier: Notifier,
-  recipient: String,
-  previous: Option(Int),
-) -> service.Result(Nil) {
-  case previous {
-    Some(sent_at) ->
-      database.execute(
-        notifier.repo,
-        "UPDATE howdy_notifications_digests SET sent_at = $1 WHERE user_id = $2",
-        [sql.int(sent_at), sql.string(recipient)],
-      )
-    None ->
-      database.execute(
-        notifier.repo,
-        "DELETE FROM howdy_notifications_digests WHERE user_id = $1",
-        [sql.string(recipient)],
-      )
   }
 }
 

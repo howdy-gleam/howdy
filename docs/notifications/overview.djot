@@ -22,14 +22,17 @@ howdy_notifications = { git = "https://github.com/mikeyjones/howdy.git", ref = "
 ```
 
 It keeps its tables in your app's database, through
-[`howdy_database`](/docs/database/overview), on PostgreSQL or SQLite. Apply
-its migrations with your own when you deploy:
+[`howdy_database`](/docs/database/overview), on PostgreSQL or SQLite, and
+sends email and push as [background jobs](/docs/jobs/overview), so it
+brings in `howdy_jobs` too. Apply both packages' migrations with your own
+when you deploy:
 
 ```gleam
+import howdy/jobs
 import howdy/migration
 import howdy/notifications
 
-migration.run(db, [my_app.schema(), notifications.schema()])
+migration.run(db, [jobs.schema(), notifications.schema(), my_app.schema()])
 ```
 
 ## Sending
@@ -192,6 +195,6 @@ older than a time, to keep the table small.
 ## Next
 
 [Email and digests](/docs/notifications/delivery) covers the other ways
-out and the worker that sends them, and [Web Push](/docs/notifications/web-push)
+out and the jobs that send them, and [Web Push](/docs/notifications/web-push)
 the browser's own notifications. `examples/notifications` puts it all
 together, with a flash message after each send.

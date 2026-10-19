@@ -40,8 +40,8 @@ howdy.new()
 
 `contact` is how a push service can reach whoever runs the app if
 something goes wrong. Push is sent by the same
-[worker](/docs/notifications/delivery) as email, so add
-`notifications.supervised(notifier)` to your supervision tree too.
+[jobs](/docs/notifications/delivery#Sending-them) as email, so a runner
+with `notifications.handle_jobs(notifier)` sends it too.
 
 `web_push.routes` serves what browsers need:
 
@@ -82,7 +82,7 @@ opens the link when it is clicked, focusing a tab that is already there.
 
 When a push service says a subscription has gone, because the user turned
 notifications off or the browser was reset, it is deleted. When it asks to
-be tried later, the worker retries the whole notification; browsers show a
+be tried later, the push job retries the whole notification; browsers show a
 notification once per tag, so the ones that already had it do not show it
 twice.
 

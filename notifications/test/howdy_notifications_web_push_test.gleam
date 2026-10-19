@@ -14,6 +14,7 @@ import gloo/adapter/sqlite
 import howdy
 import howdy/controller
 import howdy/database
+import howdy/jobs
 import howdy/migration
 import howdy/notifications.{Delivered, GiveUp, Retry}
 import howdy/notifications/web_push.{Subscription}
@@ -158,12 +159,21 @@ fn open_push(
 ) -> #(notifications.Notifier, web_push.WebPush) {
   let assert Ok(db) = sqlite.start(sqlite.memory())
   let assert Ok(Nil) = database.sqlite_defaults(db)
-  let assert Ok(Nil) = migration.run(db, [notifications.schema()])
+  let assert Ok(Nil) =
+    migration.run(db, [jobs.schema(), notifications.schema()])
   let notifier = notifications.new(db)
   let push =
     web_push.new(notifier, web_push.generate_keys(), contact: "mailto:a@b.c")
     |> web_push.with_post(post)
   #(notifications.with_push(notifier, web_push.deliver(push)), push)
+}
+
+fn deliver(notifier: notifications.Notifier) -> jobs.Drained {
+  let assert Ok(drained) =
+    jobs.runner(notifications.repo(notifier))
+    |> notifications.handle_jobs(notifier)
+    |> jobs.drain
+  drained
 }
 
 /// A browser's subscription, with the browser's keys for reading what is
@@ -248,8 +258,7 @@ pub fn notifications_are_encrypted_for_each_browser_test() {
     |> notifications.body("Looks good")
     |> notifications.link("/posts/1")
     |> notifications.send(notifier, to: "u1")
-  assert notifications.deliver_due(notifier)
-    == Ok(notifications.Report(0, 0, 1, 0))
+  assert deliver(notifier) == jobs.Drained(1, 0, 0, 0, 0)
 
   let assert Ok(request) = process.receive(sent, 0)
   assert request.method == http.Post
@@ -295,8 +304,7 @@ pub fn a_user_without_subscriptions_is_done_at_once_test() {
   let #(notifier, _) = open_push(fn(_) { panic as "nothing to send" })
   let assert Ok(Some(_)) =
     notifications.draft("x", "Hi") |> notifications.send(notifier, to: "u1")
-  assert notifications.deliver_due(notifier)
-    == Ok(notifications.Report(0, 0, 1, 0))
+  assert deliver(notifier) == jobs.Drained(1, 0, 0, 0, 0)
 }
 
 // -- Routes ------------------------------------------------------------------

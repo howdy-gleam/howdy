@@ -24,6 +24,7 @@ gloo = ">= 1.0.2 and < 2.0.0"
 howdy = { path = ".." }
 howdy_database = { path = "../database" }
 howdy_mail = { path = "../mail" }
+howdy_jobs = { path = "../jobs" }
 
 [dev_dependencies]
 gleeunit = ">= 1.0.0 and < 2.0.0"

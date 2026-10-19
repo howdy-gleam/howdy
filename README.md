@@ -791,7 +791,7 @@ notification is kept in an inbox in the app's database until read, pushed
 straight away to every page the user has open, and emailed or sent as a browser
 notification (Web Push) when the kind and the user's preferences ask for it.
 Email can wait to see whether the notification is read in the app first, or be
-gathered into a digest; a supervised worker sends it and retries. howdy_ui's
+gathered into a digest; background jobs send it and retry. howdy_ui's
 `bell` shows the unread count and the newest, live:
 
 ```gleam

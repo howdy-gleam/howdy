@@ -240,7 +240,7 @@
         {
           "slug": "delivery",
           "title": "Email and digests",
-          "description": "Email notifications one by one or in a digest, skip the ones read in the app first, and run the worker that sends and retries them."
+          "description": "Email notifications one by one or in a digest, skip the ones read in the app first, and send and retry them with background jobs."
         },
         {
           "slug": "web-push",

@@ -1,9 +1,11 @@
 # Email and digests
 
 A notification can go out by email as well as to the inbox, one at a time
-or gathered into a digest. Email and push are sent by a worker running
-alongside your app, which retries what fails, so a slow or broken mail
-provider never holds up the request that sent the notification.
+or gathered into a digest. Email and push are
+[background jobs](/docs/jobs/overview), queued in the same transaction
+that saves the notification and sent by your app's jobs runner, which
+retries what fails, so a slow or broken mail provider never holds up the
+request that sent the notification.
 
 ## Email
 
@@ -57,35 +59,41 @@ to a hundred. Ones read in the inbox before the digest goes are left out,
 and a user who has read everything gets no email. Without `with_digest`,
 digest kinds are emailed one at a time.
 
-## The worker
+## Sending them
 
-Add the worker to your supervision tree, before the server:
+Teach your app's [jobs runner](/docs/jobs/overview#Doing-jobs) to deliver
+notifications, and run it under your supervision tree, before the server:
 
 ```gleam
+let runner =
+  jobs.runner(db)
+  |> jobs.queue("notifications", concurrency: 10)
+  |> notifications.handle_jobs(notifier)
+
 supervisor.new(supervisor.OneForOne)
-|> supervisor.add(notifications.supervised(notifier))
+|> supervisor.add(jobs.supervised(runner))
 |> supervisor.add(howdy.supervised(app(notifier)))
 |> howdy.start_application(name: "my_app_server")
 ```
 
-It looks for email and push that is due every ten seconds
-(`check_every` changes that), and straight away after a send from the same
-node. Run it on every node: workers claim what they send in the database,
-so they share the work without sending anything twice. A worker that dies
-mid-send leaves its claim to expire after two minutes, and another sends
-it then, so a crash can mean a second copy but never a lost one.
+The jobs go to the `notifications` queue, ten at a time on each node
+unless the runner gives it another concurrency, and show in the
+[admin's Jobs page](/docs/jobs/production#Watching-jobs) with the rest.
+Sending is quick: the runner hears about the jobs as soon as the
+notification is saved. Run the runner on every node and they share the
+work. As with every job, a node that dies mid-send leaves the job for
+another to run again, so a crash can mean a second copy but never a lost
+one.
 
-What fails is tried again, with the delay doubling from thirty seconds,
-five times in all; then it is given up and logged. A mail provider that is
-down or rate limiting is retried; one that refuses the message is not.
-
-`deliver_due(notifier)` runs one pass and reports what it sent, for a
-scheduled job instead of the worker, or for tests:
-
-```gleam
-assert notifications.deliver_due(notifier)
-  == Ok(notifications.Report(emails: 1, digests: 0, pushes: 0, failed: 0))
-```
+- An email waits `email_after` seconds, then is sent, unless the
+  notification was read in the meantime: its job is cancelled instead.
+- A digest is one job per user, due when their last digest is a period
+  old. Notifications sent while it waits join it; one sent while it is
+  going out waits for the next.
+- What fails is tried again, with the delay doubling from thirty seconds,
+  five times in all; then it is given up and logged. A mail provider that
+  is down or rate limiting is retried; one that refuses the message, or a
+  user with no address, is not.
 
 ## Testing
 
@@ -96,6 +104,7 @@ what went out:
 let box = outbox.start()
 let notifier = notifications.new(db) |> notifications.with_email(mail.mailer(outbox.adapter(box)), ...)
 notifications.draft("security.login", "New sign-in") |> notifications.send(notifier, to: user_id)
-let assert Ok(_) = notifications.deliver_due(notifier)
+let runner = jobs.runner(db) |> notifications.handle_jobs(notifier)
+let assert Ok(_) = jobs.drain(runner)
 let assert Ok(email) = outbox.latest_to(box, "ana@example.com")
 ```
