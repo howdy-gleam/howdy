@@ -99,7 +99,7 @@ Error(service.Validation([
 ]))
 ```
 
-A field error holds a [`Problem`](/docs/i18n/overview#validation-messages)
+A field error holds a [`Problem`](/docs/i18n/overview#Validation-messages)
 rather than a sentence, so the words can be chosen later, in the reader's
 language. `Custom` takes a short code for clients and the message to show.
 

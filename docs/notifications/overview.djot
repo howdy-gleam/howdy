@@ -137,6 +137,16 @@ stream connects, and put it in the page itself, such as the header, rather
 than in a live view. Opening the panel reads the list; clicking a
 notification marks it read on the way to its link.
 
+The bell speaks English. In another language, give it the words for the
+page's locale, as every [Howdy UI](/docs/i18n/overview#Howdy-UI) component
+takes them:
+
+```gleam
+bell.new(id: "inbox", source: "/notifications")
+|> bell.words(words.translated(t))
+|> bell.view
+```
+
 Each open tab with a bell holds a connection open. Browsers allow six
 connections to a site at once over HTTP/1.1, so serve the app over HTTP/2,
 as howdy does with TLS, if people keep many tabs open.

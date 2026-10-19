@@ -283,7 +283,8 @@ controller.status(ctx, 303)
 
 // ...and the page it lands on shows it once, as toasts with howdy_ui.
 use messages <- flash.take(ctx, flash)
-toast.region(words, [], toast.flashed(words, messages))
+let w = words.english()
+toast.region(w, [], toast.flashed(w, messages))
 ```
 
 ## Authentication and authorization
@@ -641,6 +642,45 @@ copied into your project to edit with `gleam run -m howdy/ui add button`. The CS
 embedded in each page by default, served as one file in development with
 `ui.stylesheet`, or written to a minified static file for publishing with
 `howdy/ui/export`. See `examples/live` for a working page.
+
+### Rich text
+
+`howdy/ui/rich_text` is an editor for formatted writing, with mentions and
+file attachments. It posts a JSON document; decoding it is the safety
+check, and `document.view` draws it through Lustre, so nothing the browser
+sends is ever trusted as HTML:
+
+```gleam
+rich_text.new(name: "body")
+|> rich_text.value(post.body)
+|> rich_text.mentions(trigger: "@", kind: "person", search: "/people/search")
+|> rich_text.view
+
+use body <- rich_text.field(fields, "body", [rich_text.not_empty()])
+```
+
+Mount `ui.rich_text()`, which serves the editor's browser code. See
+[docs/ui/rich-text.djot](https://github.com/mikeyjones/howdy/blob/v2.1.1/docs/ui/rich-text.djot).
+
+### Islands
+
+An island is a Lustre app in a module under an `islands` directory,
+rendered on the server and then run in the browser, for the parts of a
+page that need to answer without a round trip:
+
+```gleam
+// src/my_app/islands/counter.gleam
+pub fn island() {
+  island.simple(init:, update:, view:, flags: decode.int, encode: json.int)
+}
+
+// in a page
+page.body([island.mount(counter.island, with: 5)])
+```
+
+Mount `ui.islands()`, which builds the islands on demand in development.
+For a release, `gleam run -m howdy/ui export` bundles them and exports the
+app. See [docs/ui/islands.djot](https://github.com/mikeyjones/howdy/blob/v2.1.1/docs/ui/islands.djot).
 
 ## Calling other services
 

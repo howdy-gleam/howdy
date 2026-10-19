@@ -11,6 +11,10 @@ the visitor cannot see or tamper with its logic. The cost is a connection
 held open per visitor and a round trip for every interaction, so it suits
 dashboards, forms and admin tools better than a drawing app.
 
+For a piece of a page that needs no server, such as a counter or a drawing
+surface, use an [island](/docs/ui/islands) instead: a Lustre app that runs
+in the browser.
+
 Under the hood these are [Lustre](https://hexdocs.pm/lustre) server
 components. `howdy/ui/live` connects them to Howdy's
 [WebSockets](/docs/controllers/websockets).
@@ -240,6 +244,15 @@ live.socket(counter.app(), 0)
 |> websocket.allow_origins(["https://app.example.com"])
 |> websocket.upgrade(ctx)
 ```
+
+{since="2.2"}
+## Islands in a live view
+
+A live view can render [islands](/docs/ui/islands) with `island.mount`.
+The live view draws each one once and leaves it to the browser: the
+island's clicks never reach the server, and the live view's re-renders
+leave its state alone. Rendering a different island in its place, or the
+same one with different flags, starts a fresh one.
 
 ## Styling
 

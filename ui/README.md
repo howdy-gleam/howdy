@@ -1,6 +1,6 @@
 # howdy_ui
 
-Pages, themes and live server components for [howdy](https://github.com/mikeyjones/howdy/blob/v2.1.1/README.md), built
+Pages, themes, live server components and browser islands for [howdy](https://github.com/mikeyjones/howdy/blob/v2.1.1/README.md), built
 on [Lustre](https://hexdocs.pm/lustre) and [Sketch](https://hexdocs.pm/sketch).
 
 ```sh
@@ -151,7 +151,8 @@ re-exports them. Every one is a Sketch class built from tokens.
 | `tabs` | `tabs`, `tab`; `tabs.styled` for `Vertical` and the underlined `Line` look |
 | `accordion` | `accordion`, `accordion_item`, `collapsible` |
 | `select` | `select`, `select_item`, `select_group` (a styled list; `native_select` is the browser's own) |
-| `toast` | `toast_region`, `toast` in `Info`, `Success`, `Loading` and `Danger`, `toast_title`, `toast_description`, `toast_close`; `toast.duration`, `toast.persistent`; `toast.queue` for a live view's model: the browser reports when a toast fades or is held open, so cleanup never removes one being read |
+| `toast` | `toast_region`, `toast` in `Info`, `Success`, `Loading` and `Danger`, `toast_title`, `toast_description`, `toast_close`; `toast.duration`, `toast.persistent`; `toast.queue` for a live view's model: the browser reports when a toast fades or is held open, so cleanup never removes one being read; `toast.flashed(words, messages)` and `toast.push_flashed` for `howdy/flash` messages |
+| `bell` | `bell.new(id:, source:)` built up with `unread`, `inbox`, `push(at:)`, `without_toasts` and `words`, shown with `view`: a notification bell whose count and panel follow `howdy_notifications`' inbox live, showing new notifications as toasts |
 | `sidebar` | `sidebar_layout`, `sidebar`, `sidebar_trigger`, `sidebar_header`, `sidebar_content`, `sidebar_footer`, `sidebar_group`, `sidebar_link`, `sidebar_button`; `sidebar.styled_layout` for a `Rail` or `Floating`/`Inset` sidebar, `sidebar.icon_link`, `sidebar.submenu` |
 | `pagination` | `pagination`; `pagination.live_pagination` for live views |
 | `command` | `command`, `command_group`, `command_item`, `command_link`, `command_empty`, `command_dialog` (with a ⌘K shortcut), `combobox`, `multiple_combobox` (chips, one form field per value; `live.on_values` in a live view), `combobox_option` |
@@ -183,8 +184,8 @@ re-exports them. Every one is a Sketch class built from tokens.
 | `uploader` | `uploader.new(name:, start:)` built up with `multiple`, `accept`, `max_size`, `required`, `layout`, `stored`, `id` and `words`, shown with `view`: drop or choose files, which the browser sends straight to storage with progress, posting each file's key; `file_size`, `describe` |
 | `rich_text` | `rich_text.new(name:)` built up with `value`, `placeholder`, `tools`, `mentions(trigger:, kind:, search:)`, `attachments(start:, url:)`, `accept`, `max_size`, `required`, `disabled`, `invalid`, `id` and `words`, shown with `view`: a ProseMirror editor posting its document as JSON; `field`, `not_empty`, `max_length` and `suggestions_to_json` on the server. `howdy/ui/rich_text/document` decodes, stores and draws documents. Mount `ui.rich_text()` |
 
-`calendar`, `data_table`, `chart`, `uploader` and `rich_text` are builders with several
-options, so use them from their own modules rather than through `howdy/ui`.
+`calendar`, `data_table`, `chart`, `uploader`, `rich_text` and `bell` are builders with
+several options, so use them from their own modules rather than through `howdy/ui`.
 
 Controls follow their native state. `attribute.disabled(True)` dims them
 and `attribute.aria_invalid("true")` gives them the danger colour, so a form
@@ -214,8 +215,14 @@ let w = words.translated(i18n.new(locale.to_string(l)))  // or words.english()
 
 ui.pagination(w, current: 3, total: 12, href: page_href)
 data_table.new(columns, rows) |> data_table.words(w)
+rich_text.new(name: "body") |> rich_text.words(w)
+bell.new(id: "inbox", source: "/notifications") |> bell.words(w)
 calendar.new("due", year: 2026, month: 10) |> calendar.locale(w.calendar)
 ```
+
+The rich text editor's words are a `RichTextWords` record in the
+`rich_text` field; the bell's are fields of `Words` itself, such as
+`unread` and `mark_all_read`.
 
 `translated` covers Arabic, Chinese, Dutch, English, French, German,
 Italian, Japanese, Polish, Portuguese and Spanish. Numbers, month and
@@ -517,6 +524,49 @@ runtime with `live.start` and register your own subject as the client, as
 
 See `examples/live` for a page with a private and a shared counter, and
 live links between two views.
+
+## Islands
+
+An island is a Lustre app rendered on the server and then run in the
+browser, for interaction that needs no server: no socket, no round trip.
+Put it in a module in a directory called `islands`, with a function
+returning an `Island`:
+
+```gleam
+// src/my_app/islands/counter.gleam
+pub fn island() -> Island(Int, Int, Msg) {
+  island.simple(init:, update:, view:, flags: decode.int, encode: json.int)
+}
+```
+
+and mount it by passing that function and its flags:
+
+```gleam
+page.body([island.mount(counter.island, with: 5)])
+```
+
+The server renders `view(init(5))` into the page; the browser loads the
+module and takes over the same elements. Mount `ui.islands()` in the app
+to serve the browser code. In development it rebuilds the islands for
+JavaScript when a page loads them, under `gleam run` as well as
+`gleam dev`, and shows compile errors on the page. Island modules, and the
+app modules they import, must run in a browser.
+
+- howdy_ui components work in islands, with the same class names as on the
+  server; CSS for classes first used in the browser is added as they
+  appear.
+- Islands work inside live views, which render them once and leave them to
+  the browser.
+- `island.every` and `island.subscription` start timers and listeners that
+  stop when the island leaves the page.
+- Any package depending on howdy_ui can ship islands in its own `islands`
+  directory, mounted the same way.
+- For a release, export with `gleam run -m howdy/ui export`, which bundles
+  the islands with esbuild into `priv/howdy_islands` and then runs
+  `gleam export erlang-shipment`. A release refuses a bundle built from
+  different code and logs what to run.
+
+See `examples/islands`.
 
 ## Publishing
 

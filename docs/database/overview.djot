@@ -199,6 +199,7 @@ its own, opened on the same file.
 PostgreSQL's pool hands each transaction its own connection, so none of
 this applies there.
 
+{since="2.2"}
 ## Health checks
 
 `database.health_check(db)` is a check for a

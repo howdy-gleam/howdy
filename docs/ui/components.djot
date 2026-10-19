@@ -33,9 +33,10 @@ ui.card([], [
 ])
 ```
 
-Render them in a [page](/docs/ui/pages) or in the view of a
-[live component](/docs/ui/live-components). Both include the CSS for the
-components they draw, so there is nothing else to set up.
+Render them in a [page](/docs/ui/pages), in the view of a
+[live component](/docs/ui/live-components), or in an
+[island](/docs/ui/islands) running in the browser. Each includes the CSS
+for the components it draws, so there is nothing else to set up.
 
 ## How they are called
 
@@ -63,8 +64,8 @@ ui.button(Primary, [event.on_click(Save)], [text("Save")])
 Each component also has its own module under `howdy/ui`, such as
 `howdy/ui/button` or `howdy/ui/card`. Its page in the
 [gallery](/components) names the module. A few components with many
-options, `calendar`, `data_table`, `chart`, `uploader` and `rich_text`, are
-[builders](#Builders) used from their own modules only.
+options, `calendar`, `data_table`, `chart`, `uploader`, `rich_text` and
+`bell`, are [builders](#Builders) used from their own modules only.
 
 ## What there is
 
@@ -82,7 +83,7 @@ The [gallery](/components) groups them the same way:
   [calendars and date pickers](/components/calendar), questionnaires
   that ask one question at a time, [uploaders](/components/uploader)
   that send files straight to storage, and a
-  [rich text editor](/components/rich_text) with mentions.
+  [rich text editor](/docs/ui/rich-text) with mentions.
 - *Layout*: containers, stacks and rows, [cards](/components/card), an
   application [sidebar](/components/sidebar), scroll areas, resizable
   panels and right-to-left sections.
@@ -94,7 +95,8 @@ The [gallery](/components) groups them the same way:
 - *Data display*: tables, [data tables](/components/data_table),
   [charts](/components/chart), badges, avatars, carousels and item lists.
 - *Feedback*: progress bars, empty states, [alerts](/components/alert),
-  [toasts](/components/toast), skeletons and spinners.
+  [toasts](/components/toast), a notification [bell](/components/bell),
+  skeletons and spinners.
 - *Chat*: a [conversation](/components/chat) that stays on the newest
   message, and file attachments.
 
@@ -190,6 +192,7 @@ The other controls work the same way: `ui.textarea`, `ui.checkbox`,
 `ui.slider`, `ui.select` and `ui.combobox`. [Forms](/docs/controllers/forms)
 covers reading and validating what the form sends.
 
+{since="2.2"}
 ### Uploads
 
 `howdy/ui/uploader` is a place to drop or choose files. The browser sends
@@ -223,82 +226,50 @@ saved earlier so an edit form keeps them unless they are removed. In a
 live view, `live.on_values("photos", PhotosChanged)` hears the keys each
 time they change.
 
+{since="2.2"}
 ### Rich text
 
 `howdy/ui/rich_text` is an editor for formatted writing, like Rails'
-Action Text: bold, italic, links, headings, quotes, lists and code, with
-mentions of people or anything else, and files sent straight to storage.
-It posts the document as JSON, which `howdy/ui/rich_text/document` reads
-into Gleam values:
+Action Text, with mentions and attachments. It posts a JSON document, which
+`howdy/ui/rich_text/document` reads into Gleam values, refusing anything
+the editor could not have made, and draws through Lustre:
 
 ```gleam
-import howdy/ui/rich_text
-import howdy/ui/rich_text/document
-
-html.form([attribute.method("post"), attribute.action("/posts")], [
-  ui.stack([], [
-    rich_text.new(name: "body")
-      |> rich_text.value(post.body)
-      |> rich_text.placeholder("Write something…")
-      |> rich_text.mentions(trigger: "@", kind: "person", search: "/people/search")
-      |> rich_text.attachments(start: "/posts/uploads", url: fn(file) {
-        Some(files.url(file.key))
-      })
-      |> rich_text.required
-      |> rich_text.view,
-    ui.submit_button(Primary, [], [text("Post")]),
-  ]),
-])
+rich_text.new(name: "body")
+|> rich_text.value(post.body)
+|> rich_text.mentions(trigger: "@", kind: "person", search: "/people/search")
+|> rich_text.required
+|> rich_text.view
 ```
 
-The editor's browser code is ProseMirror, loaded only by pages with an
-editor. Mount `ui.rich_text()` in the app to serve it:
+Mount `ui.rich_text()` to serve its browser code.
+[Rich text](/docs/ui/rich-text) covers storing, validating, mentions,
+attachments and showing documents.
+
+{since="2.2"}
+## Words and other languages
+
+Everything the components say, from a pagination's "Previous" to a toast's
+close button and the rich text editor's toolbar, is in one
+`howdy/ui/words.Words` record. Components that are plain functions take it
+as their first argument, and builders take it with a `words` step,
+speaking English without one:
 
 ```gleam
-howdy.new()
-|> howdy.controller(ui.rich_text())
+import howdy/ui/words
+
+let w = words.translated(t)  // or words.english()
+
+ui.pagination(w, current: 3, total: 12, href: page_href)
+ui.toast_region(w, [], toasts)
+data_table.new(columns, rows) |> data_table.words(w)
+rich_text.new(name: "body") |> rich_text.words(w) |> rich_text.view
 ```
 
-Reading the post is where it is made safe. `rich_text.field` in a form
-validator, or `document.decode`, refuses anything the editor could not
-have made, such as a `<script>` or a `javascript:` link, so a forged post
-gets no further than a typed one. Store the document with
-`document.to_string`, and show it with `document.view`, which draws it
-through Lustre, escaping all its text:
-
-```gleam
-use body <- rich_text.field(fields, "body", [rich_text.not_empty()])
-```
-
-Typing a trigger such as `@` asks the `search` endpoint for suggestions:
-`GET /people/search?q=ad`, answered with `rich_text.suggestions_to_json`.
-Each mention keeps the id you gave it and the label shown at the time.
-List them with `document.mentions` to send notifications, after checking
-each id is someone the writer may mention. When showing the document,
-`document.view_with` draws mentions and attachments from your records as
-they are now, so a renamed person shows their new name:
-
-```gleam
-document.view_with(
-  post.body,
-  mention: fn(mention) {
-    document.mention_view(mention, href: Some("/people/" <> mention.id))
-  },
-  attachment: fn(file) {
-    document.attachment_view(file, url: Some(files.url(file.key)))
-  },
-)
-```
-
-Attachments use the same `start` endpoint as the [uploader](#Uploads);
-check each key from `document.attachments` before you keep it. The
-toolbar, menus and text use the theme's tokens and prose styles, and the
-editor understands Markdown-like shortcuts as you type: `#` for a heading,
-`>` for a quote, `-` or `1.` for a list, three backticks for code, and
-`**bold**`, `_italic_`, `~~strike~~` and `` `code` ``. In a live view,
-`live.on_value("body", BodyChanged)` hears the document each time the
-editor loses focus, and giving it a new value, such as an empty one after
-sending, replaces what is in the editor.
+`words.translated` gives them in the language of an
+[i18n](/docs/i18n/overview) translator, with numbers and dates written
+that locale's way. Change a few with a record update:
+`words.Words(..words.english(), dismiss: "Close")`.
 
 ## Layout
 
@@ -383,10 +354,40 @@ that wants to know listens for the native events: `close` on a dialog,
 item. Keep a trigger and what it opens in the same place: both in the page,
 or both in one live view.
 
+{since="2.2"}
+## Toasts and the bell
+
+`ui.toast_region` is the corner toasts appear in. Render it once on every
+page, even empty, so a screen reader is listening when a toast arrives.
+`toast.flashed` turns [flash messages](/docs/controllers/flash-messages)
+into toasts after a redirect:
+
+```gleam
+use messages <- flash.take(ctx, flash)
+let w = words.english()
+page.new("Settings")
+|> page.body([settings_form(), toast.region(w, [], toast.flashed(w, messages))])
+|> page.respond(ctx)
+```
+
+`howdy/ui/bell` is a notification bell: a button with the unread count,
+opening a panel of the newest notifications, which keeps up as they arrive
+and shows each new one as a toast. It reads the inbox
+[Howdy Notifications](/docs/notifications/overview) serves:
+
+```gleam
+bell.new(id: "inbox", source: "/notifications")
+|> bell.unread(unread_count)
+|> bell.inbox("/inbox")
+|> bell.words(w)
+|> bell.view
+```
+
 ## Builders
 
-`calendar`, `data_table` and `chart` have many options, so they are built
-up in a pipeline and drawn with `view`. Use them from their own modules:
+`calendar`, `data_table`, `chart`, `uploader`, `rich_text` and `bell` have
+many options, so they are built up in a pipeline and drawn with `view`.
+Use them from their own modules:
 
 ```gleam
 import gleam/int

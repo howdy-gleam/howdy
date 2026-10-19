@@ -38,6 +38,11 @@
           "slug": "console",
           "title": "A console on your running app",
           "description": "Attach a Gleam REPL to a running Howdy app with GSH, and call your code with the same database, auth and caches the server uses."
+        },
+        {
+          "slug": "upgrading-to-2-2",
+          "title": "Upgrading to Howdy 2.2",
+          "description": "What changed in Howdy 2.2, and what to change in an app built on 2.1."
         }
       ]
     },
@@ -466,6 +471,11 @@
           "description": "The ready-made Howdy UI components: headings, text, buttons, form fields and layout."
         },
         {
+          "slug": "rich-text",
+          "title": "Rich text",
+          "description": "Let people write formatted text with mentions and attachments, store it as a JSON document, and show it safely with Howdy UI's rich text editor."
+        },
+        {
           "slug": "themes",
           "title": "Themes",
           "description": "Define light, dark and brand themes as Gleam records, and let visitors switch between them."
@@ -479,6 +489,11 @@
           "slug": "live-components",
           "title": "Live components",
           "description": "Run interactive Lustre components on the server over a WebSocket, and move between live pages without a reload, with no JavaScript to write."
+        },
+        {
+          "slug": "islands",
+          "title": "Islands",
+          "description": "Run parts of a server-rendered page in the browser as Gleam islands: rendered on the server, brought to life with Lustre, and bundled for release."
         },
         {
           "slug": "publishing",

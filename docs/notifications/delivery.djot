@@ -31,6 +31,29 @@ let notifier =
 that cannot be found gives up on that email. Kinds whose delivery says
 `EmailNow` are then emailed one by one.
 
+### In the recipient's language
+
+The title and body are whatever you wrote when sending, so write them in
+the recipient's language, or keep the parts in `data` and write the email
+in `render`. With [Howdy Auth](/docs/auth/overview), each user has a
+`locale`, the language they registered in or chose, which also works for
+emails sent outside a request:
+
+```gleam
+fn render(n: Notification) -> mail.Message {
+  let t = case users.get(identity, n.recipient) {
+    Ok(User(locale: Some(tag), ..)) -> i18n.new(tag)
+    _ -> i18n.new("en")
+  }
+  mail.message()
+  |> mail.subject(messages.notification_subject(t, title: n.title))
+  |> mail.text(n.body)
+}
+```
+
+See [internationalisation](/docs/i18n/overview) for the catalogues behind
+`messages`.
+
 ### Only if not read first
 
 Someone already looking at the app does not need an email as well.

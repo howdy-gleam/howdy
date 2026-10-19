@@ -197,12 +197,18 @@ import howdy/ui/words
 
 let w = words.translated(t)
 ui.pagination(w, current: 3, total: 12, href: page_href)
+toast.region(w, [], toast.flashed(w, messages))
 data_table.new(columns, rows) |> data_table.words(w)
+bell.new(id: "inbox", source: "/notifications") |> bell.words(w)
+rich_text.new(name: "body") |> rich_text.words(w)
 calendar.new("due", year: 2026, month: 10) |> calendar.locale(w.calendar)
 ```
 
 The calendar takes its month and weekday names, and the day weeks start
-on, from the locale. Set the page's direction with
+on, from the locale. The [notification bell](/docs/notifications/overview)
+and the [rich text editor](/docs/ui/rich-text) say everything in the
+words too, their browser script's messages included; the editor's are the
+`rich_text` field, a `RichTextWords` record. Set the page's direction with
 `page.direction(direction.of(l))`.
 
 ## Howdy Auth

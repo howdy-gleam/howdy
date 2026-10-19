@@ -142,7 +142,7 @@ fn job_progress(ctx: Context) {
   use id <- param.string(ctx, "id")
 
   sse.new(fn(stream) {
-    jobs.watch(id, sse.subject(stream))
+    progress.watch(id, sse.subject(stream))
     Nil
   })
   |> sse.on_message(fn(stream, state, message) {
@@ -166,7 +166,7 @@ fn job_progress(ctx: Context) {
 }
 ```
 
-Here `jobs.watch` stands for your own code, which keeps the subject and
+Here `progress.watch` stands for your own code, which keeps the subject and
 later calls `process.send(subject, Step(3, 10))`.
 
 `presence.subscribe` from `howdy/websocket/presence` sends to a subject in

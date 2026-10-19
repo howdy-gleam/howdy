@@ -120,6 +120,16 @@ scheme you already use for other assets works here too.
 exactly the classes their view uses. They are styled the same whichever of
 the three approaches a page takes, and need nothing from the exported file.
 
+{since="2.2"}
+## Islands
+
+[Islands](/docs/ui/islands) use the same class names in the browser as on
+the server, so the file styles what the server renders. A class an island
+only uses after it starts in the browser has its CSS added to the page by
+the island, so islands need nothing more from the file either. Their
+browser code is published separately: export the app with
+`gleam run -m howdy/ui export`, which bundles the islands first.
+
 ## A checklist
 
 - Every component module has a `classes` function that lists all its
@@ -131,6 +141,7 @@ the three approaches a page takes, and need nothing from the exported file.
 - `gleam run -m tasks/css` has been run since the last change, and the
   result is committed.
 - Pages link the file with `page.stylesheet`, with a version in the URL.
+- An app with islands is exported with `gleam run -m howdy/ui export`.
 
 The sign of a missed step is a component that looks right in development
 and unstyled once published. Its class is missing from the file, usually
