@@ -567,3 +567,48 @@ pub fn a_listener_stops_with_its_owner_test() {
   let assert Ok(_) = repo.close(db)
   Nil
 }
+
+pub fn a_channel_may_be_a_keyword_test() {
+  use config <- with_postgres
+  let assert Ok(db) = postgres.start(config)
+  let heard = process.new_subject()
+  let assert Ok(listener) =
+    postgres.listen(db, "select", fn(payload) { process.send(heard, payload) })
+  let assert Ok(Nil) = postgres.notify(db, "select", "quoted")
+  assert process.receive(heard, 5000) == Ok("quoted")
+  postgres.stop_listening(listener)
+  let assert Ok(_) = repo.close(db)
+  Nil
+}
+
+/// Over TLS, notifications sent one after another all arrive: pgo 0.20.0's
+/// own listener crashed after each one. Needs a server with TLS, named by
+/// `HOWDY_DATABASE_TEST_POSTGRES_TLS_URL` with `?sslmode=require`.
+pub fn a_listener_over_tls_hears_every_notification_test() {
+  case env.get("HOWDY_DATABASE_TEST_POSTGRES_TLS_URL") {
+    Error(Nil) -> Nil
+    Ok(url) -> {
+      let assert Ok(config) = postgres.from_url(url)
+      let assert Ok(db) = postgres.start(config)
+      let heard = process.new_subject()
+      let assert Ok(listener) =
+        postgres.listen(db, "howdy_tls", fn(payload) {
+          process.send(heard, payload)
+        })
+      let sent = ["one", "two", "three", "four"]
+      list.each(sent, fn(payload) {
+        let assert Ok(Nil) = postgres.notify(db, "howdy_tls", payload)
+        process.sleep(50)
+      })
+      let got =
+        list.map(sent, fn(_) {
+          let assert Ok(payload) = process.receive(heard, 5000)
+          payload
+        })
+      assert got == sent
+      postgres.stop_listening(listener)
+      let assert Ok(_) = repo.close(db)
+      Nil
+    }
+  }
+}

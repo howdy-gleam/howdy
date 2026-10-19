@@ -151,10 +151,6 @@ fn literals(texts: List(String)) -> String {
   "(" <> list.map(texts, literal) |> string.join(", ") <> ")"
 }
 
-fn ids(ids: List(Int)) -> String {
-  "(" <> list.map(ids, int.to_string) |> string.join(", ") <> ")"
-}
-
 /// Run an UPDATE or DELETE on `howdy_jobs` and say how many rows it
 /// changed. Gloo's SQLite adapter counts only the rows a statement returns,
 /// so the statement returns them.
@@ -433,14 +429,29 @@ pub fn release(
   })
 }
 
-/// Push back the lease on jobs this node is still running.
-pub fn extend(conn: Repo, jobs: List(Int), until: Int) -> service.Result(Nil) {
+/// Push back the lease on jobs this node is still running, by id and
+/// attempt: a job rescued from this node and claimed again elsewhere is
+/// that node's to renew.
+pub fn extend(
+  conn: Repo,
+  jobs: List(#(Int, Int)),
+  until: Int,
+) -> service.Result(Nil) {
   case jobs {
     [] -> Ok(Nil)
     _ -> {
+      let owned =
+        list.map(jobs, fn(job) {
+          "(id = "
+          <> int.to_string(job.0)
+          <> " AND attempt = "
+          <> int.to_string(job.1)
+          <> ")"
+        })
+        |> string.join(" OR ")
       use conn <- database.connect(conn)
       affected(conn, "UPDATE howdy_jobs SET lease_until = $1
-         WHERE state = 'executing' AND id IN " <> ids(jobs), [sql.int(until)])
+         WHERE state = 'executing' AND (" <> owned <> ")", [sql.int(until)])
       |> result.replace(Nil)
     }
   }

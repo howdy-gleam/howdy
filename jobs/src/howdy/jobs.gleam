@@ -1184,7 +1184,9 @@ fn produce(
     Fetch -> actor.continue(fetch(Producer(..producer, awake: False)))
     Heartbeat -> {
       process.send_after(producer.self, producer.runner.lease / 3, Heartbeat)
-      let ids = dict.values(producer.running) |> list.map(fn(job) { job.id })
+      let ids =
+        dict.values(producer.running)
+        |> list.map(fn(job) { #(job.id, job.attempt) })
       let runner = producer.runner
       case store.extend(runner.repo, ids, runner.clock() + runner.lease) {
         Ok(Nil) -> Nil
@@ -1195,9 +1197,10 @@ fn produce(
     TimedOut(pid) ->
       case dict.get(producer.running, pid) {
         Ok(job) -> {
-          // Settled here; the exit the kill brings is then let pass.
-          settle_lost(producer.runner, job, "it timed out")
+          // Stopped before anything that may wait on the database, then
+          // settled here; the exit the kill brings is let pass.
           process.kill(pid)
+          settle_lost(producer.runner, job, "it timed out")
           let job = Running(..job, timed_out: True)
           actor.continue(
             Producer(
