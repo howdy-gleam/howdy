@@ -241,6 +241,26 @@ async function newPage(browser) {
         },
       };
     },
+    // Watch the server-sent events the page receives from now on. Call it
+    // before `goto`, so none are missed; `until(name)` waits for one.
+    async serverEvents() {
+      const names = [];
+      browser.on((message) => {
+        if (message.sessionId === sessionId && message.method === 'Network.eventSourceMessageReceived') names.push(message.params.eventName);
+      });
+      await send('Network.enable');
+      return {
+        names,
+        async until(name, timeout = 2000) {
+          const end = Date.now() + timeout;
+          while (Date.now() < end) {
+            if (names.includes(name)) return;
+            await sleep(40);
+          }
+          throw new Error(`timed out waiting for a server-sent ${name} event`);
+        },
+      };
+    },
     // Wait until `expression` is true, for animations and smooth scrolling.
     async until(expression, timeout = 2000) {
       const end = Date.now() + timeout;

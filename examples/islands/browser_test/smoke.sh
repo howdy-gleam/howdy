@@ -86,8 +86,12 @@ if ! grep -qF "$expected" "$logs/stale.log"; then
   exit 1
 fi
 # The page still renders on the server; the browser is told why the
-# islands did not start.
-curl -sf "$url" | grep -q "Total: 5"
-curl -sf "${url}_howdy/islands/boot.mjs" | grep -qF "console.error"
+# islands did not start. Each response is read whole before it is
+# searched: `grep -q` stops at the first match, and under pipefail the
+# write curl then fails makes the pipeline fail.
+page=$(curl -sf "$url")
+grep -qF "Total: 5" <<< "$page"
+boot=$(curl -sf "${url}_howdy/islands/boot.mjs")
+grep -qF "console.error" <<< "$boot"
 stop
 echo "refused, as it should be: $expected"

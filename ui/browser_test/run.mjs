@@ -413,7 +413,12 @@ const tests = {
   },
 
   async 'a notification bell follows its inbox live'(page) {
+    const events = await page.serverEvents();
     await page.goto('/bell/preview/0');
+    // The pretend inbox keeps nothing, so the count its stream opens with
+    // is always 2. Wait for it, or it could land after the marks below and
+    // undo their counts.
+    await events.until('unread', 5000);
     const button = '[data-howdy-bell-button]';
     equal(await page.evaluate(`q('[data-howdy-bell-count]').textContent`), '2', 'count drawn with the page');
     equal(await page.evaluate(`q('${button}').getAttribute('aria-label')`), 'Notifications, 2 unread', 'label');
