@@ -13,18 +13,18 @@ tag.
   as `/components/<name>`. When the website shows an older release, it
   points these at that release.
 - Install instructions give `ref = "v<version>"`, and links to code on
-  GitHub use `/tree/v2/` or `/blob/v2/`. `scripts/release.sh` points both at
+  GitHub use `/tree/v1/` or `/blob/v1/`. `scripts/release.sh` points both at
   each new tag, so readers see the code of the release they are reading.
 - The site renders Djot with `jot`, which has no tables: use a list.
 
 ## Marking what is new
 
-Put `{since="2.1"}` on the line before a heading for a section about
-something added in Howdy 2.1. The website shows a "New in 2.1" badge on it,
+Put `{since="1.1"}` on the line before a heading for a section about
+something added in Howdy 1.1. The website shows a "New in 1.1" badge on it,
 so readers on an older release know it is not there for them yet:
 
 ```djot
-{since="2.1"}
+{since="1.1"}
 ## Required STARTTLS
 ```
 

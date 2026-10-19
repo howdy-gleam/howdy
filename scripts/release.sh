@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Release every Howdy package together as one Howdy version. See RELEASING.md.
 #
-#   scripts/release.sh 2.1.0            check, record, commit and tag
-#   scripts/release.sh 2.1.0 --no-tag   check and record only, to review first
+#   scripts/release.sh 1.0.0            check, record, commit and tag
+#   scripts/release.sh 1.0.0 --no-tag   check and record only, to review first
 #
 # It never pushes or publishes. Push the branch and tags, then run
 # scripts/publish.sh, when you are happy.
@@ -15,7 +15,7 @@ tag_it=true
 if [[ "${2:-}" == "--no-tag" ]]; then tag_it=false; fi
 
 if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-  echo "usage: scripts/release.sh VERSION [--no-tag]   (VERSION like 2.1.0)" >&2
+  echo "usage: scripts/release.sh VERSION [--no-tag]   (VERSION like 1.0.0)" >&2
   exit 2
 fi
 

@@ -6,7 +6,7 @@ Package-owned migrations and portable transactions over
 for their own tables, with or without auth.
 
 ```sh
-gleam add howdy_database@2 gloo@1
+gleam add howdy_database@1 gloo@1
 ```
 
 The application opens, configures and closes the Gloo Repo; everything else in

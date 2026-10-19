@@ -1,5 +1,5 @@
 name = "howdy_flags"
-version = "2.0.0"
+version = "1.0.0"
 gleam = ">= 1.18.0"
 description = "Feature flags for Howdy apps: defined in code, rolled out gradually to groups and a share of users, with a kill switch and history"
 licences = ["Apache-2.0"]

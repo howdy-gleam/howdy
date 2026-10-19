@@ -6,7 +6,7 @@ the `dev/` entry point beside [`howdy_dev`](https://github.com/mikeyjones/howdy/
 never reaches a deployment.
 
 ```sh
-gleam add --dev howdy_dev@2 howdy_admin@2
+gleam add --dev howdy_dev@1 howdy_admin@1
 ```
 
 ```gleam

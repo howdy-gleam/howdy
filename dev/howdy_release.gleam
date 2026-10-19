@@ -9,8 +9,8 @@
 //// never by hand.
 ////
 //// ```sh
-//// gleam run -m howdy_release -- check 2.1.0
-//// gleam run -m howdy_release -- record 2.1.0 2026-10-01 /tmp/interfaces
+//// gleam run -m howdy_release -- check 1.0.0
+//// gleam run -m howdy_release -- record 1.0.0 2026-10-01 /tmp/interfaces
 //// ```
 ////
 //// `record` reads one `gleam export package-interface` file per package,
@@ -210,7 +210,7 @@ pub fn package_versions() -> Result(List(#(String, String)), String) {
 pub fn check(version: String) -> Result(List(#(String, String)), String) {
   use parsed <- result.try(
     parse_version(version)
-    |> result.replace_error(version <> " is not a version like 2.1.0"),
+    |> result.replace_error(version <> " is not a version like 1.0.0"),
   )
   use releases <- result.try(read_releases())
   use _ <- result.try(

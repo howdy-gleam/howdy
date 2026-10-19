@@ -1,5 +1,5 @@
 name = "howdy_i18n"
-version = "2.0.0"
+version = "1.0.0"
 gleam = ">= 1.18.0"
 description = "Translations for Howdy apps: typed ICU message catalogues, CLDR plural rules, and number and date formatting"
 licences = ["Apache-2.0"]

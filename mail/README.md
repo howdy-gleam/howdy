@@ -7,7 +7,7 @@ provider, and kept in a development outbox that the
 builds its emails on it.
 
 ```sh
-gleam add howdy_mail@2 smail@2
+gleam add howdy_mail@1 smail@2
 ```
 
 ## Writing a message

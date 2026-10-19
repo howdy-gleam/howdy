@@ -4,7 +4,7 @@ OpenAPI 3.1 documents for Howdy apps, built from schemas that also decode
 requests and encode responses, so the document cannot drift from the code.
 
 ```sh
-gleam add howdy_openapi@2
+gleam add howdy_openapi@1
 ```
 
 ```gleam

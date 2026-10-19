@@ -120,7 +120,6 @@ scheme you already use for other assets works here too.
 exactly the classes their view uses. They are styled the same whichever of
 the three approaches a page takes, and need nothing from the exported file.
 
-{since="2.2"}
 ## Islands
 
 [Islands](/docs/ui/islands) use the same class names in the browser as on

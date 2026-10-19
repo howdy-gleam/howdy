@@ -6,7 +6,7 @@ sign-in; this package is what sends them somewhere. Without it, or until
 `telemetry.start` is called, nothing is recorded or sent.
 
 ```sh
-gleam add howdy_telemetry@2
+gleam add howdy_telemetry@1
 ```
 
 ## Production

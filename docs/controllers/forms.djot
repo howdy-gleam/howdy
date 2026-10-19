@@ -157,7 +157,6 @@ the first value of a field as a `Result`, `form.all` gives every value,
 `form.value` gives the first value or `""`, and `form.fields` gives every
 name and value pair in the order submitted.
 
-{since="2.2"}
 ### File uploads
 
 A form only takes files when you say how many and how large, so a route

@@ -1,5 +1,5 @@
 name = "howdy_storage"
-version = "2.0.0"
+version = "1.0.0"
 gleam = ">= 1.18.0"
 description = "File storage for Howdy apps: one API over S3-compatible buckets, a local folder and memory, with signed URLs"
 licences = ["Apache-2.0"]

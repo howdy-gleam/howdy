@@ -1,5 +1,5 @@
 name = "howdy_auth"
-version = "2.1.0"
+version = "1.0.0"
 gleam = ">= 1.18.0"
 description = "Optional authentication and role-based authorization for Howdy"
 licences = ["Apache-2.0"]

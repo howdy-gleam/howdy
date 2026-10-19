@@ -4,7 +4,7 @@
 [![Hex Docs](https://img.shields.io/badge/hex-docs-ffaff3)](https://howdy.hexdocs.pm/)
 
 ```sh
-gleam add howdy@2
+gleam add howdy@1
 ```
 ```gleam
 import gleam/erlang/process

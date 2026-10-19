@@ -192,7 +192,6 @@ The other controls work the same way: `ui.textarea`, `ui.checkbox`,
 `ui.slider`, `ui.select` and `ui.combobox`. [Forms](/docs/controllers/forms)
 covers reading and validating what the form sends.
 
-{since="2.2"}
 ### Uploads
 
 `howdy/ui/uploader` is a place to drop or choose files. The browser sends
@@ -226,7 +225,6 @@ saved earlier so an edit form keeps them unless they are removed. In a
 live view, `live.on_values("photos", PhotosChanged)` hears the keys each
 time they change.
 
-{since="2.2"}
 ### Rich text
 
 `howdy/ui/rich_text` is an editor for formatted writing, like Rails'
@@ -246,7 +244,6 @@ Mount `ui.rich_text()` to serve its browser code.
 [Rich text](/docs/ui/rich-text) covers storing, validating, mentions,
 attachments and showing documents.
 
-{since="2.2"}
 ## Words and other languages
 
 Everything the components say, from a pagination's "Previous" to a toast's
@@ -354,7 +351,6 @@ that wants to know listens for the native events: `close` on a dialog,
 item. Keep a trigger and what it opens in the same place: both in the page,
 or both in one live view.
 
-{since="2.2"}
 ## Toasts and the bell
 
 `ui.toast_region` is the corner toasts appear in. Render it once on every

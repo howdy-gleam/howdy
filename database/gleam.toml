@@ -1,5 +1,5 @@
 name = "howdy_database"
-version = "2.1.0"
+version = "1.0.0"
 gleam = ">= 1.18.0"
 description = "Package-owned migrations and portable transactions over Gloo for Howdy apps"
 licences = ["Apache-2.0"]

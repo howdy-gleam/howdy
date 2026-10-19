@@ -38,11 +38,6 @@
           "slug": "console",
           "title": "A console on your running app",
           "description": "Attach a Gleam REPL to a running Howdy app with GSH, and call your code with the same database, auth and caches the server uses."
-        },
-        {
-          "slug": "upgrading-to-2-2",
-          "title": "Upgrading to Howdy 2.2",
-          "description": "What changed in Howdy 2.2, and what to change in an app built on 2.1."
         }
       ]
     },

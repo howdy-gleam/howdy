@@ -8,8 +8,6 @@ interactive reference for it.
 howdy_openapi = { git = "https://github.com/mikeyjones/howdy.git", ref = "v2.1.1", path = "openapi" }
 ```
 
-`howdy_openapi` is not in the v2.0.0 release, so depend on the `v2` branch until the next tag.
-
 Gleam cannot look inside a decoder or a handler, so there is nothing to read
 a document from after the fact. Instead you describe each value once, as a
 [schema](/docs/openapi/schemas), and that one description is the decoder a

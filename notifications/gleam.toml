@@ -1,5 +1,5 @@
 name = "howdy_notifications"
-version = "2.0.0"
+version = "1.0.0"
 gleam = ">= 1.18.0"
 description = "Notifications for Howdy apps: an inbox kept until read, pushed live to open pages, with email, digests and Web Push"
 licences = ["Apache-2.0"]

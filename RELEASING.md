@@ -14,22 +14,22 @@ then published to Hex, where their API docs go to HexDocs.
   `releases/releases.json` records which versions of every package make up
   each Howdy release, so users can see what goes together.
 - Each other package is also tagged `<package>-v<version>`, such as
-  `howdy_ui-v2.0.0`, at the release that first shipped that version. Its
+  `howdy_ui-v1.0.0`, at the release that first shipped that version. Its
   HexDocs "source" links point at that tag. `scripts/release.sh` refuses to
   release a package that has changed since its tag without a new version.
 - Apps depend on Hex versions:
 
   ```sh
-  gleam add howdy@2 howdy_ui@2
+  gleam add howdy@1 howdy_ui@1
   ```
 
-  A package that is not on Hex is installed from a tag, never the `v2`
+  A package that is not on Hex is installed from a tag, never a
   branch. Its path dependencies on the other packages come from the same
   checkout, so every Howdy package in the app must then come from git too:
 
   ```toml
-  howdy = { git = "https://github.com/mikeyjones/howdy.git", ref = "v2.1.0" }
-  howdy_ui = { git = "https://github.com/mikeyjones/howdy.git", ref = "v2.1.0", path = "ui" }
+  howdy = { git = "https://github.com/mikeyjones/howdy.git", ref = "v1.0.0" }
+  howdy_ui = { git = "https://github.com/mikeyjones/howdy.git", ref = "v1.0.0", path = "ui" }
   ```
 
 ## Making a release
@@ -40,24 +40,24 @@ then published to Hex, where their API docs go to HexDocs.
 3. Run:
 
    ```sh
-   scripts/release.sh 2.1.0
+   scripts/release.sh 1.1.0
    ```
 
    It checks the versions, exports every package's public API, records the
    release in `releases/`, points the install instructions in `docs/` and
-   the links in the READMEs at the new tag, then commits and tags `v2.1.0`
+   the links in the READMEs at the new tag, then commits and tags `v1.1.0`
    and `<package>-v<version>` for each package with a new version. Pass
    `--no-tag` to stop before committing and review the changes first.
 4. Push the branch and the tags it prints:
 
    ```sh
-   git push origin HEAD v2.1.0 howdy_ui-v2.0.1
+   git push origin HEAD v1.1.0 howdy_ui-v1.0.1
    ```
 
 5. Publish to Hex, from the tag:
 
    ```sh
-   git checkout v2.1.0
+   git checkout v1.1.0
    scripts/publish.sh --dry-run
    scripts/publish.sh
    ```

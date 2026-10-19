@@ -235,7 +235,7 @@ for the official Better Auth references and inspected verifier behavior.
 ## Install and migrate
 
 ```sh
-gleam add howdy_auth@2 howdy_database@2
+gleam add howdy_auth@1 howdy_database@1
 ```
 
 [`howdy_database`](https://github.com/mikeyjones/howdy/blob/v2.1.1/database/README.md) provides `howdy/migration` and the

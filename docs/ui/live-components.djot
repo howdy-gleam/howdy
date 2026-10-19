@@ -245,7 +245,6 @@ live.socket(counter.app(), 0)
 |> websocket.upgrade(ctx)
 ```
 
-{since="2.2"}
 ## Islands in a live view
 
 A live view can render [islands](/docs/ui/islands) with `island.mount`.

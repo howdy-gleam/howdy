@@ -4,7 +4,7 @@ Typed calls from one Howdy service to another, over Erlang distribution or
 HTTP.
 
 ```sh
-gleam add howdy_remote@2
+gleam add howdy_remote@1
 ```
 
 ## Procedures

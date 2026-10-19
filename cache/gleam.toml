@@ -1,5 +1,5 @@
 name = "howdy_cache"
-version = "2.0.0"
+version = "1.0.0"
 gleam = ">= 1.18.0"
 description = "An application cache for Howdy apps: fetch-or-compute with expiry and tag invalidation, kept in memory or in the database"
 licences = ["Apache-2.0"]

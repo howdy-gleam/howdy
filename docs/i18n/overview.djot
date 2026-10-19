@@ -233,7 +233,7 @@ auth.new(...)
 
 ## An example
 
-[`examples/i18n`](https://github.com/mikeyjones/howdy/tree/v2/examples/i18n)
+[`examples/i18n`](https://github.com/mikeyjones/howdy/tree/v1/examples/i18n)
 is a small app in English, German, French and Arabic. It has a language
 switcher, URL-prefixed pages, formatted prices and dates, and translated
 validation messages.
