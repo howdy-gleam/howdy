@@ -295,7 +295,24 @@ The browser sets `Content-Length` from the file itself, so a file that is
 not the size it claimed is refused by storage.
 
 An S3 bucket on another origin needs a CORS rule letting your site send the
-upload. Set it in your provider's console; for AWS S3 and Cloudflare R2:
+upload. `s3.put_cors` sets the bucket's rules with your app's key, if the
+key may change the bucket's settings, as an owner's may:
+
+```gleam
+import gleam/http
+import howdy/storage/s3
+
+let assert Ok(Nil) =
+  s3.put_cors(config, [
+    s3.cors_rule(origins: ["https://app.example.com"], methods: [http.Put]),
+  ])
+```
+
+`cors_rule` lets the page send a `Content-Type` and has the browser
+remember the answer for an hour. The rules stay on the bucket, so run it
+once by hand or each time the app starts. They replace any the bucket had.
+Some services set CORS only in their console; the same rule there, for AWS
+S3 and Cloudflare R2:
 
 ```json
 [
@@ -365,7 +382,7 @@ take, 60 seconds by default.
 Browsers that fetch a signed URL from another origin, such as an `<img>` on
 your site, need nothing more. JavaScript that reads the response with
 `fetch`, or [uploads directly](#Direct-uploads), needs a CORS rule on the
-bucket, set in your provider's console.
+bucket: `s3.put_cors` sets one, or set it in your provider's console.
 
 ## A local folder
 

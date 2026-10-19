@@ -3,6 +3,7 @@ import gleam/http/request
 import gleam/http/response
 import gleam/httpc
 import gleam/json
+import gleam/option.{None, Some}
 import gleam/string
 import gleam/time/timestamp
 import howdy/storage
@@ -230,4 +231,107 @@ pub fn direct_upload_json_test() {
     ])
   assert json.to_string(storage.direct_upload_to_json(upload))
     == "{\"url\":\"https://b/k?x=1\",\"method\":\"PUT\",\"headers\":{\"content-type\":\"image/png\"}}"
+}
+
+// -- CORS --------------------------------------------------------------------
+
+pub fn cors_rules_are_written_as_s3_expects_test() {
+  let upload =
+    s3.cors_rule(origins: ["https://app.example.com"], methods: [http.Put])
+  let read =
+    s3.CorsRule(
+      origins: ["https://*.example.com", "http://localhost:8000"],
+      methods: [http.Get, http.Head],
+      headers: [],
+      expose_headers: ["etag", "content-length"],
+      max_age: None,
+    )
+  assert s3.cors_document([upload, read])
+    == Ok(
+      "<CORSConfiguration xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">"
+      <> "<CORSRule><AllowedOrigin>https://app.example.com</AllowedOrigin>"
+      <> "<AllowedMethod>PUT</AllowedMethod>"
+      <> "<AllowedHeader>content-type</AllowedHeader>"
+      <> "<MaxAgeSeconds>3600</MaxAgeSeconds></CORSRule>"
+      <> "<CORSRule><AllowedOrigin>https://*.example.com</AllowedOrigin>"
+      <> "<AllowedOrigin>http://localhost:8000</AllowedOrigin>"
+      <> "<AllowedMethod>GET</AllowedMethod><AllowedMethod>HEAD</AllowedMethod>"
+      <> "<ExposeHeader>etag</ExposeHeader>"
+      <> "<ExposeHeader>content-length</ExposeHeader></CORSRule>"
+      <> "</CORSConfiguration>",
+    )
+  let assert Ok(escaped) =
+    s3.cors_document([
+      s3.cors_rule(origins: ["https://a.com/<&>"], methods: [http.Get]),
+    ])
+  assert string.contains(escaped, "https://a.com/&lt;&amp;&gt;")
+}
+
+pub fn cors_rules_s3_would_refuse_are_invalid_test() {
+  let rule =
+    s3.cors_rule(origins: ["https://app.example.com"], methods: [http.Put])
+  let assert Error(storage.Invalid(_)) = s3.cors_document([])
+  let assert Error(storage.Invalid(_)) =
+    s3.cors_document([s3.CorsRule(..rule, origins: [])])
+  let assert Error(storage.Invalid(_)) =
+    s3.cors_document([s3.CorsRule(..rule, origins: ["https://*.*.example.com"])])
+  let assert Error(storage.Invalid(_)) =
+    s3.cors_document([s3.CorsRule(..rule, methods: [])])
+  let assert Error(storage.Invalid(_)) =
+    s3.cors_document([s3.CorsRule(..rule, methods: [http.Patch])])
+  let assert Error(storage.Invalid(_)) =
+    s3.cors_document([s3.CorsRule(..rule, max_age: Some(-1))])
+  // Nothing is sent for rules that are refused.
+  let assert Error(storage.Invalid(_)) = s3.put_cors(aws("acme"), [])
+}
+
+fn preflight(url: String, origin: String) -> response.Response(BitArray) {
+  let assert Ok(req) = request.to(url)
+  let req =
+    req
+    |> request.set_method(http.Options)
+    |> request.set_header("origin", origin)
+    |> request.set_header("access-control-request-method", "PUT")
+    |> request.set_header("access-control-request-headers", "content-type")
+    |> request.set_body(<<>>)
+  let assert Ok(response) = httpc.dispatch_bits(httpc.configure(), req)
+  response
+}
+
+/// Whether a browser goes on after this preflight: it needs a success and
+/// its origin allowed. Garage adds `Access-Control-Allow-Origin: *` to its
+/// refusals too, so the status matters.
+fn browser_allows(response: response.Response(BitArray), origin: String) {
+  let allowed = response.get_header(response, "access-control-allow-origin")
+  response.status >= 200
+  && response.status < 300
+  && { allowed == Ok(origin) || allowed == Ok("*") }
+}
+
+pub fn browsers_may_upload_from_allowed_origins_test() {
+  case s3_config() {
+    Error(Nil) -> Nil
+    Ok(config) -> {
+      let assert Ok(Nil) =
+        s3.put_cors(config, [
+          s3.cors_rule(origins: ["https://app.example.com"], methods: [http.Put]),
+        ])
+      let assert Ok(upload) =
+        storage.upload_url(
+          s3.adapter(config),
+          "cors/" <> random_name() <> ".png",
+          content_type: "image/png",
+          size: 4,
+          expires_in: 60,
+        )
+      let allowed = preflight(upload.url, "https://app.example.com")
+      assert response.get_header(allowed, "access-control-allow-origin")
+        == Ok("https://app.example.com")
+      assert browser_allows(allowed, "https://app.example.com")
+      assert !browser_allows(
+        preflight(upload.url, "https://elsewhere.example"),
+        "https://elsewhere.example",
+      )
+    }
+  }
 }

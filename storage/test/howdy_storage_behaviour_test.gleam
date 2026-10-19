@@ -54,7 +54,7 @@ pub fn s3_config_for(bucket: String) -> Result(s3.Config, Nil) {
   use #(_, parsed, _, key, secret) <- result.map(s3_settings())
   s3.new(
     bucket:,
-    region: "us-east-1",
+    region: region(parsed),
     access_key_id: key,
     secret_access_key: secret,
   )
@@ -70,12 +70,22 @@ fn s3_settings() -> Result(#(s3.Config, uri.Uri, String, String, String), Nil) {
   let config =
     s3.new(
       bucket:,
-      region: "us-east-1",
+      region: region(parsed),
       access_key_id: key,
       secret_access_key: secret,
     )
     |> s3.endpoint(endpoint(parsed))
   Ok(#(config, parsed, bucket, key, secret))
+}
+
+/// The region to sign for, from `?region=` on the URL, such as `garage`
+/// for Garage, else `us-east-1`.
+fn region(parsed: uri.Uri) -> String {
+  let query = option.unwrap(parsed.query, "") |> uri.parse_query
+  case query {
+    Ok(pairs) -> list.key_find(pairs, "region") |> result.unwrap("us-east-1")
+    Error(Nil) -> "us-east-1"
+  }
 }
 
 fn endpoint(parsed: uri.Uri) -> String {
@@ -104,7 +114,7 @@ fn create_bucket(parsed: uri.Uri, bucket: String, key: String, secret: String) {
     |> request.set_body(<<>>)
     |> sigv4.sign(
       [],
-      sigv4.Credentials(key, secret, None, "us-east-1"),
+      sigv4.Credentials(key, secret, None, region(parsed)),
       timestamp.system_time(),
     )
   // Already existing is fine.

@@ -29,6 +29,9 @@
 //// upload in parts is aborted, so its parts are not left to be charged for.
 //// `get` reads the whole object into memory: send browsers to `url`
 //// instead.
+////
+//// `put_cors` sets which other origins' pages may use the bucket from the
+//// browser, as direct uploads need.
 
 import bucket
 import bucket/complete_multipart_upload
@@ -39,6 +42,7 @@ import bucket/put_object
 import bucket/upload_part
 import gleam/bit_array
 import gleam/bool
+import gleam/crypto
 import gleam/http.{type Method}
 import gleam/http/request
 import gleam/http/response.{type Response}
@@ -201,6 +205,164 @@ pub fn adapter(config: Config) -> Storage {
       })
     None -> storage
   }
+}
+
+// -- Bucket settings ---------------------------------------------------------
+
+/// Which pages may use the bucket from the browser, and how. A page on
+/// another origin needs a rule to upload with `storage.upload_url`, or to read
+/// a response with `fetch`; an `<img>` or a link needs none.
+pub type CorsRule {
+  CorsRule(
+    /// Origins such as `"https://app.example.com"`, with no path or
+    /// trailing slash. One `*` may stand for any part, as in
+    /// `"https://*.example.com"`, or `"*"` for any origin.
+    origins: List(String),
+    /// `Get`, `Put`, `Head`, `Post` or `Delete`.
+    methods: List(Method),
+    /// Request headers the page may send, such as `"content-type"`.
+    headers: List(String),
+    /// Response headers the page's script may read, such as `"etag"`.
+    expose_headers: List(String),
+    /// How long a browser may remember the answer to its preflight
+    /// request, in seconds.
+    max_age: Option(Int),
+  )
+}
+
+/// A rule letting `origins` use these methods, sending a `Content-Type`,
+/// with the preflight remembered for an hour. A rule for direct uploads:
+///
+/// ```gleam
+/// s3.cors_rule(origins: ["https://app.example.com"], methods: [http.Put])
+/// ```
+///
+/// Change the rest with a record update:
+/// `s3.CorsRule(..rule, expose_headers: ["etag"])`.
+pub fn cors_rule(
+  origins origins: List(String),
+  methods methods: List(Method),
+) -> CorsRule {
+  CorsRule(
+    origins:,
+    methods:,
+    headers: ["content-type"],
+    expose_headers: [],
+    max_age: Some(3600),
+  )
+}
+
+/// Replace the bucket's CORS rules with these. The key needs permission to
+/// change the bucket's settings, as the bucket's owner has. A browser
+/// follows the first rule that matches its request.
+///
+/// Run it when the app starts or deploys, or once by hand: the rules stay
+/// on the bucket. Some services set CORS only in their console, and refuse
+/// this.
+pub fn put_cors(config: Config, rules: List(CorsRule)) -> Result(Nil, Error) {
+  use document <- result.try(cors_document(rules))
+  let body = bit_array.from_string(document)
+  let headers = [
+    #("content-type", "application/xml"),
+    // Required by AWS for this request.
+    #("content-md5", bit_array.base64_encode(md5(body), True)),
+  ]
+  use location <- result.try(location(config))
+  use response <- result.try(dispatch(
+    config,
+    location,
+    http.Put,
+    bucket_path(location),
+    [#("cors", "")],
+    headers,
+    body,
+  ))
+  case response.status {
+    200 | 204 -> Ok(Nil)
+    _ -> Error(error_from(response))
+  }
+}
+
+/// The `PutBucketCors` document for `rules`, or why S3 would refuse them.
+@internal
+pub fn cors_document(rules: List(CorsRule)) -> Result(String, Error) {
+  use <- bool.guard(
+    rules == [] || list.length(rules) > 100,
+    Error(Invalid("a bucket needs between 1 and 100 CORS rules")),
+  )
+  use rules <- result.map(list.try_map(rules, cors_rule_document))
+  "<CORSConfiguration xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">"
+  <> string.concat(rules)
+  <> "</CORSConfiguration>"
+}
+
+fn cors_rule_document(rule: CorsRule) -> Result(String, Error) {
+  use <- bool.guard(
+    rule.origins == [],
+    Error(Invalid("a CORS rule needs at least one origin")),
+  )
+  use <- bool.guard(
+    list.any(rule.origins, fn(origin) {
+      string.trim(origin) == "" || count(origin, "*") > 1
+    }),
+    Error(Invalid("a CORS origin must not be empty or have more than one *")),
+  )
+  use <- bool.guard(
+    rule.methods == [],
+    Error(Invalid("a CORS rule needs at least one method")),
+  )
+  use methods <- result.try(list.try_map(rule.methods, cors_method))
+  use <- bool.guard(
+    case rule.max_age {
+      Some(seconds) -> seconds < 0
+      None -> False
+    },
+    Error(Invalid("a CORS max age must not be negative")),
+  )
+  let element = fn(name, values) {
+    list.map(values, fn(value) {
+      "<" <> name <> ">" <> escape_xml(value) <> "</" <> name <> ">"
+    })
+  }
+  Ok(
+    string.concat(
+      list.flatten([
+        ["<CORSRule>"],
+        element("AllowedOrigin", rule.origins),
+        element("AllowedMethod", methods),
+        element("AllowedHeader", rule.headers),
+        element("ExposeHeader", rule.expose_headers),
+        case rule.max_age {
+          Some(seconds) -> element("MaxAgeSeconds", [int.to_string(seconds)])
+          None -> []
+        },
+        ["</CORSRule>"],
+      ]),
+    ),
+  )
+}
+
+fn cors_method(method: Method) -> Result(String, Error) {
+  case method {
+    http.Get -> Ok("GET")
+    http.Put -> Ok("PUT")
+    http.Head -> Ok("HEAD")
+    http.Post -> Ok("POST")
+    http.Delete -> Ok("DELETE")
+    _ ->
+      Error(Invalid(
+        "CORS rules allow only GET, PUT, HEAD, POST and DELETE, not "
+        <> http.method_to_string(method),
+      ))
+  }
+}
+
+fn count(text: String, part: String) -> Int {
+  list.length(string.split(text, part)) - 1
+}
+
+fn md5(bytes: BitArray) -> BitArray {
+  crypto.hash(crypto.Md5, bytes)
 }
 
 // -- Operations --------------------------------------------------------------

@@ -44,7 +44,8 @@ howdy_ui's `uploader` does the browser's part, with progress.
 - `howdy/storage/s3`: AWS S3, Cloudflare R2, Tigris, MinIO, Garage,
   SeaweedFS, Backblaze B2 and other S3-compatible services. `s3.from_env()`
   reads the standard `AWS_*` variables and `S3_BUCKET` or `BUCKET_NAME`.
-  Files over 16 MiB go up in parts.
+  Files over 16 MiB go up in parts, and `s3.put_cors` sets the CORS rule
+  direct uploads need.
 - `howdy/storage/local`: a folder, for development and single servers.
   `local.controller` serves its signed URLs from your app, with headers
   that stop an uploaded HTML or SVG file running script on your site.
