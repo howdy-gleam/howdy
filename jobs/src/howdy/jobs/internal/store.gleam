@@ -17,6 +17,7 @@ import gloo/repo.{type Repo}
 import gloo/sql
 import gloo/value.{type GlooValue}
 import howdy/database.{Postgres, Sqlite}
+import howdy/database/postgres
 import howdy/service
 
 pub const table = "howdy_jobs"
@@ -248,11 +249,13 @@ fn flag(on: Bool) -> String {
 /// commits. Only PostgreSQL can.
 pub fn notify(conn: Repo, queue: String) -> service.Result(Nil) {
   case database.backend(conn) {
-    Ok(Postgres) ->
-      database.execute(conn, "NOTIFY howdy_jobs, " <> literal(queue), [])
+    Ok(Postgres) -> postgres.notify(conn, channel, queue)
     _ -> Ok(Nil)
   }
 }
+
+/// The channel jobs are announced on, with their queue as the payload.
+pub const channel = "howdy_jobs"
 
 // -- Running -------------------------------------------------------------------
 

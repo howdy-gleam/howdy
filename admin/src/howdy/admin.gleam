@@ -127,9 +127,10 @@ pub fn new() -> Admin {
 /// How the grid's listening connection reaches PostgreSQL, so it hears
 /// about changes through `NOTIFY` rather than polling. Give the same
 /// settings the app's pool uses, such as `pog.url_config(name, url)`; the
-/// pool name in them is not used. Without this the admin looks for the
-/// settings inside the running pool, which depends on pgo's internals and
-/// falls back to polling when it cannot find them. Does nothing on SQLite.
+/// pool name in them is not used. Only needed for a pool the app did not
+/// open with `howdy/database/postgres`, whose settings
+/// `postgres.listen` cannot find: without them the grid polls. Does
+/// nothing on SQLite.
 pub fn notify_via(admin: Admin, config: pog.Config) -> Admin {
   Admin(Config(..admin.config, listen: Some(config)))
 }

@@ -149,6 +149,42 @@ If your app starts pog itself, `postgres.from_pog(started)` wraps the pool
 in the same way, without waiting for the server. Queries sent straight to
 pog skip the query spans that the Repo records.
 
+### Listening for changes
+
+PostgreSQL can tell every connection to a database that something
+happened, with `NOTIFY`. `postgres.listen` hears a channel, and
+`postgres.notify` sends on one:
+
+```gleam
+let assert Ok(_listener) =
+  postgres.listen(db, "orders", fn(order_id) {
+    process.send(dashboard, OrderPlaced(order_id))
+  })
+
+use conn <- database.transaction(db)
+use order <- result.try(orders.insert(conn, cart))
+postgres.notify(conn, "orders", int.to_string(order.id))
+```
+
+A notification sent inside a transaction goes out when it commits, and
+not at all if it rolls back, so listeners never hear about a change they
+cannot see yet. It reaches every listener on the channel, on this node or
+any other, which makes it a way for app servers that are not connected to
+each other to share news. [Howdy Jobs](/docs/jobs/overview) wakes its
+runners this way, and the admin's database grid follows changes with it.
+
+The listener is a process linked to the one that called `listen`, with a
+connection of its own. It connects with the pool's settings, which a pool
+opened by `howdy/database/postgres` remembers. For a pool your app started
+some other way it looks for them inside pgo, and `postgres.listen_via`
+takes them from a `pog.Config` when it cannot. When the connection drops,
+the listener connects and listens again by itself, but what was sent
+meanwhile is not heard: if missing one matters, check now and then as
+well, more slowly.
+
+Channels are lowercase names, such as `orders` or `howdy_jobs`, and a
+payload is text of up to 8000 bytes, so send an id rather than the record.
+
 ## Sharing a SQLite Repo
 
 Gloo gives a SQLite Repo exactly one connection. Everything that goes

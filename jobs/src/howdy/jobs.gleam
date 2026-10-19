@@ -67,6 +67,7 @@ import gleam/string
 import gloo/migration as gloo_migration
 import gloo/repo.{type Repo}
 import howdy/database
+import howdy/database/postgres
 import howdy/jobs/cron.{type Cron}
 import howdy/jobs/internal/store.{type Row}
 import howdy/migration
@@ -1055,6 +1056,9 @@ pub fn stop(runner: Runner) -> Nil {
 @external(erlang, "howdy_jobs_ffi", "stop_supervisor")
 fn stop_supervisor(pid: Pid, timeout: Int) -> Nil
 
+/// On PostgreSQL, a child hearing jobs other nodes queue, through
+/// `NOTIFY howdy_jobs`. Without the pool's settings it logs once and does
+/// nothing: producers poll.
 fn listener(runner: Runner) -> Option(supervision.ChildSpecification(Nil)) {
   case database.backend(runner.repo), runner.listen {
     Ok(database.Postgres), FromPool -> Some(None)
@@ -1063,42 +1067,26 @@ fn listener(runner: Runner) -> Option(supervision.ChildSpecification(Nil)) {
   }
   |> option.map(fn(settings) {
     supervision.worker(fn() {
-      let settings =
-        option.map(settings, fn(config: pog.Config) {
-          #(
-            config.host,
-            config.port,
-            config.database,
-            config.user,
-            config.password,
-            config.ssl,
-            config.connection_parameters,
-            config.ip_version,
+      let listening = case settings {
+        Some(config) -> postgres.listen_via(config, store.channel, wake)
+        None -> postgres.listen(runner.repo, store.channel, wake)
+      }
+      case listening {
+        Ok(listener) ->
+          Ok(actor.Started(pid: postgres.listener_pid(listener), data: Nil))
+        Error(error) -> {
+          logging.log(
+            logging.Warning,
+            "howdy/jobs: not listening for jobs other nodes queue: "
+              <> postgres.listen_error_to_string(error)
+              <> ". Producers poll instead.",
           )
-        })
-      let assert Ok(pid) = start_listener(runner.repo, settings, wake)
-      Ok(actor.Started(pid:, data: Nil))
+          Ok(actor.Started(pid: process.spawn(process.sleep_forever), data: Nil))
+        }
+      }
     })
   })
 }
-
-@external(erlang, "howdy_jobs_ffi", "start_listener")
-fn start_listener(
-  repo: Repo,
-  settings: Option(
-    #(
-      String,
-      Int,
-      String,
-      String,
-      Option(String),
-      pog.Ssl,
-      List(#(String, String)),
-      pog.IpVersion,
-    ),
-  ),
-  notify: fn(String) -> Nil,
-) -> Result(Pid, Nil)
 
 // -- Producers -----------------------------------------------------------------
 // One per queue per node. It claims due jobs while it has room, runs each
