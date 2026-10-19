@@ -44,6 +44,7 @@ pub const packages = [
   #("howdy_flags", "flags"),
   #("howdy_jobs", "jobs"),
   #("howdy_notifications", "notifications"),
+  #("howdy_cache", "cache"),
 ]
 
 const releases_path = "releases/releases.json"

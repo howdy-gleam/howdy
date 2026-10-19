@@ -4,6 +4,7 @@
 
 import gleam/dynamic/decode
 import gleam/json.{type Json}
+import howdy/codec
 import howdy/remote
 
 pub type User {
@@ -14,8 +15,8 @@ pub fn user_to_json(user: User) -> Json {
   json.object([#("id", json.int(user.id)), #("name", json.string(user.name))])
 }
 
-fn user() -> remote.Codec(User) {
-  remote.codec(encode: user_to_json, decoder: {
+fn user() -> codec.Codec(User) {
+  codec.new(encode: user_to_json, decoder: {
     use id <- decode.field("id", decode.int)
     use name <- decode.field("name", decode.string)
     decode.success(User(id:, name:))
@@ -23,13 +24,9 @@ fn user() -> remote.Codec(User) {
 }
 
 pub fn get_user() -> remote.Procedure(Int, User) {
-  remote.procedure("users.get", input: remote.int(), output: user())
+  remote.procedure("users.get", input: codec.int(), output: user())
 }
 
 pub fn list_users() -> remote.Procedure(Nil, List(User)) {
-  remote.procedure(
-    "users.list",
-    input: remote.nil(),
-    output: remote.list(user()),
-  )
+  remote.procedure("users.list", input: codec.nil(), output: codec.list(user()))
 }

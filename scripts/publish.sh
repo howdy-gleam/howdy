@@ -33,6 +33,7 @@ packages=(
   "howdy_flags:flags"
   "howdy_jobs:jobs"
   "howdy_notifications:notifications"
+  "howdy_cache:cache"
   "howdy_dev:howdy_dev"
   "howdy_auth:auth"
   "howdy_admin:admin"

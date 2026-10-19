@@ -44,6 +44,7 @@ packages=(
   "howdy_flags:flags"
   "howdy_jobs:jobs"
   "howdy_notifications:notifications"
+  "howdy_cache:cache"
 )
 
 echo "== Checking versions"

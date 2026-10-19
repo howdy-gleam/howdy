@@ -14,20 +14,21 @@ once, in a module both services import. A small shared package works best:
 the caller and the server then always agree on names and types.
 
 ```gleam
+import howdy/codec
 import howdy/remote
 
 pub fn get_user() -> remote.Procedure(Int, User) {
-  remote.procedure("users.get", input: remote.int(), output: user())
+  remote.procedure("users.get", input: codec.int(), output: user())
 }
 
-fn user() -> remote.Codec(User) {
-  remote.codec(encode: user_to_json, decoder: user_decoder())
+fn user() -> codec.Codec(User) {
+  codec.new(encode: user_to_json, decoder: user_decoder())
 }
 ```
 
-`int`, `float`, `string`, `bool`, `nil`, `list` and `optional` cover the
-simple cases. The name is all that crosses the wire, so prefix names with the
-service, as in `"users.get"`.
+Codecs come from `howdy/codec` in the core package: `int`, `float`, `string`,
+`bool`, `nil`, `list` and `optional` cover the simple cases. The name is all
+that crosses the wire, so prefix names with the service, as in `"users.get"`.
 
 Inputs and outputs travel as JSON and are decoded on arrival, even between
 Erlang nodes. Two services deployed at different times can disagree on a

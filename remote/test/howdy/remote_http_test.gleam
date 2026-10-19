@@ -3,6 +3,7 @@ import gleam/int
 import gleam/list
 import gleam/option.{Some}
 import howdy
+import howdy/codec
 import howdy/remote
 import howdy/service
 import howdy/telemetry
@@ -16,7 +17,7 @@ fn crash() -> a
 const token = "test-token-with-plenty-of-entropy"
 
 fn crashing() -> remote.Procedure(Nil, Nil) {
-  remote.procedure("http.crash", input: remote.nil(), output: remote.nil())
+  remote.procedure("http.crash", input: codec.nil(), output: codec.nil())
 }
 
 /// Serve the users procedures at `/rpc` on a free port and return the URL.

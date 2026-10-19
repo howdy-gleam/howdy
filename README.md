@@ -650,7 +650,7 @@ serve it from the service that owns the data, and call it from anywhere:
 
 ```gleam
 pub fn get_user() -> remote.Procedure(Int, User) {
-  remote.procedure("users.get", input: remote.int(), output: user_codec())
+  remote.procedure("users.get", input: codec.int(), output: user_codec())
 }
 
 // In the users service. Handlers return the usual `service.Result`.
@@ -824,6 +824,29 @@ notifications.draft("comment.created", "Ana commented on your post")
 bell.new(id: "inbox", source: "/notifications") |> bell.unread(count) |> bell.view
 ```
 
+## Caching
+
+`howdy/conditional` answers `304 Not Modified` when the browser already has
+the current version of a response, and `412` when a write was based on an
+old one. Describe the version, and the rest of the handler only runs when
+the client needs the body:
+
+```gleam
+use <- conditional.when(ctx, conditional.etag(["note", id, version]))
+controller.json(ctx, note_to_json(note))
+```
+
+[`howdy_cache`](https://github.com/mikeyjones/howdy/blob/v2.1.1/cache/README.md) keeps the results of expensive work, in memory or
+the app's database, and drops them by tag when the data changes. Errors are
+never cached, invalidations inside a transaction wait for it to end, and a
+failing store falls back to computing:
+
+```gleam
+let entry = cache.entry("dashboard:" <> team, ttl: 300) |> cache.tags(["projects"])
+use <- cache.fetch(app_cache, entry, dashboard_codec())
+build_dashboard(db, team)
+```
+
 ## Testing
 
 `howdy/testing` runs requests through an app without starting a server. The
@@ -903,6 +926,7 @@ The core package reserves `howdy/auth`, every `howdy/auth/*` module and
 `howdy/notifications` and every `howdy/notifications/*` module for
 `howdy_notifications`,
 `howdy/jobs` and every `howdy/jobs/*` module for `howdy_jobs`,
+`howdy/cache` and every `howdy/cache/*` module for `howdy_cache`,
 `howdy/openapi` and every `howdy/openapi/*` module for `howdy_openapi`,
 `howdy/telemetry` and every `howdy/telemetry/*` module for `howdy_telemetry`,
 `howdy/ui` and every `howdy/ui/*` module for `howdy_ui`, and `howdy/dev` and

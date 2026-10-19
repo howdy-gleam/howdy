@@ -97,6 +97,11 @@
           "description": "Read JSON bodies, HTML forms and file uploads with howdy/body and howdy/form, validate the input, and report every field error."
         },
         {
+          "slug": "conditional-requests",
+          "title": "Conditional requests",
+          "description": "Answer 304 Not Modified when the client already has the current version, refuse writes to an old version with 412, and choose who may cache a response."
+        },
+        {
           "slug": "responses",
           "title": "Responses",
           "description": "Send text, HTML and JSON, set status codes and headers, and redirect from a Howdy handler."
@@ -251,6 +256,17 @@
           "slug": "web-push",
           "title": "Web Push",
           "description": "Show notifications through the browser itself, even with the app closed: VAPID keys, a service worker, and turning push on from the bell."
+        }
+      ]
+    },
+    {
+      "slug": "cache",
+      "title": "Cache",
+      "docs": [
+        {
+          "slug": "overview",
+          "title": "Caching",
+          "description": "Keep the results of expensive work with howdy_cache, in memory or the database, and invalidate them by tag when the data changes."
         }
       ]
     },

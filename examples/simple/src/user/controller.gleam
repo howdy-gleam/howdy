@@ -1,8 +1,10 @@
 //// Routes for `/user`. Each handler extracts input, calls the service, and
 //// hands the result to `service` to turn into a response.
 
+import gleam/int
 import gleam/json
 import howdy/body
+import howdy/conditional
 import howdy/controller.{type Context}
 import howdy/middleware
 import howdy/param
@@ -39,8 +41,23 @@ fn all(ctx: Context) {
 
 fn by_id(ctx: Context) {
   use id <- param.int(ctx, "id")
-  user_service.find(id)
-  |> service.respond(ctx, user.to_json)
+  case user_service.find(id) {
+    Error(error) -> service.error_response(ctx, error)
+    Ok(found) -> {
+      // The etag changes whenever the JSON would. A client that sends it
+      // back in `if-none-match` gets an empty 304 while it still matches.
+      use <- conditional.when(
+        ctx,
+        conditional.etag([
+          int.to_string(found.id),
+          found.name,
+          found.email,
+          int.to_string(found.age),
+        ]),
+      )
+      controller.json(ctx, user.to_json(found))
+    }
+  }
 }
 
 fn create(ctx: Context) {
