@@ -236,6 +236,11 @@ only. Nodes do not find each other on their own: connect them with
 
 Read [Distribution is full trust](/docs/remote/clusters) before you do.
 
+Servers that share a PostgreSQL database need no cluster for
+[notifications](/docs/notifications/overview#On-several-servers):
+`notifications.across_servers` sends them to pages open on every server
+through the database. Channels and presence still need the cluster.
+
 ## Kamal
 
 [Kamal](https://kamal-deploy.org) deploys images to your own servers, behind

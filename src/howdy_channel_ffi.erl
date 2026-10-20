@@ -1,6 +1,7 @@
 %% pg-backed topics for howdy/websocket/channel.
 -module(howdy_channel_ffi).
--export([channel_join/2, channel_leave/2, channel_members/1, channel_broadcast/3, tuple_second/1]).
+-export([channel_join/2, channel_leave/2, channel_members/1, channel_local_members/1,
+         channel_broadcast/3, tuple_second/1]).
 
 %% -- WebSocket channels ------------------------------------------------------
 %%
@@ -26,6 +27,10 @@ channel_leave(Topic, Pid) ->
 
 channel_members(Topic) ->
     pg:get_members(channel_scope(), Topic).
+
+%% The members on this node only.
+channel_local_members(Topic) ->
+    pg:get_local_members(channel_scope(), Topic).
 
 %% Send `{Tag, Message}` to every member of Topic. Duplicates arise when a
 %% process joined more than once, so they are sent to once.

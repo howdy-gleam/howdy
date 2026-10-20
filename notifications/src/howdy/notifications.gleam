@@ -46,6 +46,8 @@ import gleam/int
 import gleam/json.{type Json}
 import gleam/list
 import gleam/option.{type Option, None, Some}
+import gleam/otp/actor
+import gleam/otp/supervision
 import gleam/result
 import gleam/string
 import gloo/migration as gloo_migration
@@ -54,6 +56,7 @@ import gloo/sql
 import howdy/content.{type Content}
 import howdy/controller.{type Context, type Controller}
 import howdy/database
+import howdy/database/postgres
 import howdy/jobs
 import howdy/mail
 import howdy/migration
@@ -61,6 +64,8 @@ import howdy/param
 import howdy/query
 import howdy/service
 import howdy/sse
+import logging
+import pog
 
 // -- Notifications -----------------------------------------------------------
 
@@ -907,8 +912,9 @@ pub opaque type Subscription {
 }
 
 /// Hear about `recipient`'s inbox on `subject`, from any node in the
-/// cluster, until the process that owns the subject exits or `unsubscribe`
-/// is called. Nothing announced after this returns is missed.
+/// cluster, or any server at all with `across_servers`, until the process
+/// that owns the subject exits or `unsubscribe` is called. Nothing
+/// announced after this returns is missed.
 ///
 /// In a live view, subscribe from an effect:
 ///
@@ -930,7 +936,8 @@ pub fn unsubscribe(subscription: Subscription) -> Nil {
   stop_relay(subscription.relay)
 }
 
-/// How many subscriptions a user has, across the cluster.
+/// How many subscriptions a user has, across the cluster. Servers that are
+/// not clustered, even with `across_servers`, only count their own.
 pub fn subscribers(recipient: String) -> Int {
   count_subscribers(recipient)
 }
@@ -939,18 +946,275 @@ pub fn subscribers(recipient: String) -> Int {
 /// itself; this is for events of the app's own making, such as an unread
 /// count changed by a bulk update.
 pub fn announce(recipient: String, event: Event) -> Nil {
-  broadcast(recipient, event)
+  case process.named(fan_out_name()) {
+    Ok(_) ->
+      process.send(
+        process.named_subject(fan_out_name()),
+        Tell(recipient, event),
+      )
+    Error(Nil) -> broadcast(recipient, event)
+  }
 }
 
 fn announce_unread(notifier: Notifier, recipient: String) -> Nil {
-  case subscribers(recipient) > 0 {
+  case process.named(fan_out_name()) {
+    // Subscribers on other servers are not known here, so each server
+    // counts for its own.
+    Ok(_) ->
+      process.send(process.named_subject(fan_out_name()), Recount(recipient))
+    Error(Nil) -> recount(notifier, recipient, False)
+  }
+}
+
+// -- Across servers ----------------------------------------------------------
+// Announcements go through `pg`, which reaches every node of an Erlang
+// cluster and no further. `across_servers` sends them through PostgreSQL
+// instead: each server's process sends what is announced there as a
+// `NOTIFY`, hears every server's, and passes each on to the subscribers on
+// its own node. With it, a cluster's nodes hear each announcement once, by
+// PostgreSQL, rather than twice.
+
+/// The PostgreSQL channel announcements go out on.
+const fan_out_channel = "howdy_notifications"
+
+/// The longest payload PostgreSQL takes. A notification too long to go
+/// whole goes by ID, and is read back by the servers with subscribers.
+const largest_payload = 7999
+
+type FanOut {
+  /// Send an announcement to every server.
+  Tell(recipient: String, event: Event)
+  /// Ask every server to count the recipient's unread notifications for
+  /// its own subscribers.
+  Recount(recipient: String)
+}
+
+type FanOutState {
+  /// Announcing through PostgreSQL.
+  Notifying(notifier: Notifier)
+  /// On SQLite, or unable to listen: announcing through `pg`, as without
+  /// `across_servers`.
+  Broadcasting(notifier: Notifier)
+}
+
+/// Announce through PostgreSQL, so that pages open on any server hear
+/// about their user's notifications, whether or not the servers are
+/// connected as an Erlang cluster. Add it to the app's supervisor on every
+/// server, after the database pool and before the server:
+///
+/// ```gleam
+/// supervisor.new(supervisor.OneForOne)
+/// |> supervisor.add(pool)
+/// |> supervisor.add(notifications.across_servers(notifier))
+/// |> supervisor.add(jobs.supervised(runner))
+/// |> supervisor.add(howdy.supervised(app(notifier)))
+/// ```
+///
+/// It listens on a connection of its own, opened with the pool's settings;
+/// see `across_servers_via` for a pool `howdy/database/postgres` did not
+/// open. One runs per node. On SQLite, which only one server can use, it
+/// changes nothing. While it is not running, such as when it restarts,
+/// announcements go through the cluster as they do without it. What is
+/// announced while a server's listening connection is lost does not reach
+/// that server's open pages, but the inbox has it: the bell reads it when
+/// its panel next opens.
+pub fn across_servers(
+  notifier: Notifier,
+) -> supervision.ChildSpecification(Nil) {
+  fan_out(notifier, None)
+}
+
+/// `across_servers`, listening with these settings, such as
+/// `pog.url_config(name, url)`: the same the app's pool uses. The pool name
+/// in them is not used.
+pub fn across_servers_via(
+  notifier: Notifier,
+  config: pog.Config,
+) -> supervision.ChildSpecification(Nil) {
+  fan_out(notifier, Some(config))
+}
+
+fn fan_out(
+  notifier: Notifier,
+  settings: Option(pog.Config),
+) -> supervision.ChildSpecification(Nil) {
+  supervision.worker(fn() {
+    actor.new_with_initialiser(10_000, fn(_subject) {
+      let state = case database.backend(notifier.repo) {
+        Ok(database.Postgres) -> {
+          let hear = fn(payload) { hear(notifier, payload) }
+          let listening = case settings {
+            Some(config) -> postgres.listen_via(config, fan_out_channel, hear)
+            None -> postgres.listen(notifier.repo, fan_out_channel, hear)
+          }
+          case listening {
+            Ok(_) -> Notifying(notifier)
+            Error(error) -> {
+              logging.log(
+                logging.Warning,
+                "howdy/notifications: not announcing across servers: "
+                  <> postgres.listen_error_to_string(error)
+                  <> ". Only this node's cluster hears announcements.",
+              )
+              Broadcasting(notifier)
+            }
+          }
+        }
+        _ -> Broadcasting(notifier)
+      }
+      Ok(actor.initialised(state))
+    })
+    |> actor.named(fan_out_name())
+    |> actor.on_message(fn(state, message) {
+      case state {
+        Notifying(notifier) -> tell_servers(notifier, message)
+        Broadcasting(notifier) ->
+          case message {
+            Tell(recipient, event) -> broadcast(recipient, event)
+            Recount(recipient) -> recount(notifier, recipient, False)
+          }
+      }
+      actor.continue(state)
+    })
+    |> actor.start
+    |> result.map(fn(started) { actor.Started(..started, data: Nil) })
+  })
+}
+
+/// Send one announcement to every server, or to this node's cluster if
+/// PostgreSQL cannot take it.
+fn tell_servers(notifier: Notifier, message: FanOut) -> Nil {
+  let #(recipient, fields) = case message {
+    Tell(recipient, Received(notification)) -> #(recipient, [
+      #("notification", to_json(notification)),
+    ])
+    Tell(recipient, Unread(count)) -> #(recipient, [
+      #("unread", json.int(count)),
+    ])
+    Recount(recipient) -> #(recipient, [#("recount", json.bool(True))])
+  }
+  let payload = fan_out_payload(recipient, fields)
+  let payload = case message, string.byte_size(payload) > largest_payload {
+    Tell(_, Received(notification)), True ->
+      fan_out_payload(recipient, [#("id", json.string(notification.id))])
+    _, _ -> payload
+  }
+  case postgres.notify(notifier.repo, fan_out_channel, payload) {
+    Ok(Nil) -> Nil
+    Error(error) -> {
+      logging.log(
+        logging.Warning,
+        "howdy/notifications: could not announce across servers: "
+          <> service.message(error),
+      )
+      case message {
+        Tell(recipient, event) -> broadcast(recipient, event)
+        Recount(recipient) -> recount(notifier, recipient, False)
+      }
+    }
+  }
+}
+
+fn fan_out_payload(recipient: String, fields: List(#(String, Json))) -> String {
+  json.object([#("to", json.string(recipient)), ..fields]) |> json.to_string
+}
+
+/// Pass an announcement from any server on to this node's subscribers.
+fn hear(notifier: Notifier, payload: String) -> Nil {
+  let decoder = {
+    use recipient <- decode.field("to", decode.string)
+    use heard <- decode.then(
+      decode.one_of(
+        decode.field(
+          "notification",
+          notification_json_decoder(recipient),
+          fn(n) { decode.success(HeardNotification(n)) },
+        ),
+        [
+          decode.field("id", decode.string, fn(id) {
+            decode.success(HeardId(id))
+          }),
+          decode.field("unread", decode.int, fn(count) {
+            decode.success(HeardUnread(count))
+          }),
+          decode.field("recount", decode.bool, fn(_) {
+            decode.success(HeardRecount)
+          }),
+        ],
+      ),
+    )
+    decode.success(#(recipient, heard))
+  }
+  case json.parse(payload, decoder) {
+    Error(_) -> Nil
+    Ok(#(recipient, heard)) ->
+      case local_subscribers(recipient) > 0 {
+        False -> Nil
+        True ->
+          case heard {
+            HeardNotification(notification) ->
+              local_broadcast(recipient, Received(notification))
+            HeardId(id) ->
+              case get(notifier, recipient, id) {
+                Ok(notification) ->
+                  local_broadcast(recipient, Received(notification))
+                Error(_) -> Nil
+              }
+            HeardUnread(count) -> local_broadcast(recipient, Unread(count))
+            HeardRecount -> recount(notifier, recipient, True)
+          }
+      }
+  }
+}
+
+type Heard {
+  HeardNotification(Notification)
+  HeardId(String)
+  HeardUnread(Int)
+  HeardRecount
+}
+
+/// Tell `recipient`'s subscribers how many notifications they have unread,
+/// unless there are none: those on this node only if `here_only`, and
+/// otherwise those in the cluster.
+fn recount(notifier: Notifier, recipient: String, here_only: Bool) -> Nil {
+  let #(listening, tell) = case here_only {
+    True -> #(local_subscribers(recipient), local_broadcast)
+    False -> #(subscribers(recipient), broadcast)
+  }
+  case listening > 0 {
     False -> Nil
     True ->
       case unread_count(notifier, recipient) {
-        Ok(count) -> announce(recipient, Unread(count))
+        Ok(count) -> tell(recipient, Unread(count))
         Error(_) -> Nil
       }
   }
+}
+
+/// A notification as `to_json` wrote it.
+fn notification_json_decoder(
+  recipient: String,
+) -> decode.Decoder(Notification) {
+  use id <- decode.field("id", decode.string)
+  use kind <- decode.field("kind", decode.string)
+  use title <- decode.field("title", decode.string)
+  use body <- decode.field("body", decode.string)
+  use link <- decode.field("link", decode.optional(decode.string))
+  use data <- decode.field("data", decode.dict(decode.string, decode.string))
+  use created_at <- decode.field("created_at", decode.int)
+  use read_at <- decode.field("read_at", decode.optional(decode.int))
+  decode.success(Notification(
+    id:,
+    recipient:,
+    kind:,
+    title:,
+    body:,
+    link:,
+    data:,
+    created_at:,
+    read_at:,
+  ))
 }
 
 /// A server-sent event stream of `recipient`'s inbox. It opens with an
@@ -1661,3 +1925,12 @@ fn broadcast(recipient: String, event: Event) -> Nil
 
 @external(erlang, "howdy_notifications_ffi", "subscribers")
 fn count_subscribers(recipient: String) -> Int
+
+@external(erlang, "howdy_notifications_ffi", "local_broadcast")
+fn local_broadcast(recipient: String, event: Event) -> Nil
+
+@external(erlang, "howdy_notifications_ffi", "local_subscribers")
+fn local_subscribers(recipient: String) -> Int
+
+@external(erlang, "howdy_notifications_ffi", "fan_out_name")
+fn fan_out_name() -> process.Name(FanOut)

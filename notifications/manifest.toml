@@ -66,3 +66,4 @@ howdy_database = { path = "../database" }
 howdy_jobs = { path = "../jobs" }
 howdy_mail = { path = "../mail" }
 logging = { version = ">= 1.3.0 and < 2.0.0" }
+pog = { version = ">= 4.1.0 and < 5.0.0" }

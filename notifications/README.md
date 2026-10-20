@@ -62,6 +62,11 @@ howdy/notifications/web_push` makes the keys. Other push services, such as
 ones sending to phones, are added by name with `with_push_service`, and
 each is sent and retried on its own.
 
+Live announcements reach every node of an Erlang cluster. For servers
+that are not clustered, add `notifications.across_servers(notifier)` to each
+server's supervisor: on PostgreSQL it sends them through the database, so
+pages open on any server hear them.
+
 Email and push are [background jobs](https://github.com/mikeyjones/howdy/blob/v1.0.0/jobs/README.md), queued in the
 transaction that saves the notification: add them to your app's runner with
 `jobs.runner(db) |> notifications.handle_jobs(notifier)`. They are retried

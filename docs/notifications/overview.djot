@@ -115,9 +115,43 @@ event: notification
 data: {"id":"…","kind":"comment.created","title":"Ana commented on your post",…}
 ```
 
+### On several servers
+
 Announcements go through the same `pg` groups as
 [channels](/docs/controllers/websockets), so they reach the recipient's
-pages on every node of a connected cluster.
+pages on every node of a connected [cluster](/docs/guides/deployment#Clusters).
+Servers that are not clustered, such as copies of the app behind a load
+balancer, only reach the pages open on the server that sent the
+notification. The inbox is still right on every server, and email and push
+still go out, but a page on another server does not hear of it until it
+reconnects or reloads.
+
+On PostgreSQL, `across_servers` sends announcements through the database
+instead, so every server hears them. Add it to the supervisor on each
+server, after the database pool:
+
+```gleam
+supervisor.new(supervisor.OneForOne)
+|> supervisor.add(pool)
+|> supervisor.add(notifications.across_servers(notifier))
+|> supervisor.add(jobs.supervised(runner))
+|> supervisor.add(howdy.supervised(app(notifier)))
+```
+
+Each server sends what is announced there as a PostgreSQL `NOTIFY`, and
+passes on what it hears to the pages open on it. It works in a cluster
+too, and each page still hears each notification once. Run it on
+everything that sends or marks notifications read, such as a separate
+service sharing the database; otherwise, what that service does is only
+heard in its own cluster.
+
+It listens on a connection of its own, opened with the pool's settings.
+For a pool `howdy/database/postgres` did not open, give the settings with
+`across_servers_via(notifier, pog.url_config(name, url))`. On SQLite,
+which only one server can use, it changes nothing. A server whose
+listening connection drops connects again, but pages open on it miss what
+was announced in between. The bell reads the inbox again when its panel
+next opens.
 
 ### The bell
 
