@@ -20,7 +20,7 @@ To add it to another project, put these in the `[dependencies]` section of
 `gleam.toml`:
 
 ```toml
-howdy_ui = { git = "https://github.com/mikeyjones/howdy.git", ref = "v1.0.0", path = "ui" }
+howdy_ui = { git = "https://github.com/howdy-gleam/howdy.git", ref = "v1.0.0", path = "ui" }
 lustre = ">= 5.7.0 and < 6.0.0"
 ```
 

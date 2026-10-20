@@ -3,7 +3,7 @@ version = "1.0.0"
 gleam = ">= 1.18.0"
 description = "Notifications for Howdy apps: an inbox kept until read, pushed live to open pages, with email, digests and Web Push"
 licences = ["Apache-2.0"]
-repository = { type = "github", user = "mikeyjones", repo = "howdy", path = "notifications", tag-prefix = "howdy_notifications-" }
+repository = { type = "github", user = "howdy-gleam", repo = "howdy", path = "notifications", tag-prefix = "howdy_notifications-" }
 links = [{ title = "Website", href = "https://tryhowdy.dev" }]
 internal_modules = ["howdy/notifications/internal/*"]
 target = "erlang"

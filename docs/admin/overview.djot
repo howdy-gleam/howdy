@@ -22,8 +22,8 @@ Add the package to the dev dependencies in `gleam.toml`, next to
 
 ```toml
 [dev_dependencies]
-howdy_dev = { git = "https://github.com/mikeyjones/howdy.git", ref = "v1.0.0", path = "howdy_dev" }
-howdy_admin = { git = "https://github.com/mikeyjones/howdy.git", ref = "v1.0.0", path = "admin" }
+howdy_dev = { git = "https://github.com/howdy-gleam/howdy.git", ref = "v1.0.0", path = "howdy_dev" }
+howdy_admin = { git = "https://github.com/howdy-gleam/howdy.git", ref = "v1.0.0", path = "admin" }
 ```
 
 ## Mounting it

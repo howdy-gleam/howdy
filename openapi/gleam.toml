@@ -3,7 +3,7 @@ version = "1.0.0"
 gleam = ">= 1.18.0"
 description = "OpenAPI documents for Howdy apps, built from schemas that also decode requests and encode responses"
 licences = ["Apache-2.0"]
-repository = { type = "github", user = "mikeyjones", repo = "howdy", path = "openapi", tag-prefix = "howdy_openapi-" }
+repository = { type = "github", user = "howdy-gleam", repo = "howdy", path = "openapi", tag-prefix = "howdy_openapi-" }
 links = [{ title = "Website", href = "https://tryhowdy.dev" }]
 internal_modules = ["howdy/openapi/internal/*"]
 target = "erlang"

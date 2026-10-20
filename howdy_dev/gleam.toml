@@ -3,7 +3,7 @@ version = "1.0.0"
 gleam = ">= 1.18.0"
 description = "Hot reload for howdy apps in development"
 licences = ["Apache-2.0"]
-repository = { type = "github", user = "mikeyjones", repo = "howdy", path = "howdy_dev", tag-prefix = "howdy_dev-" }
+repository = { type = "github", user = "howdy-gleam", repo = "howdy", path = "howdy_dev", tag-prefix = "howdy_dev-" }
 links = [{ title = "Website", href = "https://tryhowdy.dev" }]
 internal_modules = ["howdy/dev/internal/*"]
 target = "erlang"

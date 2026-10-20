@@ -36,8 +36,8 @@ implemented.
 Add the packages to `gleam.toml`, next to `howdy`:
 
 ```toml
-howdy_auth = { git = "https://github.com/mikeyjones/howdy.git", ref = "v1.0.0", path = "auth" }
-howdy_database = { git = "https://github.com/mikeyjones/howdy.git", ref = "v1.0.0", path = "database" }
+howdy_auth = { git = "https://github.com/howdy-gleam/howdy.git", ref = "v1.0.0", path = "auth" }
+howdy_database = { git = "https://github.com/howdy-gleam/howdy.git", ref = "v1.0.0", path = "database" }
 ```
 
 `howdy_database` provides the `howdy/migration` module you run the auth

@@ -3,7 +3,7 @@ version = "1.0.0"
 gleam = ">= 1.18.0"
 description = "Background jobs for Howdy apps: queued in your database inside your own transactions, retried with backoff, and run on a schedule"
 licences = ["Apache-2.0"]
-repository = { type = "github", user = "mikeyjones", repo = "howdy", path = "jobs", tag-prefix = "howdy_jobs-" }
+repository = { type = "github", user = "howdy-gleam", repo = "howdy", path = "jobs", tag-prefix = "howdy_jobs-" }
 links = [{ title = "Website", href = "https://tryhowdy.dev" }]
 internal_modules = ["howdy/jobs/internal/*"]
 target = "erlang"

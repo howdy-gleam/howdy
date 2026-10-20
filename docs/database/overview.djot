@@ -23,7 +23,7 @@ package only receives the Gloo `Repo`.
 Add the package to `gleam.toml`, next to `howdy` and `gloo`:
 
 ```toml
-howdy_database = { git = "https://github.com/mikeyjones/howdy.git", ref = "v1.0.0", path = "database" }
+howdy_database = { git = "https://github.com/howdy-gleam/howdy.git", ref = "v1.0.0", path = "database" }
 gloo = ">= 1.0.2 and < 2.0.0"
 ```
 

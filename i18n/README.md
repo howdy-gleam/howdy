@@ -1,12 +1,12 @@
 # howdy_i18n
 
-Translations for [howdy](https://github.com/mikeyjones/howdy/blob/v1.0.0/README.md)
+Translations for [howdy](https://github.com/howdy-gleam/howdy/blob/v1.0.0/README.md)
 apps: ICU MessageFormat catalogues turned into typed Gleam functions, CLDR
 plural rules, and numbers, money, dates, relative times and lists written
 the way each locale writes them.
 
 ```toml
-howdy_i18n = { git = "https://github.com/mikeyjones/howdy.git", ref = "v1.0.0", path = "i18n" }
+howdy_i18n = { git = "https://github.com/howdy-gleam/howdy.git", ref = "v1.0.0", path = "i18n" }
 ```
 
 It depends on nothing else from Howdy, and runs on Erlang and JavaScript.
@@ -75,6 +75,6 @@ a saved preference or `accept-language`. Pass its tag to `i18n.new`:
 let t = i18n.new(locale.to_string(locale.detect(ctx, locales)))
 ```
 
-See the [internationalisation docs](https://github.com/mikeyjones/howdy/blob/v1.0.0/docs/i18n/overview.djot)
+See the [internationalisation docs](https://github.com/howdy-gleam/howdy/blob/v1.0.0/docs/i18n/overview.djot)
 for the whole story, including Howdy's own translated validation messages,
 UI components and auth pages.

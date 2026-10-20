@@ -3,7 +3,7 @@ version = "1.0.0"
 gleam = ">= 1.18.0"
 description = "Feature flags for Howdy apps: defined in code, rolled out gradually to groups and a share of users, with a kill switch and history"
 licences = ["Apache-2.0"]
-repository = { type = "github", user = "mikeyjones", repo = "howdy", path = "flags", tag-prefix = "howdy_flags-" }
+repository = { type = "github", user = "howdy-gleam", repo = "howdy", path = "flags", tag-prefix = "howdy_flags-" }
 links = [{ title = "Website", href = "https://tryhowdy.dev" }]
 internal_modules = ["howdy/flags/internal/*"]
 target = "erlang"

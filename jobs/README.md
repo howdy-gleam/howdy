@@ -1,6 +1,6 @@
 # howdy_jobs
 
-Background jobs for [howdy](https://github.com/mikeyjones/howdy/blob/v1.0.0/README.md) apps. Work to be done later is
+Background jobs for [howdy](https://github.com/howdy-gleam/howdy/blob/v1.0.0/README.md) apps. Work to be done later is
 kept in the app's database, on PostgreSQL or SQLite, and done outside the
 request:
 
@@ -10,14 +10,14 @@ request:
   ordered by priority
 - run on cron schedules, each time queued once however many nodes run them
 - spread across nodes, with a job a lost node left half done run again
-- shown in the [admin area](https://github.com/mikeyjones/howdy/blob/v1.0.0/admin/README.md), managed on servers from a
-  command line, and traced with [howdy_telemetry](https://github.com/mikeyjones/howdy/blob/v1.0.0/telemetry/README.md)
+- shown in the [admin area](https://github.com/howdy-gleam/howdy/blob/v1.0.0/admin/README.md), managed on servers from a
+  command line, and traced with [howdy_telemetry](https://github.com/howdy-gleam/howdy/blob/v1.0.0/telemetry/README.md)
 
 Add it to `[dependencies]` in `gleam.toml`, from the same release as your
 app's other Howdy packages:
 
 ```toml
-howdy_jobs = { git = "https://github.com/mikeyjones/howdy.git", ref = "v1.0.0", path = "jobs" }
+howdy_jobs = { git = "https://github.com/howdy-gleam/howdy.git", ref = "v1.0.0", path = "jobs" }
 ```
 
 and its tables to your migrations: `migration.run(db, [jobs.schema(), ..])`.
@@ -107,9 +107,9 @@ gleam run -m tasks/jobs pause mail
 
 ## Learn more
 
-- [Background jobs](https://github.com/mikeyjones/howdy/blob/v1.0.0/docs/jobs/overview.djot): defining, queueing, outcomes,
+- [Background jobs](https://github.com/howdy-gleam/howdy/blob/v1.0.0/docs/jobs/overview.djot): defining, queueing, outcomes,
   queued email and testing
-- [Schedules](https://github.com/mikeyjones/howdy/blob/v1.0.0/docs/jobs/schedules.djot): cron, and keeping auth, uploads and
+- [Schedules](https://github.com/howdy-gleam/howdy/blob/v1.0.0/docs/jobs/schedules.djot): cron, and keeping auth, uploads and
   old jobs tidy
-- [Running jobs](https://github.com/mikeyjones/howdy/blob/v1.0.0/docs/jobs/production.djot): nodes, shutdown, pausing, the
+- [Running jobs](https://github.com/howdy-gleam/howdy/blob/v1.0.0/docs/jobs/production.djot): nodes, shutdown, pausing, the
   admin, the command line and traces

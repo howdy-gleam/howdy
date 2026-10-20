@@ -19,7 +19,7 @@ through your app.
 Add the package to `gleam.toml`, next to `howdy`:
 
 ```toml
-howdy_storage = { git = "https://github.com/mikeyjones/howdy.git", ref = "v1.0.0", path = "storage" }
+howdy_storage = { git = "https://github.com/howdy-gleam/howdy.git", ref = "v1.0.0", path = "storage" }
 ```
 
 ## Objects and keys

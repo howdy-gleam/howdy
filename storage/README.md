@@ -1,11 +1,11 @@
 # howdy_storage
 
-File storage for [howdy](https://github.com/mikeyjones/howdy/blob/v1.0.0/README.md) apps: one API for keeping files in
+File storage for [howdy](https://github.com/howdy-gleam/howdy/blob/v1.0.0/README.md) apps: one API for keeping files in
 an S3-compatible bucket, a local folder, or memory, with signed URLs that
 let browsers fetch them directly.
 
 ```toml
-howdy_storage = { git = "https://github.com/mikeyjones/howdy.git", ref = "v1.0.0", path = "storage" }
+howdy_storage = { git = "https://github.com/howdy-gleam/howdy.git", ref = "v1.0.0", path = "storage" }
 ```
 
 ## Storing an upload
@@ -52,5 +52,5 @@ howdy_ui's `uploader` does the browser's part, with progress.
 - `howdy/storage/memory`: for tests.
 - `storage.adapter(...)`: your own.
 
-See the [storage docs](https://github.com/mikeyjones/howdy/blob/v1.0.0/docs/storage/overview.djot) for keys, URLs,
+See the [storage docs](https://github.com/howdy-gleam/howdy/blob/v1.0.0/docs/storage/overview.djot) for keys, URLs,
 errors and testing.

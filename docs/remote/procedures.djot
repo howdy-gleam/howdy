@@ -7,7 +7,7 @@ distribution between your own nodes, or over HTTP across a trust boundary,
 and the call site is the same for both.
 
 ```toml
-howdy_remote = { git = "https://github.com/mikeyjones/howdy.git", ref = "v1.0.0", path = "remote" }
+howdy_remote = { git = "https://github.com/howdy-gleam/howdy.git", ref = "v1.0.0", path = "remote" }
 ```
 
 ## Procedures

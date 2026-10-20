@@ -3,7 +3,7 @@ version = "1.0.0"
 gleam = ">= 1.18.0"
 description = "Email for Howdy apps: smail templates, SMTP and HTTP provider adapters, and a development outbox"
 licences = ["Apache-2.0"]
-repository = { type = "github", user = "mikeyjones", repo = "howdy", path = "mail", tag-prefix = "howdy_mail-" }
+repository = { type = "github", user = "howdy-gleam", repo = "howdy", path = "mail", tag-prefix = "howdy_mail-" }
 links = [{ title = "Website", href = "https://tryhowdy.dev" }]
 internal_modules = ["howdy/mail/internal/*"]
 target = "erlang"

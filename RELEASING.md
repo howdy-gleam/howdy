@@ -33,8 +33,8 @@ then published to Hex, where their API docs go to HexDocs.
   checkout, so every Howdy package in the app must then come from git too:
 
   ```toml
-  howdy = { git = "https://github.com/mikeyjones/howdy.git", ref = "v1.0.0" }
-  howdy_ui = { git = "https://github.com/mikeyjones/howdy.git", ref = "v1.0.0", path = "ui" }
+  howdy = { git = "https://github.com/howdy-gleam/howdy.git", ref = "v1.0.0" }
+  howdy_ui = { git = "https://github.com/howdy-gleam/howdy.git", ref = "v1.0.0", path = "ui" }
   ```
 
 ## Making a release
