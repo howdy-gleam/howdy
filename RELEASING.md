@@ -17,6 +17,11 @@ then published to Hex, where their API docs go to HexDocs.
   `howdy_ui-v1.0.0`, at the release that first shipped that version. Its
   HexDocs "source" links point at that tag. `scripts/release.sh` refuses to
   release a package that has changed since its tag without a new version.
+- On Hex a package depends on each other Howdy package up to its next
+  major, so when one goes up a major every package depending on it needs a
+  new version too, even unchanged, to be published with the new range.
+  `scripts/release.sh` refuses a release until they have one. A major of
+  `howdy` therefore means a new version of every package.
 - Apps depend on Hex versions:
 
   ```sh

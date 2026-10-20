@@ -4,6 +4,7 @@ gleam = ">= 1.18.0"
 description = "File storage for Howdy apps: one API over S3-compatible buckets, a local folder and memory, with signed URLs"
 licences = ["Apache-2.0"]
 repository = { type = "github", user = "mikeyjones", repo = "howdy", path = "storage", tag-prefix = "howdy_storage-" }
+links = [{ title = "Website", href = "https://tryhowdy.dev" }]
 internal_modules = ["howdy/storage/internal/*"]
 target = "erlang"
 

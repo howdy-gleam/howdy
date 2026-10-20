@@ -54,24 +54,62 @@ gleam run -m howdy_release -- check "$version"
 # Each package other than howdy is tagged <name>-v<version> when released,
 # which is where its HexDocs source links point. A package that has changed
 # since its tag needs a new version.
+#
+# A package is published to Hex depending on each other Howdy package from
+# that one's version at the time up to its next major (see publish.sh), and
+# keeps those ranges until it is published again. So a package whose Howdy
+# dependency has gone up a major since its tag cannot be used with this
+# release, even unchanged: it needs a new version, published with the new
+# range.
+declare -A package_paths
+for entry in "${packages[@]}"; do package_paths["${entry%%:*}"]="${entry#*:}"; done
+
+# The version in a gleam.toml read from stdin.
+version_in() {
+  sed -n -E 's/^version = "([^"]+)"$/\1/p' | head -n 1
+}
+
+# The Howdy packages a gleam.toml read from stdin depends on by path in its
+# [dependencies], the only ones Hex holds it to.
+howdy_dependencies() {
+  awk '/^\[/ { deps = ($0 == "[dependencies]"); next } deps' \
+    | sed -n -E 's/^(howdy[a-z_]*) = \{ *path = .*/\1/p'
+}
+
 package_tags=()
 unbumped=()
+outgrown=()
 for entry in "${packages[@]}"; do
   name="${entry%%:*}"
   path="${entry#*:}"
   [[ "$name" == "howdy" ]] && continue
-  package_version="$(sed -n -E 's/^version = "([^"]+)"$/\1/p' "$path/gleam.toml" | head -n 1)"
+  package_version="$(version_in <"$path/gleam.toml")"
   tag="$name-v$package_version"
   if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
     if ! git diff --quiet "$tag" HEAD -- "$path/src" "$path/priv" "$path/gleam.toml"; then
       unbumped+=("$name")
+      continue
     fi
+    for dep in $(howdy_dependencies <"$path/gleam.toml"); do
+      dep_toml="${package_paths[$dep]}/gleam.toml"
+      dep_toml="${dep_toml#./}"
+      was="$(git show "$tag:$dep_toml" | version_in)"
+      now="$(version_in <"$dep_toml")"
+      if [[ "${was%%.*}" != "${now%%.*}" ]]; then
+        outgrown+=("$name (published for $dep $was, now $now)")
+      fi
+    done
   else
     package_tags+=("$tag")
   fi
 done
 if (( ${#unbumped[@]} > 0 )); then
   echo "Changed since their last release, so bump their versions: ${unbumped[*]}" >&2
+  exit 1
+fi
+if (( ${#outgrown[@]} > 0 )); then
+  echo "Published for an older major of a Howdy package, so bump their versions:" >&2
+  printf '  %s\n' "${outgrown[@]}" >&2
   exit 1
 fi
 

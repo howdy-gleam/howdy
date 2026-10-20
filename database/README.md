@@ -159,6 +159,22 @@ pub fn rename(db, id: String, slug: String) -> service.Result(Nil) {
 Gloo's SQLite adapter binds `$n` placeholders by position: never reuse one
 placeholder in a query, pass the value again.
 
+**Call `query.where` after `query.update` or `query.delete`.** In Gloo 1.x,
+`query.update` and `query.delete` start a fresh condition list, so a `where`
+placed before them is silently dropped and the statement touches every row:
+
+```gleam
+// UPDATE "notes_notes" SET slug = $1 WHERE id = $2
+query.from(note.table())
+|> query.update([#("slug", sql.string(slug))])
+|> query.where(query.Eq("id", sql.string(id)))
+
+// UPDATE "notes_notes" SET slug = $1, which renames every note
+query.from(note.table())
+|> query.where(query.Eq("id", sql.string(id)))
+|> query.update([#("slug", sql.string(slug))])
+```
+
 **Sharing a SQLite Repo.** Gloo 1.x gives a SQLite Repo one connection.
 Everything that goes through this module serializes on that Repo, first come
 first served, so auth and application code can share it. Calls made directly

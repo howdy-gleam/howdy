@@ -4,6 +4,7 @@ gleam = ">= 1.18.0"
 description = "Optional authentication and role-based authorization for Howdy"
 licences = ["Apache-2.0"]
 repository = { type = "github", user = "mikeyjones", repo = "howdy", path = "auth", tag-prefix = "howdy_auth-" }
+links = [{ title = "Website", href = "https://tryhowdy.dev" }]
 internal_modules = ["howdy/auth/internal/*"]
 target = "erlang"
 

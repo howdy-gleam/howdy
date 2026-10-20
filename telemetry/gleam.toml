@@ -4,6 +4,7 @@ gleam = ">= 1.18.0"
 description = "OpenTelemetry for Howdy apps: traces over OTLP, structured logs, and a recorder the dev admin shows"
 licences = ["Apache-2.0"]
 repository = { type = "github", user = "mikeyjones", repo = "howdy", path = "telemetry", tag-prefix = "howdy_telemetry-" }
+links = [{ title = "Website", href = "https://tryhowdy.dev" }]
 target = "erlang"
 
 [dependencies]

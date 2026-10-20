@@ -4,6 +4,7 @@ gleam = ">= 1.18.0"
 description = "A development admin area for Howdy apps: browse and edit the database, manage users and groups, and call the API"
 licences = ["Apache-2.0"]
 repository = { type = "github", user = "mikeyjones", repo = "howdy", path = "admin", tag-prefix = "howdy_admin-" }
+links = [{ title = "Website", href = "https://tryhowdy.dev" }]
 internal_modules = ["howdy/admin/internal/*"]
 target = "erlang"
 

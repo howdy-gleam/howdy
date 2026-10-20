@@ -295,6 +295,10 @@ pub fn execute_or(
 ///
 /// A violated constraint is a `Conflict` that names nothing. If the conditions
 /// match several rows they are all written and the first is returned.
+///
+/// Call `query.where` after `query.update` or `query.delete`, as above: both
+/// start a fresh condition list in Gloo 1.x, so an earlier `where` is dropped
+/// and the statement writes or removes every row.
 pub fn returning(
   repo: Repo,
   mutation: Query(a),

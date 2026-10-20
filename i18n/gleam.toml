@@ -4,6 +4,7 @@ gleam = ">= 1.18.0"
 description = "Translations for Howdy apps: typed ICU message catalogues, CLDR plural rules, and number and date formatting"
 licences = ["Apache-2.0"]
 repository = { type = "github", user = "mikeyjones", repo = "howdy", path = "i18n", tag-prefix = "howdy_i18n-" }
+links = [{ title = "Website", href = "https://tryhowdy.dev" }]
 internal_modules = ["howdy/i18n/internal", "howdy/i18n/internal/*"]
 
 [dependencies]
