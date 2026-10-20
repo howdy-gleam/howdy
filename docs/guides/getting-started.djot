@@ -37,11 +37,13 @@ written in Go, and there are two ways to install it.
 
 ### With the install script
 
-The quickest way is the install script, which downloads the right build for
-your machine and puts `howdy` on your `PATH`:
+The quickest way is the install script, which downloads the latest build for
+your machine from the
+[CLI's releases](https://github.com/howdy-gleam/howdy-cli/releases) and
+puts `howdy` on your `PATH`:
 
 ```sh
-curl -fsSL https://howdy.example/install.sh | bash
+curl -fsSL https://tryhowdy.dev/install.sh | bash
 ```
 
 ### With Go
@@ -50,7 +52,9 @@ If you have [Go](https://go.dev/doc/install) 1.25 or newer, you can build
 and install the CLI from source instead:
 
 ```sh
-go install github.com/mikeyjones/howdy_cli@latest
+git clone https://github.com/howdy-gleam/howdy-cli.git
+cd howdy-cli
+go install .
 ```
 
 Go installs programs to `$HOME/go/bin`, so make sure that directory is on
