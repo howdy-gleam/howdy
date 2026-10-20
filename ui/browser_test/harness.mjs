@@ -26,7 +26,10 @@ const CHROMIUM = process.env.CHROMIUM || 'chromium';
 
 // -- Chromium and the protocol -----------------------------------------------
 
-async function launch() {
+// A cold Chromium on a CI runner can take well over ten seconds to write its
+// port file, so allow a minute, give up early if it exits instead, and try
+// once more before failing the run.
+async function launch(attempts = 2) {
   const profile = mkdtempSync(join(tmpdir(), 'howdy-browser-'));
   const child = spawn(CHROMIUM, [
     '--headless=new',
@@ -36,9 +39,24 @@ async function launch() {
     '--disable-gpu',
     `--user-data-dir=${profile}`,
     'about:blank',
-  ], { stdio: 'ignore' });
+  ], { stdio: ['ignore', 'ignore', 'pipe'] });
+  let errors = '';
+  child.stderr.on('data', (chunk) => { errors = (errors + chunk).slice(-4000); });
   const portFile = join(profile, 'DevToolsActivePort');
-  for (let i = 0; i < 100 && !existsSync(portFile); i++) await sleep(100);
+  const running = () => child.exitCode === null && child.signalCode === null;
+  for (let i = 0; i < 600 && !existsSync(portFile) && running(); i++) await sleep(100);
+  if (!existsSync(portFile)) {
+    const how = running()
+      ? 'did not start within a minute'
+      : `exited (${child.exitCode ?? child.signalCode})`;
+    child.kill('SIGKILL');
+    rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    if (attempts > 1) {
+      console.warn(`${CHROMIUM} ${how}; trying again`);
+      return launch(attempts - 1);
+    }
+    throw new Error(`${CHROMIUM} ${how}:\n${errors}`);
+  }
   const [port] = readFileSync(portFile, 'utf8').split('\n');
   const version = await (await fetch(`http://127.0.0.1:${port}/json/version`)).json();
   const browser = await connect(version.webSocketDebuggerUrl);
