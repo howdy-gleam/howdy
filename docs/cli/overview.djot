@@ -1,20 +1,30 @@
 # The howdy command
 
-`howdy` is the command line for Howdy. It creates new projects, adds code to
-the project you are working in, and runs the development server. It is a
-single program written in Go, and
+`howdy` is the command line for Howdy. It creates new projects, writes code
+into the project you are working in, adds Howdy packages and wires them up,
+checks the project, lists its routes, and runs the development server. It
+is a single program written in Go, and
 [Getting started](/docs/guides/getting-started) shows how to install it.
 
 ## Commands
 
-- `howdy new <project_name>` creates a project. See
-  [Creating a project](/docs/cli/new).
-- `howdy create controller`, `howdy create pages`, `howdy create repo` and
-  `howdy create migration` add a database table to the current project, with
-  as much code around it as you ask for, from a JSON API to a full set of
-  pages to list, add, edit and delete records. See
+- `howdy new <project_name>` creates a project, with a database, the dev
+  admin, a console and guides for coding agents, or without whichever you
+  leave out. See [Creating a project](/docs/cli/new).
+- `howdy create ...` writes code in the shape of the project: a JSON API, a
+  set of pages, a repo or a migration around a new table, and pages, live
+  pages, components, live components, layouts and emails on their own. See
   [Generating code](/docs/cli/create).
+- `howdy add ...` adds a Howdy package and wires it into the app, the dev
+  server and the tests: `auth`, `mail`, `flags`, `openapi` and `remote`.
+  `howdy add docker` adds the files to deploy in a container. See
+  [Adding packages](/docs/cli/add).
+- `howdy check` formats, builds and tests the project, and `howdy routes`
+  lists every route it serves and where it is defined. See
+  [Checking the project](/docs/cli/check).
 - `howdy dev` runs the current project with hot reload.
+- `howdy completion bash|zsh|fish|powershell` prints a completion script
+  for your shell.
 
 Every command explains itself with `--help`, including its arguments, flags
 and examples:
@@ -27,6 +37,24 @@ howdy create controller --help
 
 `howdy --version` prints the version you have installed.
 
+## Flags every command shares
+
+The commands that write code, `new`, `create` and `add`, take the same
+flags:
+
+- `--dry-run` shows which files the command would create and modify, and
+  what it would leave for you to do, without changing anything. Use it to
+  see what a command does before letting it.
+- `--json` prints the result as one JSON object instead of progress, for a
+  script or a coding agent to read. See [Output for scripts and
+  agents](#Output-for-scripts-and-agents).
+- `--plain` prints progress as one line per step instead of animating,
+  which reads better in CI logs.
+- `--skip-deps`, for `new` and `add`, leaves out `gleam deps download`
+  after `gleam.toml` changes, so you can run it yourself later.
+
+`check` and `routes` take `--json` too.
+
 ## What it needs
 
 The CLI writes Gleam code and then hands over to Gleam's own tools, so it
@@ -34,9 +62,14 @@ looks for `gleam` on your `PATH` before it writes anything, and stops with an
 error if it is missing. It warns you if `erl` is missing too, because the
 project will not run without Erlang.
 
-Howdy, Howdy UI and Howdy Dev are downloaded from GitHub as Git
-dependencies, so `howdy new` also needs *Git* installed. You do not need a
+Howdy's packages are downloaded from GitHub as Git dependencies, so
+`howdy new` and `howdy add` also need *Git* installed. You do not need a
 copy of Howdy on your machine.
+
+Every command but `new` runs inside a project. It looks for the nearest
+directory with a `gleam.toml`, starting where you are and walking up, so it
+works from any folder inside the project, and stops with an error outside
+one rather than guessing.
 
 ## Running the project
 
@@ -45,19 +78,48 @@ howdy dev
 ```
 
 `howdy dev` finds the project you are in and runs `gleam dev` there, which
-rebuilds and refreshes the browser as you change the code. It looks for the
-nearest directory with a `gleam.toml`, starting where you are and walking up,
-so it works from any folder inside the project. Output is streamed to your
+rebuilds and refreshes the browser as you change the code, and serves the
+[admin](/docs/admin/overview) at `/_howdy`. Output is streamed to your
 terminal, and Ctrl-C stops the server.
 
-Outside a Gleam project it stops with an error rather than guessing.
+## Output for scripts and agents
 
-## Progress output
+With `--json`, a command that writes code prints one object and nothing
+else:
 
-`howdy new` and the `howdy create` commands animate their progress when they
-run in a terminal. Pass `--plain` to print one line per step instead, which
-reads better in CI logs and scripts:
-
-```sh
-howdy new my_app --plain
+```json
+{
+  "command": "howdy create page blog about",
+  "ok": true,
+  "dry_run": false,
+  "created": [
+    "src/my_app/features/blog/blog_controller.gleam",
+    "src/my_app/features/blog/pages/about_page.gleam",
+    "test/my_app/features/blog/pages/about_page_test.gleam"
+  ],
+  "modified": ["src/my_app.gleam"],
+  "manual_steps": [],
+  "warnings": [],
+  "next": [],
+  "notes": [
+    "The new blog controller is registered in src/my_app.gleam.",
+    "Add the page's content in src/my_app/features/blog/pages/about_page.gleam."
+  ]
+}
 ```
+
+- `created` and `modified` list the files, relative to the project.
+- `manual_steps` is what the command could not wire up itself, such as a
+  registration in a file that no longer has the shape `howdy new` gave it.
+  An empty list means nothing is left to do.
+- `warnings` is anything to know about, such as a missing tool.
+- `next` and `notes` say what to do and where things went.
+
+A command that fails prints `"ok": false` with an `error`, and exits with
+status 1.
+
+A project made by `howdy new` comes with `AGENTS.md`, which tells a coding
+agent to use these commands rather than write the same code by hand, to run
+`howdy check` after every change, and where things go. `CLAUDE.md` imports
+it for Claude Code, and `.claude/skills/` holds guides for common tasks,
+which `howdy add` extends with a guide for each package it adds.

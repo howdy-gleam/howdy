@@ -27,6 +27,9 @@ cache-control: no-store
 {"status":"ok"}
 ```
 
+Projects made by [`howdy new`](/docs/cli/new) mount it already, last in
+`app()`, and their `Dockerfile` asks it.
+
 `GET` and `HEAD` are answered. Other methods, and other paths, go to the
 app's routes as usual.
 

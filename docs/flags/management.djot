@@ -1,0 +1,143 @@
+# Managing flags
+
+Flags are changed from code, from the admin area in development, from the
+command line on a server, or wherever a read-only store gets its settings
+from.
+
+## The admin area
+
+With [Howdy Admin](/docs/admin/overview) mounted, register the flags with
+`admin.flags(features)` and `/_howdy` gets a Flags section: every flag the
+code defines with its state, the kill switch, the rules and who they name,
+the groups and their members, and the history with undo. Rollouts are
+shown, not set. The admin makes its changes as `howdy_admin`.
+
+## The command line
+
+`howdy/flags/cli` manages the flags from a terminal, for servers without
+the admin. Give it the app's flags and a way to open their store, in a task
+module (`howdy add flags` writes this one):
+
+```gleam
+// src/tasks/flags.gleam
+import howdy/flags/cli
+import howdy/flags/database as flags_database
+
+pub fn main() -> Nil {
+  cli.main(my_app.all_flags(), fn() {
+    flags_database.store(my_app.database())
+  })
+}
+```
+
+```sh
+$ gleam run -m tasks/flags list
+new_checkout  5%, ramp paused, 2 rules  Stripe-hosted checkout
+search_v2     default on                New search
+$ gleam run -m tasks/flags rollout new_checkout 20 --by mike
+new_checkout is rolled out to 20%.
+$ gleam run -m tasks/flags check new_checkout --user 42 --org acme
+on: allowed for group:beta
+```
+
+| Command | Does |
+|---|---|
+| `export` | the flags the code defines, as JSON; opens no store |
+| `list [--json]` | every flag and its state; `--json` prints everything stored |
+| `show KEY` | one flag in full |
+| `check KEY [--user ID] [--org ID]` | whether someone gets it, and why |
+| `history [KEY] [--limit N]` | the latest changes, numbered |
+| `undo CHANGE` | put a flag back as it was before that change |
+| `kill KEY`, `revive KEY` | the kill switch |
+| `rollout KEY PERCENT` | such as `5` or `12.5` |
+| `bucket KEY user\|organization` | what the rollout is by |
+| `allow`, `block`, `unlist KEY TARGET` | rules for `user:ID`, `org:ID` or `group:NAME` |
+| `ramp KEY STEPS EVERY` | such as `1,5,25,100 1h`; `EVERY` is seconds, or `90s`, `30m`, `1h` or `2d` |
+| `pause`, `resume`, `cancel KEY` | the flag's ramp |
+| `reset KEY` | delete what is stored: back to the default |
+| `groups`, `group create\|delete\|add\|remove ...` | groups and their members |
+
+Changes go straight to the store, and running nodes pick them up at their
+next check. Each is recorded as made by `--by NAME`, or `cli:$USER`. Output
+goes to standard output; errors go to standard error, with exit status 1
+when a command fails and 2 when it was not understood.
+
+In a release built with `gleam export erlang-shipment`, run it from the
+release directory, with the arguments after `-extra`:
+
+```sh
+erl -pa */ebin -noshell -eval 'tasks@flags:main()' -extra kill new_checkout
+```
+
+`export` prints the flags as the code defines them, for a tool that
+prepares somewhere to keep them before they are turned on:
+
+```json
+{"format":1,"flags":[{"key":"new_checkout","description":"Stripe-hosted checkout","default":false}]}
+```
+
+`format` changes only if a field changes meaning or goes away; new fields
+may be added. `flags.to_json` returns the same JSON as a value, and
+`flags.export` prints it on its own.
+
+## Stores
+
+A store loads a `Snapshot` of everything kept (settings, groups and a
+version that rises with every change), reports its version cheaply, and
+lists recent history. A store with a `Writer` can also be changed, through
+the management functions, the admin and the command line;
+`flags.writable(features)` says whether this one can.
+
+- `howdy/flags/database` keeps them in a Gloo Repo, on PostgreSQL or
+  SQLite, in the `howdy_flags_` tables its `schema()` creates. Nodes
+  sharing the database share the flags, and a ramp step is taken once
+  however many nodes see it due.
+- `howdy/flags/memory` keeps them in one process: for tests, or an app on
+  one node without a database. `memory.from(snapshot)` starts from a
+  snapshot, such as one read from a file, and `memory.stop` ends the
+  process.
+- `flags.store(named:, load:, version:, history:)` builds a read-only
+  store over anything else, such as a service that manages the flags and
+  pushes their settings to the app. `flags.with_writer` makes one
+  writable, and `flags.with_stop` says how to close it.
+
+`flags.snapshot_to_json` and `flags.snapshot_decoder` are the JSON form of
+a snapshot, what `list --json` prints, for moving settings between
+systems:
+
+```json
+{"format":1,"version":12,
+ "settings":{"new_checkout":{"killed":false,"rollout":500,"bucketing":"user",
+   "allowed":["group:beta"],"blocked":[],
+   "ramp":{"steps":[100,500,10000],"every":3600,"next":1790000000}}},
+ "groups":[{"name":"beta","description":"Beta testers","members":["org:acme"]}]}
+```
+
+Whatever the store, a rollout position is the same SHA-256 of the flag's
+key and the id, so anything that computes who is in a rollout agrees with
+the app.
+
+## Testing
+
+Start the flags on a memory store in tests, so each test begins from the
+defaults and nothing is shared with the development database. A test that
+needs a flag on for one user allows them and checks the result:
+
+```gleam
+import howdy/flags
+import howdy/flags/memory
+
+pub fn early_access_is_off_by_default_test() {
+  let assert Ok(features) =
+    flags.new(memory.new()) |> flags.register(all_flags()) |> flags.start
+  assert !flags.enabled(features, new_checkout(), for: flags.user("42"))
+
+  let assert Ok(Nil) =
+    flags.allow(features, "new_checkout", flags.User("42"), by: "test")
+  assert flags.enabled(features, new_checkout(), for: flags.user("42"))
+  flags.stop(features)
+}
+```
+
+A change made on the node applies before the call returns, so nothing has
+to wait for the next check.

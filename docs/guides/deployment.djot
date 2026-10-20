@@ -1,0 +1,382 @@
+# Deploying
+
+A project made by [`howdy new`](/docs/cli/new) is ready to deploy as a
+container image. It comes with a `Dockerfile` that builds one, and a
+`bin/start` script that runs the app inside it. The app answers health
+checks at `/up`, stops cleanly when it is told to, and migrates its
+database as it starts.
+
+This guide builds the image, runs it, and covers what every deploy needs to
+get right: configuration, migrations, stopping, a shell on the running app,
+and clusters. It ends with examples for Kamal, Kubernetes and a plain
+server.
+
+A project made with `--no-docker` has none of these files.
+[`howdy add docker`](/docs/cli/add) adds them, and everything but the image
+applies without them.
+
+## Build the image
+
+```sh
+docker build -t my_app .
+```
+
+The `Dockerfile` builds in two stages:
+
+1. The build stage copies Gleam's binary onto the official `erlang` Alpine
+   image. It downloads the dependencies first, in a layer of their own, so
+   a change to your code does not download them again. Then it runs
+   `gleam export erlang-shipment`, which compiles the app and its
+   dependencies and leaves out `dev/`, `test/` and the dev dependencies.
+2. The image you run starts from the same `erlang` image, so compiled code
+   and native drivers, such as SQLite's, match the Erlang they run on. It
+   holds the shipment and `bin/start`, runs as an unprivileged user called
+   `app`, and listens on `0.0.0.0:8787`.
+
+The Gleam and Erlang/OTP versions are the ones installed where you ran
+`howdy new`, set at the top of the `Dockerfile`:
+
+```dockerfile
+ARG GLEAM_VERSION=v1.19.2
+ARG ERLANG_VERSION=29
+```
+
+Change them there when you upgrade either, so the image builds with what
+you develop with. `--build-arg` overrides them for one build.
+
+Build for the servers' architecture. From a Mac with Apple silicon to an
+x86 server, that is `docker build --platform linux/amd64`.
+
+`.dockerignore` keeps `build/`, `.env`, crash dumps and local SQLite
+databases out of the build.
+
+## Run it
+
+With SQLite, the database lives in a volume at `/data`, so it outlives the
+container:
+
+```sh
+docker run -d --name my_app -p 8787:8787 -v my_app_data:/data my_app
+```
+
+With PostgreSQL, give it the database's URL:
+
+```sh
+docker run -d --name my_app -p 8787:8787 \
+  -e DATABASE_URL=postgres://user:password@db.internal:5432/my_app \
+  my_app
+```
+
+To try the image beside the PostgreSQL from `docker-compose.yml`, run the
+`app` profile:
+
+```sh
+docker compose --profile app up --build
+```
+
+Once the app is serving, `/up` answers and Docker reports the container as
+healthy:
+
+```sh
+curl http://127.0.0.1:8787/up
+docker ps
+```
+
+The image's `HEALTHCHECK` asks `/up` every ten seconds. It allows thirty
+seconds for the app to start before a failure counts.
+
+## Configuration
+
+The app reads its configuration from the environment as it starts, in
+`main`. Set it on the platform:
+
+- `HOST` and `PORT`: where the app listens. The image sets them to
+  `0.0.0.0` and `8787`.
+- `DATABASE_URL`, with PostgreSQL: the database to connect to.
+- `DATABASE_PATH`, with SQLite: the database file. The image sets it to
+  `/data/my_app.sqlite3`.
+- `MIGRATE_ON_START`: `false` to leave migrations to a
+  [step of their own](#Migrations).
+- `OTEL_EXPORTER_OTLP_ENDPOINT`: an OpenTelemetry collector to send traces
+  to, in a project made without `--minimal`; see
+  [Telemetry](/docs/telemetry/overview).
+- `HOWDY_NODE_NAME`, `HOWDY_COOKIE` and `HOWDY_DIST_PORT`: Erlang
+  distribution, for a [shell](#A-shell-on-the-running-app) or a
+  [cluster](#Clusters).
+
+Packages added with [`howdy add`](/docs/cli/add) read their own:
+
+- auth: `APP_ORIGIN`, the site's public address, such as
+  `https://my-app.example.com`. Sign-in links and cookies are made for it.
+- mail: `MAIL_FROM`, and one of `SMTP_URL`, `RESEND_API_KEY` or
+  `SENDGRID_API_KEY` to send through.
+- remote: `RPC_TOKEN`, which callers over HTTP must send.
+
+`.env.example` lists the ones a project uses. Do not ship a `.env` file:
+values in it override the environment. `.dockerignore` keeps it out of the
+image.
+
+## Migrations
+
+By default the app applies pending migrations as it starts, before it
+serves a request:
+
+- Migrations run in one transaction, holding a lock. Copies of the app that
+  start together take turns, and the ones that come second find nothing
+  left to do.
+- A migration that fails stops the start. The new version never answers
+  `/up`, so a platform that waits for it keeps the old version serving.
+
+To migrate as a step of its own, before the new version starts, set
+`MIGRATE_ON_START=false` on the app and run the image with `migrate`:
+
+```sh
+docker run --rm -e DATABASE_URL=postgres://... my_app migrate
+docker run --rm -v my_app_data:/data my_app migrate
+```
+
+`migrate` applies what is pending, prints how many migrations it applied,
+and exits. It exits with an error if one fails.
+
+### Migrations the old version survives
+
+Most deploys start the new version before stopping the old, so for a while
+the old code runs against the new schema. Write migrations it can live
+with:
+
+- Add a column as nullable or with a default, so the old code's inserts
+  still work.
+- Add a column or table in one release, and use it in the next.
+- Stop using a column in one release, and drop it in the next.
+- Rename in steps: add the new column, write to both, move the data across,
+  then drop the old one.
+
+## Stopping
+
+Platforms stop an app by sending it `SIGTERM`, then kill it if it is still
+running after a while. A Howdy app stops cleanly in that time:
+
+1. The server stops accepting connections.
+2. Requests in flight get 8 seconds to finish, and WebSockets are closed
+   with a going-away frame.
+3. The rest of the app's supervision tree stops, and the VM exits.
+
+The 8 seconds fit inside the 10 that `docker stop` waits. Change them with
+`howdy.shutdown_timeout` in `configured`, in `src/my_app.gleam`, and keep
+them below the platform's wait:
+
+- `docker stop`: 10 seconds, or `stop_grace_period` in Docker Compose
+- Kamal: `drain_timeout`, 30 seconds
+- Kubernetes: `terminationGracePeriodSeconds`, 30 seconds
+
+[Supervision and shutdown](/docs/guides/supervision) explains how `main`
+sets this up.
+
+## A shell on the running app
+
+`bin/start remote` opens an Erlang shell inside the running app. It
+connects to the app over Erlang distribution, so the app must run as a
+named node. Set `HOWDY_NODE_NAME` and `HOWDY_COOKIE`. To keep distribution
+on the container's loopback, where only `remote` uses it, set these too:
+
+```sh
+docker run -d --name my_app -p 8787:8787 -v my_app_data:/data \
+  -e HOWDY_NODE_NAME=my_app@localhost \
+  -e HOWDY_COOKIE="$(openssl rand -hex 32)" \
+  -e ERL_EPMD_ADDRESS=127.0.0.1 \
+  -e ERL_FLAGS="-kernel inet_dist_use_interface {127,0,0,1}" \
+  my_app
+```
+
+Then open the shell in the same container, where those variables are
+already set:
+
+```sh
+docker exec -it my_app bin/start remote
+```
+
+It is an Erlang shell, not a Gleam one: GSH is a dev dependency, so it is
+not in the image. Gleam modules are Erlang modules with `@` for `/`, and
+strings are written `<<"like this">>`. The shortcuts in `src/console.gleam`
+work as they do in the [console](/docs/guides/console):
+
+```
+(my_app@localhost)1> console:todos().
+{ok,[{todo,1,<<"hello">>,false}]}
+```
+
+Everything you type runs in the app, with its database and its data.
+Leave with `Ctrl+G` and then `q`. *Do not type `q().`*: in a remote shell it
+stops the app.
+
+`bin/start` writes the cookie to `~/.erlang.cookie`, where Erlang reads it,
+rather than putting it on a command line where any process could see it.
+Anyone with the cookie who can reach the node can run any code in it, so
+keep the cookie secret.
+
+## Clusters
+
+Copies of the app on different servers can connect as an Erlang cluster.
+[Howdy Remote](/docs/remote/clusters) calls procedures across it, and
+channels and presence reach every node. Give each node a name the others
+can reach it by, and the same cookie:
+
+- `HOWDY_NODE_NAME`: the node's name, with a host the other nodes can
+  reach, such as `my_app@10.0.0.5` or `my_app@app-1.internal`. A host with a
+  dot gets a full name (`-name`) and one without a short name (`-sname`).
+  An IPv6 address switches distribution to IPv6.
+- `HOWDY_COOKIE`: the secret every node shares.
+- `HOWDY_DIST_PORT`: the port the node listens on for other nodes, rather
+  than a random one, so a firewall can allow it.
+
+Other nodes find it through EPMD on port 4369, and then connect on the
+distribution port. Open both between the servers, on a private network
+only. Nodes do not find each other on their own: connect them with
+`remote.connect_to`, which reconnects a node that drops.
+
+Read [Distribution is full trust](/docs/remote/clusters) before you do.
+
+## Kamal
+
+[Kamal](https://kamal-deploy.org) deploys images to your own servers, behind
+a proxy that waits for each new container to answer `/up` before sending
+it traffic. That is the path the app answers, so a `config/deploy.yml` needs
+little:
+
+```yaml
+service: my_app
+image: my-user/my_app
+
+servers:
+  web:
+    - 192.0.2.10
+
+proxy:
+  host: my-app.example.com
+  ssl: true
+  app_port: 8787
+
+registry:
+  username: my-user
+  password:
+    - KAMAL_REGISTRY_PASSWORD
+
+builder:
+  arch: amd64
+
+env:
+  clear:
+    APP_ORIGIN: https://my-app.example.com
+  secret:
+    - DATABASE_URL
+```
+
+`.kamal/secrets` says where the secrets come from, such as
+`DATABASE_URL=$DATABASE_URL`. Then `kamal setup` deploys for the first
+time, and `kamal deploy` after that.
+
+The new container migrates as it starts, and the proxy keeps sending
+traffic to the old one until the new one is healthy. Kamal waits
+`deploy_timeout`, 30 seconds by default, so raise it for migrations that
+take longer. To migrate by hand, Kamal runs the image's commands:
+
+```sh
+kamal app exec migrate
+kamal app exec -i --reuse "bin/start remote"
+```
+
+The first starts a container of its own; the second runs inside the
+container that is serving, so it needs the node name and cookie in `env`.
+
+With SQLite, keep the database in a volume and deploy to one server:
+
+```yaml
+volumes:
+  - my_app_data:/data
+```
+
+During a deploy, the old and new containers use the database at the same
+time for a few seconds. They share the server's disk, so SQLite's locks
+keep them apart.
+
+## Kubernetes
+
+```yaml
+spec:
+  terminationGracePeriodSeconds: 30
+  containers:
+    - name: my-app
+      image: registry.example.com/my_app:1.4.0
+      ports:
+        - containerPort: 8787
+      env:
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: my-app
+              key: database-url
+      startupProbe:
+        httpGet:
+          path: /up
+          port: 8787
+        failureThreshold: 30
+        periodSeconds: 2
+      livenessProbe:
+        httpGet:
+          path: /up
+          port: 8787
+      readinessProbe:
+        httpGet:
+          path: /up
+          port: 8787
+      lifecycle:
+        preStop:
+          exec:
+            command: ["sleep", "5"]
+```
+
+- The startup probe gives the app a minute to migrate and start before the
+  liveness probe can restart it.
+- Kubernetes sends `SIGTERM` at about the time it stops routing to the
+  pod, so requests can still arrive for a few seconds after. The `preStop`
+  sleep lets those land before the server stops listening.
+- For a readiness probe that also checks the database, mount a second
+  health check at `/ready`; see
+  [Health checks](/docs/guides/health-checks).
+- To migrate before a rollout, set `MIGRATE_ON_START` to `false` and run
+  the image as a `Job` with `args: ["migrate"]`.
+
+## Without Docker
+
+The shipment runs anywhere with the same Erlang/OTP version it was built
+with. Build it, and put `bin/start` in its `bin/` folder:
+
+```sh
+gleam export erlang-shipment
+mkdir -p build/erlang-shipment/bin
+cp bin/start build/erlang-shipment/bin/
+```
+
+Copy `build/erlang-shipment` to the server, and run it with a service
+manager. A `systemd` unit:
+
+```ini
+[Unit]
+Description=my_app
+After=network.target
+
+[Service]
+User=my_app
+ExecStart=/srv/my_app/bin/start run
+EnvironmentFile=/etc/my_app/env
+Restart=on-failure
+TimeoutStopSec=15
+
+[Install]
+WantedBy=multi-user.target
+```
+
+`systemd` stops the app with `SIGTERM`, as a container runtime does.
+`/etc/my_app/env` holds the [configuration](#Configuration), one
+`NAME=value` per line. Run `/srv/my_app/bin/start migrate` with the same
+environment to migrate by hand.

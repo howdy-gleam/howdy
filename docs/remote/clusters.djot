@@ -21,6 +21,11 @@ ERL_FLAGS="-sname web -setcookie $COOKIE" gleam run -m web
 `-sname` is enough for nodes on one machine. For nodes on different hosts,
 use a full name such as `-name users@10.0.0.5`.
 
+In a project made by `howdy new`, `bin/start` takes them from the
+environment instead: `HOWDY_NODE_NAME`, `HOWDY_COOKIE`, and
+`HOWDY_DIST_PORT` to pin the distribution port. See
+[Deploying](/docs/guides/deployment#Clusters).
+
 Connect each node to one other, and Erlang connects it to the rest:
 
 ```gleam

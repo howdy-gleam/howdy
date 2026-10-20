@@ -1,0 +1,136 @@
+# Feature flags
+
+`howdy_flags` is an optional package for feature flags: switches defined
+in code and changed while the app runs. A flag can be turned off for
+everyone at once, allowed or blocked for particular users, organizations
+and groups, and [rolled out gradually](/docs/flags/rollouts) to a share of
+users. Where the settings are kept is up to a [store](/docs/flags/management):
+the app's database, one process's memory, or a service that manages them
+for you.
+
+```toml
+howdy_flags = { git = "https://github.com/mikeyjones/howdy.git", ref = "v1.0.0", path = "flags" }
+```
+
+In a project made with `howdy new`, `howdy add flags`
+adds the package, a module for the app's flags with an example, a task
+module for the [command line](/docs/flags/management), and a test. Flags
+keep their settings in the app's database, so the project needs
+`howdy_database`.
+
+## Defining flags
+
+A flag is a key, a description and a default. Its key is 1 to 100 of
+`a-z`, `0-9`, `_`, `.` and `-`, and is how the flag is stored, so renaming
+it starts the flag afresh. With nothing stored for it, its default
+applies, so a flag works in tests, on a fresh deployment, and before anyone
+has touched it.
+
+```gleam
+import howdy/flags
+
+pub fn new_checkout() -> flags.Flag {
+  flags.flag("new_checkout", description: "Stripe-hosted checkout")
+}
+
+// A finished feature kept behind a kill switch.
+pub fn search_v2() -> flags.Flag {
+  flags.flag("search_v2", description: "New search") |> flags.on_by_default
+}
+
+pub fn all_flags() -> List(flags.Flag) {
+  [new_checkout(), search_v2()]
+}
+```
+
+Keep every flag in one list, so startup, the admin and the command line
+agree on what exists. Management refuses changes to keys that are not
+registered, though checks work for any flag.
+
+## Starting
+
+Run the database store's schema with the app's other
+[migrations](/docs/database/migrations), open a store on the database,
+then start the flags once at startup and hand them to the app through its
+services:
+
+```gleam
+import howdy/flags
+import howdy/flags/database as flags_database
+import howdy/migration
+
+let assert Ok(Nil) = migration.run(db, [flags_database.schema()])
+let assert Ok(store) = flags_database.store(db)
+let assert Ok(features) =
+  flags.new(store)
+  |> flags.register(all_flags())
+  |> flags.start
+```
+
+`flags.start` loads the settings and starts a process, the keeper, that
+keeps them current, linked to the caller. In an app, prefer
+`flags.supervised(config)`, which returns the handle and a child
+specification to put under a [supervisor](/docs/guides/supervision): the
+handle keeps working across restarts of the keeper. The store refuses to
+start on a database whose schema has not been migrated.
+
+For tests, or an app on one node without a database, `howdy/flags/memory`
+keeps the settings in a process instead:
+
+```gleam
+import howdy/flags/memory
+
+let assert Ok(features) =
+  flags.new(memory.new()) |> flags.register(all_flags()) |> flags.start
+```
+
+## Checking a flag
+
+`flags.enabled` says whether a flag is on for someone. Checks read an
+in-memory copy of the settings and never query the store, so they are cheap
+enough to call on every request:
+
+```gleam
+case flags.enabled(features, new_checkout(), for: flags.user(user.id)) {
+  True -> new_checkout_page(ctx)
+  False -> checkout_page(ctx)
+}
+```
+
+Who the check is for is an actor: `flags.user(id)`,
+`flags.organization(id)`, both with `flags.user(id) |>
+flags.in_organization(org)`, or `flags.anonymous()`. The ids are yours,
+such as a [Howdy Auth](/docs/auth/overview) user id: the package does not
+depend on `howdy_auth`.
+
+`flags.explain` returns a `Decision` saying why the flag is on or off, for
+support and debugging, and `flags.is_on` turns it back into a boolean.
+
+## What decides a check
+
+In this order, the first that applies wins:
+
+1. Nothing stored for the flag: its default, `Default(on:)`.
+2. The kill switch is on: off, `Killed`.
+3. A block rule names the user, their organization, or a group either is
+   in: off, `Blocked(target)`.
+4. An allow rule names one of them: on, `Allowed(target)`.
+5. Their rollout position is below the rollout: on, `InRollout`. Otherwise
+   off, `OutsideRollout`.
+
+Someone without the id the rollout is by, such as an anonymous user in a
+rollout by user, gets `NoPosition` and only sees the flag at 100%.
+
+## Seeing changes
+
+A change made on a node applies there before the call that made it
+returns. Other nodes ask the store for its version every two seconds and
+reload when it has moved, so that is the longest a kill switch takes to
+reach every node. `flags.check_every(config, milliseconds:)` sets the
+interval, from 100 ms to a minute, and `flags.refresh(features)` reloads
+now and waits for it. If the store becomes unreachable, checks keep the
+last settings they loaded.
+
+In development the [admin area](/docs/admin/overview) shows the flags under
+Flags, with their kill switches, rules, groups and history, once they are
+registered with `admin.flags(features)`.

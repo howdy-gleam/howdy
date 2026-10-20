@@ -150,6 +150,11 @@ calls `init:stop()` too, so keep `main` alive with `process.sleep_forever()`
 and let a signal end it. Give the runtime a stop timeout longer than
 `howdy.shutdown_timeout`, or the drain is cut short.
 
+A project made by `howdy new` has `bin/start`, which starts the shipment
+with a node name and cookie from the environment and runs its migrations,
+and a `Dockerfile` that builds it into an image; see
+[Deploying](/docs/guides/deployment).
+
 ### Configuration
 
 A release has no `gleam run` and no project directory, so read what the

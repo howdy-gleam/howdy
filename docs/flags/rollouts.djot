@@ -1,0 +1,115 @@
+# Rollouts, rules and groups
+
+A flag's settings are changed through the management functions in
+`howdy/flags`, and the same operations are offered by the
+[admin and the command line](/docs/flags/management). Every change is
+recorded in the flag's history under the name given as `by`, and can be
+undone. These operations are privileged: authorize the caller first.
+
+## The kill switch
+
+The kill switch turns a flag off for everyone at once, whatever its rules
+and rollout say, and `revive` lets those apply again:
+
+```gleam
+flags.kill(features, "new_checkout", by: "mike")
+flags.revive(features, "new_checkout", by: "mike")
+```
+
+Keep a finished feature behind a flag that is `on_by_default` for a while
+after release, so it can be killed without a deployment.
+
+## Rollouts
+
+Every user has a position from 0 to 99.99% for each flag, worked out from
+a SHA-256 of the flag's key and their id: nothing is stored per user, and
+the position never changes. A rollout of 20% is on for everyone below
+20%, so:
+
+- raising a rollout only adds people;
+- pausing is leaving it where it is;
+- rolling back from 20% to 5% removes exactly the people added after 5%,
+  and the first 5% keep it;
+- each flag picks a different first 5%, because the key is hashed too.
+
+Rollouts are in hundredths of a percent: `flags.percent(25)` is `2500`,
+and `flags.percent_to_string(1250)` is `12.5%`.
+
+```gleam
+flags.set_rollout(features, "new_checkout", to: flags.percent(5), by: "mike")
+```
+
+A rollout is by user unless `set_bucketing` makes it by organization.
+Then everyone in an organization is in or out together, so colleagues see
+the same app:
+
+```gleam
+flags.set_bucketing(features, "new_checkout", to: flags.ByOrganization, by: "mike")
+```
+
+Someone without the id the rollout is by only gets the flag at 100%.
+`flags.position(key, target)` gives a position, so anything else that
+works out who is in a rollout agrees with the app.
+
+Rolling back changes which code runs, not the data the new code already
+wrote: the old path has to cope with it.
+
+## Ramps
+
+A ramp raises the rollout through steps on a schedule, such as 1%, 5%,
+25%, 50% and 100% an hour apart:
+
+```gleam
+flags.start_ramp(
+  features,
+  "new_checkout",
+  steps: [100, 500, 2500, 5000, 10_000],
+  every: 3600,
+  by: "mike",
+)
+```
+
+Every running node checks for due steps at its regular check; each flag's
+row is locked while a step is taken, so a step is taken once however many
+nodes see it due. Killing the flag or changing the rollout by hand pauses
+the ramp, as does `pause_ramp`; `resume_ramp` carries on from the next
+step above the current rollout, and `cancel_ramp` forgets it.
+
+## Groups and rules
+
+A group is a named set of users and organizations, such as staff or beta
+testers. Rules allow or block a flag for a user, an organization or a
+group, named by a `Target`: `flags.User(id)`, `flags.Organization(id)` or
+`flags.Group(name)`.
+
+```gleam
+flags.create_group(features, "beta", description: "Beta testers", by: "mike")
+flags.add_member(features, "beta", flags.Organization("acme"), by: "mike")
+flags.allow(features, "new_checkout", flags.Group("beta"), by: "mike")
+flags.block(features, "new_checkout", flags.User("42"), by: "mike")
+flags.unlist(features, "new_checkout", flags.User("42"), by: "mike")
+```
+
+A block rule wins over an allow rule, and both win over the rollout. A
+group that a rule names cannot be deleted: remove the rule first, so no
+flag changes without a record in its history. `flags.groups` lists the
+groups and their members.
+
+## History and undo
+
+Every change records who made it, when, a summary such as
+`Rollout 5% → 20%`, and the setting before and after. `flags.history`
+lists them, newest first, for one flag or all of them:
+
+```gleam
+let assert Ok(changes) = flags.history(features, flag: Some("new_checkout"), limit: 20)
+```
+
+`flags.undo(features, change: id, by:)` puts the flag back as it was
+before a change, recorded as a change of its own, with any ramp paused.
+`flags.forget` deletes what is stored for a flag, putting it back to its
+default; it also tidies away keys the code no longer registers.
+
+`flags.setting(features, key)` and `flags.settings(features)` read what is
+stored, as a `Setting` with the kill switch, rollout, bucketing, rules and
+ramp.

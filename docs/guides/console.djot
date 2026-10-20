@@ -162,6 +162,11 @@ machine, use a long random cookie kept out of source control, and connect
 through a private network or an SSH tunnel. Treat console access like root
 access to the database.
 
+GSH is a dev dependency, so a deployed app does not have it. An app deployed
+from a `howdy new` project's image has `bin/start remote` instead, an Erlang
+shell inside it where the same shortcuts work; see
+[A shell on the running app](/docs/guides/deployment#A-shell-on-the-running-app).
+
 ## Pause a request and look inside
 
 GSH can also stop a process at a point in your code and let you evaluate

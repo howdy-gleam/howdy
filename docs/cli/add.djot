@@ -1,0 +1,184 @@
+# Adding packages
+
+The `howdy add` commands add an optional Howdy package to the project you
+are in and wire it up: the dependency in `gleam.toml`, from the same release
+as the project's other Howdy packages, the code that configures it, its
+place in the app's services, the dev server and the test support, its
+migrations after the app's own, and its pages in the dev admin. Each also
+adds a guide to `.claude/skills/` and a note to `AGENTS.md`, so a coding
+agent knows how to use it.
+
+```sh
+howdy add auth
+howdy add mail
+howdy add flags
+howdy add openapi
+howdy add remote
+```
+
+`howdy add docker` is the exception: it adds no package and downloads
+nothing, only the files to [deploy](/docs/guides/deployment) in a container,
+for a project made without them.
+
+Each command runs `gleam deps download` afterwards, unless `--skip-deps`
+says not to, and takes `--dry-run`, `--json` and `--plain` like the other
+commands; see [The howdy command](/docs/cli/overview). A package that keeps
+data in the database needs a project made with one.
+
+## Auth
+
+```sh
+howdy add auth
+```
+
+Adds sign-in and roles with [Howdy Auth](/docs/auth/overview). It writes
+`src/<project>/platform/accounts.gleam`, which builds the app's identity and
+permissions, and the tests for it, and gives the app:
+
+- sign-in and registration by a link or six-digit code emailed to the
+  address, with the account made once the email is used;
+- roles, defined in code or in the dev admin, checked in guards;
+- the pages `/auth/login`, `/auth/register` and `/auth/account`, and the
+  JSON API at `/api/auth`.
+
+The app's services get `identity` and `permissions`, built in `main`, the
+dev server and the test support. Auth's migrations run after the app's own.
+With the dev admin, `/_howdy` gets users, groups and roles, lets you sign
+in as anyone, and previews auth's emails. Guard a controller with
+`controller.guarded("/account", auth.required(services.identity))`, and
+`ctx.guard.user` is then the user. Set `APP_ORIGIN` to the site's public
+address before deploying, as `.env.example` says: links and cookies are for
+it.
+
+Sign-in tokens are emailed, so a project without mail gets it too, as with
+`howdy add mail`. A project made with `--api-only` gets the JSON API
+without the pages, and its emails carry the code without a link.
+
+From then on `--add-auth` on the [`howdy create`](/docs/cli/create)
+commands guards what they create.
+
+## Mail
+
+```sh
+howdy add mail
+```
+
+Adds email with [Howdy Mail](/docs/mail/overview), and smail for writing
+templates. It writes:
+
+- `src/<project>/platform/email.gleam`, the mailer `gleam run` uses, built
+  from the environment;
+- `src/<project>/emails/welcome_email.gleam`, an example email, and its
+  preview;
+- `src/<project>/emails/previews.gleam`, every email built from sample
+  data, and a test that each can be sent.
+
+A mailer goes in the app's services, so controllers send with
+`services.mailer`. Under `gleam run` it sends through `SMTP_URL`,
+`RESEND_API_KEY` or `SENDGRID_API_KEY`, whichever is set, and logs each
+email when none is. Under `gleam dev` email is kept in an outbox in
+`tmp/mail`, which the dev admin shows under Mail with the previews. Under
+`gleam test` it is kept in an in-memory outbox. Add more emails with
+[`howdy create email`](/docs/cli/create).
+
+## Flags
+
+```sh
+howdy add flags
+```
+
+Adds [feature flags](/docs/flags/overview) with Howdy Flags, kept in the
+app's database. It writes:
+
+- `src/<project>/feature_flags.gleam`, the flags with an example,
+  `early_access`, and their starting;
+- `src/tasks/flags.gleam`, which manages them from the command line:
+  `gleam run -m tasks/flags help`;
+- a test that turns the example on for one user.
+
+The app's services get `features`, started in `main`, the dev server and
+the test support, and the flags' migrations run after the app's own. With
+the dev admin, `/_howdy` gets Flags: kill switches, rules, groups and
+history. Check a flag with
+`flags.enabled(services.features, feature_flags.early_access(), for: flags.user(id))`.
+
+## OpenAPI
+
+```sh
+howdy add openapi
+```
+
+Adds an [OpenAPI document](/docs/openapi/overview) with Howdy OpenAPI. It
+writes `src/<project>/platform/api_docs.gleam`, with the document's title,
+version and security schemes, and a test that the document and the
+reference page are served. The app serves, after its controllers:
+
+- `/openapi.json`, the document;
+- `/docs`, a reference page to read it.
+
+The document lists the routes written with `howdy/openapi/endpoint`, from
+the schemas they read. Existing controllers are left as they are, so it
+starts empty: move a route to an endpoint to publish it. With the dev
+admin, `/_howdy` finds the document and lists every endpoint under API,
+where you can call them.
+
+## Remote
+
+```sh
+howdy add remote
+```
+
+Adds typed calls between services with
+[Howdy Remote](/docs/remote/procedures). It writes:
+
+- `src/<project>/procedures.gleam`, the procedures the app serves: a name,
+  an input and an output;
+- `src/<project>/platform/rpc.gleam`, the server that answers them, and the
+  RPC token;
+- a test that calls the example procedure both ways.
+
+The procedures are served two ways. Over the cluster, `main` and the dev
+server start the server, so other nodes connected to this one call it with
+`remote.cluster()`. Over HTTP, the app mounts `POST /rpc/<procedure name>`
+for callers that send `authorization: Bearer $RPC_TOKEN`; without
+`RPC_TOKEN` it refuses them all. The token is in the app's services as
+`rpc_token`. Call another service with
+`remote.call(target, procedure, input, timeout: 5000)`.
+
+## Docker
+
+```sh
+howdy add docker
+```
+
+Adds the files `howdy new` writes for containers, to a project made with
+`--no-docker` or by an older CLI:
+
+- `Dockerfile`, which builds an image of the app on the Gleam and
+  Erlang/OTP versions installed here, with a `HEALTHCHECK` on `/up`;
+- `.dockerignore`, which keeps `build/`, `.env` and local databases out of
+  it;
+- `bin/start`, which starts the app in the image: `run`, `migrate` with a
+  database, and `remote`.
+
+A file the project already has is left as it is, and the command says
+which. If `app()` does not mount a
+[health check](/docs/guides/health-checks), one is added at `/up`, which the
+image's `HEALTHCHECK` asks. Two things in an older project it leaves for
+you, and says how:
+
+- a `main` that starts the server with `howdy.start` rather than
+  `howdy.start_application`, so `SIGTERM` cuts off requests in flight; see
+  [Supervision and shutdown](/docs/guides/supervision);
+- with a database, a missing `src/tasks/migrate.gleam`, which
+  `bin/start migrate` runs.
+
+## Flags
+
+- `--skip-deps`: do not run `gleam deps download` after changing
+  `gleam.toml`.
+- `--dry-run`: show which files would be created and modified, without
+  changing the project.
+- `--json`: print the result as one JSON object: the files created and
+  modified, steps left to do by hand, and what to do next.
+- `--plain`: print progress as plain lines instead of animating.

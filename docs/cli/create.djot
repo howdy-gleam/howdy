@@ -1,7 +1,8 @@
 # Generating code
 
-The `howdy create` commands add a database table to the project you are in,
-with as much code around it as you ask for:
+The `howdy create` commands write code into the project you are in, in the
+shape `howdy new` gave it, with tests, and register it in the app. Four of
+them add a database table with as much code around it as you ask for:
 
 - `howdy create controller` writes the table, a record, its database
   operations and a JSON API.
@@ -11,10 +12,22 @@ with as much code around it as you ask for:
   operations, with no routes.
 - `howdy create migration` writes only the table.
 
+The rest add one thing at a time:
+
+- `howdy create page` and `howdy create live_page` add a page to a
+  controller, creating the controller if needed.
+- `howdy create component` and `howdy create live_component` add a
+  reusable piece of view.
+- `howdy create layout` adds a layout for pages to render through.
+- `howdy create email` adds an email, once the project has
+  [mail](/docs/cli/add).
+
 Run them from inside a project made with [`howdy new`](/docs/cli/new). The
-project must have a database, so they do not work in one created with
-`--no-database`. Whether it is SQLite or PostgreSQL is detected from
-`gleam.toml`, and the generated column types follow it.
+commands that write a table need a database, so they do not work in one
+created with `--no-database`. Whether it is SQLite or PostgreSQL is detected
+from `gleam.toml`, and the generated column types follow it. Every command
+takes `--dry-run` to show what it would write, and `--json` for a result a
+script can read; see [The howdy command](/docs/cli/overview).
 
 ## A controller
 
@@ -27,7 +40,7 @@ and the module of database operations. The second is the singular, which
 names the record module and its type. The rest are the fields, described
 below.
 
-This creates the slice `src/<project>/users/`:
+This creates the feature `src/<project>/features/users/`:
 
 - `user.gleam` holds the `User` record, input validation, JSON codecs and
   the database table.
@@ -47,8 +60,10 @@ The command also writes:
 
 - `migrations/create_users.gleam`, a migration that creates the `users`
   table, numbered one above the highest migration in the project
-- `test/<project>/users/users_test.gleam`, tests for the database operations
-- `test/<project>/users/users_controller_test.gleam`, tests for the routes
+- `test/<project>/features/users/users_test.gleam`, tests for the database
+  operations
+- `test/<project>/features/users/users_controller_test.gleam`, tests for
+  the routes
 
 Then it registers the controller in `src/<project>.gleam` and the migration
 in `platform/database.gleam`, and runs `gleam format`. The migration runs the
@@ -68,9 +83,17 @@ For pages that people use rather than a JSON API:
 howdy create pages users user name:string age:int
 ```
 
-`howdy create pages` takes the same arguments and writes the same files,
-with `users_pages.gleam` and its test in place of the controller and its
-test. The pages are:
+`howdy create pages` takes the same arguments and writes the same record,
+operations, migration and tests, with the routes under `/users` and a
+`pages/` folder in the feature:
+
+- `pages/index_page.gleam` shows every user, in a table.
+- `pages/show_page.gleam` shows one user.
+- `pages/new_page.gleam` is the form for a new user.
+- `pages/edit_page.gleam` is the form to change one.
+- `pages/helpers.gleam` holds the form both use, and where a user lives.
+
+The routes are:
 
 - `GET /users` shows every user, in a table.
 - `GET /users/new` shows the form for a new user.
@@ -86,38 +109,33 @@ why update and delete are `POST` routes: an HTML form cannot send `PUT` or
 `DELETE`. A form that fails validation comes back with the values still
 filled in and an error under each field that needs fixing.
 
-The first time you run it, the command also writes two files that every set
-of pages shares:
-
-- `src/<project>/platform/pages.gleam` holds the layout, form reading and
-  redirects.
-- `priv/public/assets/pages.css` holds the styles.
-
-Both are written once and never touched again, so they are yours to edit.
-Change the layout there and every set of pages follows.
-
-The pages are registered in `src/<project>.gleam`, and the migration in
-`platform/database.gleam`, just as for a controller.
+The pages render through the default layout in `src/<project>/layouts/`,
+or the one `--layout` names. The first time you run it, the command also
+writes the form helpers to `platform/pages.gleam` and adds the pages'
+styles to `priv/public/assets/style.css`. Both happen once and serve every
+set of pages, so they are yours to edit.
 
 Pass `--api` to get the JSON controller from `howdy create controller` as
-well, with the pages at `/users` and the API at `/api/users`:
+well, as `users_api_controller.gleam`, with the pages at `/users` and the
+API at `/api/users`:
 
 ```sh
 howdy create pages blog_posts blog_post title body published:bool --api
 ```
 
+`howdy create page users <name>` adds another page to the same controller.
+
 ## A repo
 
 For data without any routes, reached from your own pages or from other
-slices:
+features:
 
 ```sh
 howdy create repo users user name:string email:string age:int
 ```
 
 `howdy create repo` takes the same arguments and writes the same files,
-except `users_controller.gleam` and its test. It registers the migration
-only.
+except the controller and its test. It registers the migration only.
 
 ## A migration
 
@@ -133,6 +151,122 @@ This writes `migrations/create_users.gleam`, adds it to the list in
 It takes the table name alone, without a singular, so every field needs its
 type here. A bare `name` would be mistaken for the singular, and the command
 tells you so.
+
+## A page
+
+```sh
+howdy create page blog about
+```
+
+`howdy create page` writes
+`src/<project>/features/blog/pages/about_page.gleam`, a page ready for your
+content, and adds its route to `blog_controller.gleam` beside the pages
+folder: `/blog/about`, or `/blog` for a page named `index`. A test that the
+page responds goes in `test/<project>/features/blog/pages/`.
+
+If the controller does not exist it is created and registered in
+`src/<project>.gleam`. If it does, the page is added to it and served under
+whatever path the controller already uses. A page that already exists, or
+a route the controller already has, is refused and nothing is written.
+
+The page renders through the default layout, or the one `--layout` names:
+
+```sh
+howdy create page admin index --layout admin
+```
+
+## A live page
+
+```sh
+howdy create live_page dashboard index
+```
+
+`howdy create live_page` writes the same page with a live section: a
+[Lustre server component](/docs/ui/live-components) whose model, update and
+view run on the server, with the browser showing each change it sends over
+a WebSocket. The controller gets two routes, the page at
+`/dashboard` and its WebSocket at `/dashboard/index/live`. Everything else
+is as for `howdy create page`, including `--layout`.
+
+## A component
+
+```sh
+howdy create component price_tag
+howdy create component blog post_card
+```
+
+`howdy create component` writes a view function that returns an element,
+for pages to reuse, with a test that it renders. With one name it is
+global, in `src/<project>/components/price_tag_component.gleam`; with a
+controller first it belongs to that controller, in
+`src/<project>/features/blog/components/`. The controller must exist. Pages
+call `price_tag_component.view()`.
+
+## A live component
+
+```sh
+howdy create live_component notifications
+howdy create live_component blog comments
+```
+
+`howdy create live_component` writes a Lustre server component, global or
+belonging to a controller in the same way. Pages put it on the page with
+`notifications_component.mount()` and render through their layout's
+`render_live`, which loads the script it connects with.
+
+Its WebSocket is routed for you. A component of a controller gets
+`/blog/components/comments/live` in that controller. A global component
+gets `/components/notifications/live` in
+`components/components_controller.gleam`, which the first global live
+component creates and registers in `src/<project>.gleam`. A test that it
+mounts and serves its socket is written beside the other tests.
+
+## A layout
+
+```sh
+howdy create layout admin
+```
+
+`howdy create layout` writes `src/<project>/layouts/admin_layout.gleam`:
+everything around a page's content, from the HTML document with its theme
+and stylesheets to the header. It starts as a copy of the default layout
+`howdy new` wrote, ready for you to change. Pages render through it with
+`render`, or `render_live` when they have live sections. Pass
+`--layout admin` to `create page`, `create live_page` or `create pages` to
+use it.
+
+## An email
+
+```sh
+howdy create email password_reset
+```
+
+`howdy create email` writes `src/<project>/emails/password_reset_email.gleam`,
+an email written with smail, with `build(to:)` to make the message and
+`preview()` to build it from sample data. The preview is added to
+`emails/previews.gleam`, so the dev admin shows it under Mail and the tests
+check that it can be sent. The project needs mail first, from
+[`howdy add mail`](/docs/cli/add).
+
+## Guarding with auth
+
+Once the project has [`howdy add auth`](/docs/cli/add), `--add-auth` guards
+what a command creates with Howdy Auth, so only someone signed in reaches
+it, and anyone else gets 401:
+
+```sh
+howdy create controller notes note body --add-auth
+howdy create pages notes note body --add-auth
+howdy create page account index --add-auth
+howdy create live_component notifications --add-auth
+```
+
+For `create controller` and `create pages` every route is guarded, and
+with `--api` the JSON routes too. The controllers take the app's identity,
+and their tests sign in. For `create page`, `create live_page` and a global
+`create live_component`, the flag applies to the controller the command
+creates. A controller that already exists keeps its guard, or lack of one,
+and `--add-auth` is refused for one without.
 
 ## Fields
 
@@ -157,17 +291,25 @@ built-in Gleam type, such as `list`.
 ## Your code is safe
 
 Existing files are never overwritten. If any file the command would write
-already exists, it stops and writes nothing. The two files shared by every
-set of pages are the exception: when they exist they are kept as they are,
-and the rest is written.
+already exists, it stops and writes nothing. The files shared by every set
+of pages are the exception: when they exist they are kept as they are, and
+the rest is written.
 
-Registering a controller, pages or a migration means editing
-`src/<project>.gleam` and `platform/database.gleam`. If either no longer has
-the shape `howdy new` gave it, it is left alone, and the command prints what
-to add by hand.
+Registering a controller, pages, a component's socket or a migration means
+editing `src/<project>.gleam` and `platform/database.gleam`. If either no
+longer has the shape `howdy new` gave it, it is left alone, and the command
+prints what to add by hand, as `manual_steps` with `--json`.
 
 ## Flags
 
 - `--api`, for `create pages` only: also create the JSON controller under
   `/api/<plural>`.
+- `--layout <name>`, for `create page`, `create live_page` and
+  `create pages`: render through this layout from `src/<project>/layouts/`
+  instead of the default.
+- `--add-auth`: guard the routes with Howdy Auth; needs `howdy add auth`.
+- `--dry-run`: show which files would be created and modified, without
+  changing the project.
+- `--json`: print the result as one JSON object: the files created and
+  modified, steps left to do by hand, and what to do next.
 - `--plain`: print progress as plain lines instead of animating.

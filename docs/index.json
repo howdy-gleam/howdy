@@ -25,6 +25,11 @@
           "description": "Answer load balancers and container platforms at /up, check the database and other dependencies, and give Kubernetes separate liveness and readiness probes."
         },
         {
+          "slug": "deployment",
+          "title": "Deploying",
+          "description": "Build a Howdy app into a container image and run it in production: configuration, migrations, clean stops, a shell on the running app, clusters, and examples for Kamal, Kubernetes and systemd."
+        },
+        {
           "slug": "testing",
           "title": "Testing",
           "description": "Test a Howdy app by sending it requests with howdy/testing, without starting a server."
@@ -48,17 +53,27 @@
         {
           "slug": "overview",
           "title": "The howdy command",
-          "description": "What the howdy command line does, what it needs, and how to run a project with howdy dev."
+          "description": "What the howdy command line does: new projects, generated code, added packages, checks, routes, and how to run a project with howdy dev."
         },
         {
           "slug": "new",
           "title": "Creating a project",
-          "description": "Create a Howdy project with howdy new, on SQLite, PostgreSQL or with no database."
+          "description": "Create a Howdy project with howdy new, on SQLite, PostgreSQL or with no database, as a full site or a JSON backend only, ready to deploy."
         },
         {
           "slug": "create",
           "title": "Generating code",
-          "description": "Generate JSON controllers, CRUD pages, repos and migrations for a Howdy project with howdy create."
+          "description": "Generate JSON controllers, CRUD pages, repos, migrations, pages, live pages, components, layouts and emails for a Howdy project with howdy create."
+        },
+        {
+          "slug": "add",
+          "title": "Adding packages",
+          "description": "Add Howdy Auth, Mail, Flags, OpenAPI or Remote to a project with howdy add, wired into the app, the dev server, the tests and the admin, or the files to deploy it with Docker."
+        },
+        {
+          "slug": "check",
+          "title": "Checking the project",
+          "description": "Format, build and test a project with howdy check, and list every route it serves with howdy routes."
         }
       ]
     },
@@ -427,6 +442,27 @@
           "slug": "schemas",
           "title": "Schemas",
           "description": "Describe a JSON value once and get its decoder, its encoder and its JSON Schema, with constraints checked while decoding."
+        }
+      ]
+    },
+    {
+      "slug": "flags",
+      "title": "Feature flags",
+      "docs": [
+        {
+          "slug": "overview",
+          "title": "Feature flags",
+          "description": "Define feature flags in code with howdy_flags, check them for a user or organization on every request, and switch them while the app runs."
+        },
+        {
+          "slug": "rollouts",
+          "title": "Rollouts, rules and groups",
+          "description": "Kill a flag for everyone, roll it out to a share of users or organizations, ramp it on a schedule, allow or block groups, and undo any change from its history."
+        },
+        {
+          "slug": "management",
+          "title": "Managing flags",
+          "description": "Change flags from the admin area, the command line or your own store, keep them in the database or in memory, and test code that checks them."
         }
       ]
     },
