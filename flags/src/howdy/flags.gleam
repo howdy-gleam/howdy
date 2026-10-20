@@ -1229,7 +1229,7 @@ fn ask(
     Ok(pid) -> {
       let reply = process.new_subject()
       let monitor = process.monitor(pid)
-      process.send(process.named_subject(flags.name), make(reply))
+      send_to(pid, flags.name, make(reply))
       let outcome =
         process.new_selector()
         |> process.select_map(reply, Ok)
@@ -1296,6 +1296,15 @@ fn withdraw(key: #(String, Reference)) -> Nil
 
 @external(erlang, "howdy_flags_ffi", "attempt")
 fn attempt(run: fn() -> a) -> Result(a, String)
+
+/// Send to `pid`, looked up as `name`, without looking it up again: if it
+/// has exited since, the message is dropped instead of crashing the caller.
+@external(erlang, "howdy_flags_ffi", "send_to")
+fn send_to(
+  pid: process.Pid,
+  name: process.Name(message),
+  message: message,
+) -> Nil
 
 /// A store call that raises, rather than returning an error, is an error
 /// like any other: the keeper survives it.

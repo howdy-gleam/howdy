@@ -947,11 +947,7 @@ pub fn subscribers(recipient: String) -> Int {
 /// count changed by a bulk update.
 pub fn announce(recipient: String, event: Event) -> Nil {
   case process.named(fan_out_name()) {
-    Ok(_) ->
-      process.send(
-        process.named_subject(fan_out_name()),
-        Tell(recipient, event),
-      )
+    Ok(fan_out) -> send_to(fan_out, fan_out_name(), Tell(recipient, event))
     Error(Nil) -> broadcast(recipient, event)
   }
 }
@@ -960,8 +956,7 @@ fn announce_unread(notifier: Notifier, recipient: String) -> Nil {
   case process.named(fan_out_name()) {
     // Subscribers on other servers are not known here, so each server
     // counts for its own.
-    Ok(_) ->
-      process.send(process.named_subject(fan_out_name()), Recount(recipient))
+    Ok(fan_out) -> send_to(fan_out, fan_out_name(), Recount(recipient))
     Error(Nil) -> recount(notifier, recipient, False)
   }
 }
@@ -1934,3 +1929,8 @@ fn local_subscribers(recipient: String) -> Int
 
 @external(erlang, "howdy_notifications_ffi", "fan_out_name")
 fn fan_out_name() -> process.Name(FanOut)
+
+/// Send to `pid`, looked up as `name`, without looking it up again: if it
+/// has exited since, the message is dropped instead of crashing the caller.
+@external(erlang, "howdy_notifications_ffi", "send_to")
+fn send_to(pid: Pid, name: process.Name(message), message: message) -> Nil

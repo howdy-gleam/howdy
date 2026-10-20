@@ -1,5 +1,5 @@
 -module(howdy_flags_ffi).
--export([publish/2, current/1, withdraw/1, attempt/1, arguments/0, halt/1, getenv/1]).
+-export([publish/2, current/1, withdraw/1, attempt/1, arguments/0, halt/1, getenv/1, send_to/3]).
 
 %% Each running Flags keeps its settings in persistent_term: every check reads
 %% them without copying, and they change only when someone changes a flag, so
@@ -43,3 +43,10 @@ getenv(Name) ->
         false -> {error, nil};
         Value -> {ok, unicode:characters_to_binary(Value)}
     end.
+
+%% Send to the process a name was looked up as, the way a send to that name
+%% does. Unlike sending to the name again, it does nothing if the process
+%% has exited since, rather than crashing the sender.
+send_to(Pid, Name, Message) ->
+    erlang:send(Pid, {Name, Message}),
+    nil.

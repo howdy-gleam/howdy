@@ -4,7 +4,7 @@
 -module(howdy_notifications_ffi).
 -export([now_ms/0, subscribe/3, unsubscribe/1, broadcast/2, subscribers/1]).
 -export([local_broadcast/2, local_subscribers/1, fan_out_name/0]).
--export([rescue/1]).
+-export([rescue/1, send_to/3]).
 
 -define(TAG, howdy_notifications).
 
@@ -76,3 +76,10 @@ rescue(F) ->
             {error, unicode:characters_to_binary(
                 io_lib:format("~p: ~P", [Class, Reason, 20]))}
     end.
+
+%% Send to the process a name was looked up as, the way a send to that name
+%% does. Unlike sending to the name again, it does nothing if the process
+%% has exited since, rather than crashing the sender.
+send_to(Pid, Name, Message) ->
+    erlang:send(Pid, {Name, Message}),
+    nil.

@@ -69,6 +69,11 @@ type State {
 @external(erlang, "howdy_mail_ffi", "rescue")
 fn rescue(run: fn() -> a) -> Result(a, String)
 
+/// Send to `pid`, looked up as `name`, without looking it up again: if it
+/// has exited since, the message is dropped instead of crashing the caller.
+@external(erlang, "howdy_mail_ffi", "send_to")
+fn send_to(pid: Pid, name: Name(message), message: message) -> Nil
+
 /// An outbox in memory: its messages are gone when the VM stops. It is
 /// linked to the caller; see `supervised` for an app with a supervision
 /// tree.
@@ -264,11 +269,7 @@ pub fn clear(box: Outbox) -> Result(Nil, mail.Error) {
 /// starts without subscribers.
 pub fn subscribe(box: Outbox, notify: fn() -> Nil) -> Nil {
   case process.named(box.name) {
-    Ok(_) ->
-      process.send(
-        process.named_subject(box.name),
-        Subscribe(process.self(), notify),
-      )
+    Ok(pid) -> send_to(pid, box.name, Subscribe(process.self(), notify))
     Error(Nil) -> Nil
   }
 }
@@ -285,7 +286,7 @@ fn ask(
     Ok(pid) -> {
       let reply = process.new_subject()
       let monitor = process.monitor(pid)
-      process.send(process.named_subject(box.name), make_request(reply))
+      send_to(pid, box.name, make_request(reply))
       let answer =
         process.new_selector()
         |> process.select_map(reply, Ok)

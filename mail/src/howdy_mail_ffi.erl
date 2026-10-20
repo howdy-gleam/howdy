@@ -1,5 +1,5 @@
 -module(howdy_mail_ffi).
--export([smtp_send/10, rescue/1]).
+-export([smtp_send/10, rescue/1, send_to/3]).
 
 %% Send one message through gen_smtp and sort the outcome into
 %% {ok, Receipt}, {error, {temporary, Reason}} or {error, {permanent, Reason}}.
@@ -109,3 +109,10 @@ rescue(Fun) ->
         Class:Reason ->
             {error, describe({Class, Reason})}
     end.
+
+%% Send to the process a name was looked up as, the way a send to that name
+%% does. Unlike sending to the name again, it does nothing if the process
+%% has exited since, rather than crashing the sender.
+send_to(Pid, Name, Message) ->
+    erlang:send(Pid, {Name, Message}),
+    nil.
