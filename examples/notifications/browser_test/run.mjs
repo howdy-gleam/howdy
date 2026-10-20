@@ -153,6 +153,10 @@ try {
   await bo.submit('[data-howdy-bell-list] [data-howdy-bell-link]');
   equal(await bo.evaluate(`location.pathname`), '/inbox', 'followed the link');
   await bo.until(`${count}.hidden`);
+  // The link marks it read with a keepalive request while the browser moves
+  // on, so the inbox can render before that lands. The count going away
+  // says it has; load the inbox again to see it there.
+  await bo.goto('/inbox');
   equal(await bo.evaluate(`document.body.textContent.includes('Mark unread')`), true, 'read in the inbox page');
 
   // The inbox works as plain forms too.
