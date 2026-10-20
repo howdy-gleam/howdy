@@ -1,5 +1,5 @@
 -module(howdy_notifications_test_ffi).
--export([getenv/1, clock/0, advance/1, kept/0, keep/1]).
+-export([getenv/1, clock/0, advance/1, kept/0, keep/1, crashes/1]).
 
 getenv(Name) ->
     case os:getenv(binary_to_list(Name)) of
@@ -36,3 +36,11 @@ kept() ->
 keep(Repo) ->
     persistent_term:put(howdy_notifications_test_repo, Repo),
     nil.
+
+%% Whether running F crashes.
+crashes(F) ->
+    try F() of
+        _ -> false
+    catch
+        _:_ -> true
+    end.

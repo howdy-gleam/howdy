@@ -239,6 +239,13 @@ pub fn subscriptions_are_checked_and_kept_per_browser_test() {
   assert web_push.known_push_service(
     uri.Uri(..uri.empty, host: Some("db5p.notify.windows.com")),
   )
+  // Chromium's own builds, as Chromium 154 on Arch Linux subscribed.
+  assert web_push.known_push_service(
+    uri.Uri(..uri.empty, host: Some("jmt17.google.com")),
+  )
+  assert !web_push.known_push_service(
+    uri.Uri(..uri.empty, host: Some("evil.google.com.example")),
+  )
 }
 
 // -- Delivering --------------------------------------------------------------
@@ -365,3 +372,18 @@ pub fn routes_serve_the_worker_key_and_subscriptions_test() {
   assert res.status == 204
   assert web_push.subscriptions(push, "u1") == Ok([])
 }
+
+pub fn a_contact_must_be_mailto_or_https_test() {
+  let #(notifier, _) = open_push(fn(_) { Error("unused") })
+  let keys = web_push.generate_keys()
+  let _ = web_push.new(notifier, keys, contact: "https://example.com/contact")
+  assert crashes(fn() {
+    web_push.new(notifier, keys, contact: "ops@example.com")
+  })
+  assert crashes(fn() {
+    web_push.new(notifier, keys, contact: "http://example.com")
+  })
+}
+
+@external(erlang, "howdy_notifications_test_ffi", "crashes")
+fn crashes(run: fn() -> a) -> Bool

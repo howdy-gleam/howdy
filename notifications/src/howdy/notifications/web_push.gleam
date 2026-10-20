@@ -123,8 +123,15 @@ pub opaque type WebPush {
 }
 
 /// Push for `notifier`'s users. `contact` is a `mailto:` or `https:` URL
-/// a push service can use to reach whoever runs the app.
+/// a push service can use to reach whoever runs the app. Panics on any
+/// other: Apple's push service refuses every notification signed without
+/// one. Make it a real address, not one on `localhost`, which Apple also
+/// refuses.
 pub fn new(notifier: Notifier, keys: Keys, contact contact: String) -> WebPush {
+  let assert True =
+    string.starts_with(contact, "mailto:")
+    || string.starts_with(contact, "https://")
+    as "howdy/notifications/web_push: contact must be a mailto: or https: URL"
   WebPush(
     notifier:,
     keys:,
@@ -154,14 +161,16 @@ pub fn allow_endpoints(push: WebPush, allow: fn(Uri) -> Bool) -> WebPush {
 }
 
 /// Whether an endpoint belongs to the push service of Chrome, Edge,
-/// Firefox or Safari.
+/// Firefox or Safari. Chromium builds other than Google's own, such as
+/// Linux distributions', subscribe through `jmt17.google.com`.
 pub fn known_push_service(endpoint: Uri) -> Bool {
   case endpoint.host {
     Some(host) ->
       list.any(
         [
-          "fcm.googleapis.com", "updates.push.services.mozilla.com",
-          "push.services.mozilla.com", "web.push.apple.com",
+          "fcm.googleapis.com", "jmt17.google.com",
+          "updates.push.services.mozilla.com", "push.services.mozilla.com",
+          "web.push.apple.com",
         ],
         fn(known) { host == known },
       )

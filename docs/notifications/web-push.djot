@@ -39,7 +39,11 @@ howdy.new()
 ```
 
 `contact` is how a push service can reach whoever runs the app if
-something goes wrong. Push is sent by the same
+something goes wrong: a `mailto:` or `https:` URL, and `new` refuses
+anything else. Use a real address. Apple's push service refuses every
+notification whose contact is missing, not one of these, or on `localhost`,
+while Chrome's and Firefox's keep working, so the mistake only shows on
+Safari. Push is sent by the same
 [jobs](/docs/notifications/delivery#Sending-them) as email, so a runner
 with `notifications.handle_jobs(notifier)` sends it too.
 
@@ -90,9 +94,9 @@ twice.
 
 The app sends to the address a browser's subscription gives, so a
 subscription could name any server. Only the push services of Chrome,
-Edge, Firefox and Safari are accepted, so your app cannot be made to send
-requests anywhere else. `allow_endpoints` widens or replaces the list, for
-a self-hosted push service:
+Chromium, Edge, Firefox and Safari are accepted, so your app cannot be made
+to send requests anywhere else. `allow_endpoints` widens or replaces the
+list, for a self-hosted push service:
 
 ```gleam
 web_push.allow_endpoints(push, fn(endpoint) {
