@@ -4025,6 +4025,12 @@
         "Subscription": {
           "since": "1.0.0"
         },
+        "across_servers": {
+          "since": "1.0.0"
+        },
+        "across_servers_via": {
+          "since": "1.0.0"
+        },
         "announce": {
           "since": "1.0.0"
         },
@@ -4158,6 +4164,9 @@
           "since": "1.0.0"
         },
         "with_push": {
+          "since": "1.0.0"
+        },
+        "with_push_service": {
           "since": "1.0.0"
         }
       }
