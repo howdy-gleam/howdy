@@ -58,7 +58,9 @@ whether the notification is read in the app first, and digest kinds are
 gathered into one email per period. `howdy/notifications/web_push` sends
 the browser's own notifications, encrypted for each browser (RFC 8291) and
 signed with your VAPID keys (RFC 8292); `gleam run -m
-howdy/notifications/web_push` makes the keys.
+howdy/notifications/web_push` makes the keys. Other push services, such as
+ones sending to phones, are added by name with `with_push_service`, and
+each is sent and retried on its own.
 
 Email and push are [background jobs](https://github.com/mikeyjones/howdy/blob/v1.0.0/jobs/README.md), queued in the
 transaction that saves the notification: add them to your app's runner with

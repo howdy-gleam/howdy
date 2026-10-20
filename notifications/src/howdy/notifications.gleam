@@ -21,8 +21,9 @@
 //// shows them. A live view, or any other process, can `subscribe`.
 ////
 //// Each kind of notification can also go out by email, straight away or
-//// gathered into a digest, and to the browser's own notifications with
-//// `howdy/notifications/web_push`. Users choose per kind with
+//// gathered into a digest, and by push: to the browser's own notifications
+//// with `howdy/notifications/web_push`, and to any other push service the
+//// app adds with `with_push_service`. Users choose per kind with
 //// `set_preference`, and the app sets the defaults with `with_defaults`.
 //// Email and push are background jobs of
 //// [howdy_jobs](https://hexdocs.pm/howdy_jobs/howdy/jobs.html), queued in
@@ -137,7 +138,8 @@ pub type Delivery {
     /// Shown in the inbox and on open pages.
     inbox: Bool,
     email: Email,
-    /// Sent to the browsers the user turned on with `web_push`.
+    /// Pushed by every push service the notifier has, such as to the
+    /// browsers the user turned on with `web_push`.
     push: Bool,
   )
 }
@@ -171,7 +173,8 @@ pub opaque type Notifier {
     defaults: fn(String) -> Delivery,
     email: Option(EmailSetup),
     digest: Option(DigestSetup),
-    push: Option(fn(Notification) -> Outcome),
+    /// Push services by name, in the order they were added.
+    push: List(#(String, fn(Notification) -> Outcome)),
     base_url: String,
     email_after: Int,
     clock: fn() -> Int,
@@ -207,7 +210,7 @@ pub fn new(repo: Repo) -> Notifier {
     defaults: fn(_) { default_delivery },
     email: None,
     digest: None,
-    push: None,
+    push: [],
     base_url: "",
     email_after: 0,
     clock: now_ms,
@@ -259,6 +262,22 @@ pub fn schema() -> migration.Package {
        );
        CREATE INDEX howdy_notifications_push_subscriptions_user
          ON howdy_notifications_push_subscriptions (user_id)",
+    ),
+    // What became of each push service's delivery of each notification. The
+    // items table's `push` column now only tracks push jobs queued before
+    // this table existed.
+    gloo_migration.new(
+      2,
+      "create_push_deliveries",
+      "CREATE TABLE howdy_notifications_push_deliveries (
+         item_id TEXT NOT NULL,
+         service TEXT NOT NULL,
+         user_id TEXT NOT NULL,
+         state TEXT NOT NULL,
+         PRIMARY KEY (item_id, service)
+       );
+       CREATE INDEX howdy_notifications_push_deliveries_user
+         ON howdy_notifications_push_deliveries (user_id)",
     ),
   ])
 }
@@ -330,13 +349,50 @@ pub fn email_after(notifier: Notifier, seconds: Int) -> Notifier {
 }
 
 /// Deliver push notifications with `deliver`, such as the one
-/// `web_push.deliver` makes.
+/// `web_push.deliver` makes. It is the push service named `"default"`:
+/// calling `with_push` again replaces it. Add more with `with_push_service`.
 pub fn with_push(
   notifier: Notifier,
   deliver: fn(Notification) -> Outcome,
 ) -> Notifier {
-  Notifier(..notifier, push: Some(deliver))
+  with_push_service(notifier, default_push_service, deliver)
 }
+
+/// Deliver push notifications with `deliver` too, as the push service
+/// called `name`, such as one sending to phones. A notification the user
+/// wants pushed goes to every service, each in a job of its own: one that
+/// fails or is retried does not hold up or repeat the others. Adding a
+/// name that is already there replaces its service.
+///
+/// ```gleam
+/// notifier
+/// |> notifications.with_push_service("web", web_push.deliver(push))
+/// |> notifications.with_push_service("phones", my_app.send_to_phones)
+/// ```
+///
+/// `deliver` is given the notification and finds the user's devices
+/// itself. Keep a name once notifications have been sent with it: jobs
+/// waiting for a service that is gone fail.
+pub fn with_push_service(
+  notifier: Notifier,
+  named name: String,
+  deliver deliver: fn(Notification) -> Outcome,
+) -> Notifier {
+  let push = case list.key_find(notifier.push, name) {
+    Ok(_) ->
+      list.map(notifier.push, fn(service) {
+        case service.0 == name {
+          True -> #(name, deliver)
+          False -> service
+        }
+      })
+    Error(Nil) -> list.append(notifier.push, [#(name, deliver)])
+  }
+  Notifier(..notifier, push:)
+}
+
+/// The name `with_push` gives its service.
+const default_push_service = "default"
 
 /// The address the app is served from, such as `https://example.com`, so
 /// email and push can link to it. See `url`.
@@ -407,7 +463,10 @@ pub fn send(
             None -> "now"
           }
       }
-      let push = delivery.push && option.is_some(notifier.push)
+      let push = case delivery.push {
+        True -> list.map(notifier.push, fn(service) { service.0 })
+        False -> []
+      }
       // The notification and the jobs that deliver it are saved together.
       // Gloo binds SQLite parameters by position and handles at most nine,
       // so the numbers and fixed words go in the statement itself.
@@ -424,12 +483,7 @@ pub fn send(
               <> int.to_string(now)
               <> ", '"
               <> email
-              <> "', '"
-              <> case push {
-              True -> "pending"
-              False -> "none"
-            }
-              <> "')",
+              <> "', 'none')",
             [
               sql.string(notification.id),
               sql.string(recipient),
@@ -615,13 +669,21 @@ pub fn delete(
   id: String,
 ) -> service.Result(Nil) {
   use _ <- result.try(get(notifier, recipient, id))
-  use _ <- result.try(
+  use _ <- result.try({
+    use conn <- database.transaction(notifier.repo)
+    use _ <- result.try(
+      database.execute(
+        conn,
+        "DELETE FROM howdy_notifications_items WHERE id = $1 AND user_id = $2",
+        [sql.string(id), sql.string(recipient)],
+      ),
+    )
     database.execute(
-      notifier.repo,
-      "DELETE FROM howdy_notifications_items WHERE id = $1 AND user_id = $2",
-      [sql.string(id), sql.string(recipient)],
-    ),
-  )
+      conn,
+      "DELETE FROM howdy_notifications_push_deliveries WHERE item_id = $1",
+      [sql.string(id)],
+    )
+  })
   announce_unread(notifier, recipient)
   Ok(Nil)
 }
@@ -634,6 +696,7 @@ pub fn delete_user(conn: Repo, recipient: String) -> service.Result(Nil) {
     [
       "howdy_notifications_items", "howdy_notifications_preferences",
       "howdy_notifications_digests", "howdy_notifications_push_subscriptions",
+      "howdy_notifications_push_deliveries",
     ],
     fn(table) {
       database.execute(conn, "DELETE FROM " <> table <> " WHERE user_id = $1", [
@@ -650,12 +713,25 @@ pub fn prune(
   notifier: Notifier,
   read_before before: Int,
 ) -> service.Result(Nil) {
-  database.execute(
-    notifier.repo,
-    "DELETE FROM howdy_notifications_items
+  use conn <- database.transaction(notifier.repo)
+  use _ <- result.try(
+    database.execute(
+      conn,
+      "DELETE FROM howdy_notifications_items
      WHERE read_at IS NOT NULL AND read_at < $1
-       AND email NOT IN ('now', 'digest') AND push <> 'pending'",
-    [sql.int(before)],
+       AND email NOT IN ('now', 'digest') AND push <> 'pending'
+       AND NOT EXISTS (SELECT 1 FROM howdy_notifications_push_deliveries d
+         WHERE d.item_id = howdy_notifications_items.id
+           AND d.state = 'pending')",
+      [sql.int(before)],
+    ),
+  )
+  database.execute(
+    conn,
+    "DELETE FROM howdy_notifications_push_deliveries
+     WHERE NOT EXISTS (SELECT 1 FROM howdy_notifications_items i
+       WHERE i.id = howdy_notifications_push_deliveries.item_id)",
+    [],
   )
 }
 
@@ -1073,11 +1149,34 @@ fn email_job() -> jobs.Job(String) {
   |> jobs.max_attempts(attempts)
 }
 
-fn push_job() -> jobs.Job(String) {
+/// One push service's delivery of one notification. Jobs queued before
+/// there could be more than one service hold only the notification's ID:
+/// they are for the default service, with their state in the items table.
+type PushJob {
+  PushJob(id: String, service: Option(String))
+}
+
+fn push_job() -> jobs.Job(PushJob) {
   jobs.define(
     "howdy_notifications.push",
-    encode: json.string,
-    decoder: decode.string,
+    encode: fn(job: PushJob) {
+      case job.service {
+        Some(service) ->
+          json.object([
+            #("id", json.string(job.id)),
+            #("service", json.string(service)),
+          ])
+        None -> json.string(job.id)
+      }
+    },
+    decoder: decode.one_of(
+      {
+        use id <- decode.field("id", decode.string)
+        use service <- decode.field("service", decode.string)
+        decode.success(PushJob(id:, service: Some(service)))
+      },
+      [decode.map(decode.string, PushJob(id: _, service: None))],
+    ),
   )
   |> jobs.on_queue(queue)
   |> jobs.max_attempts(attempts)
@@ -1114,8 +1213,8 @@ pub fn handle_jobs(runner: jobs.Runner, notifier: Notifier) -> jobs.Runner {
   |> jobs.handle(email_job(), fn(id, attempt) {
     deliver_email(notifier, id, attempt)
   })
-  |> jobs.handle(push_job(), fn(id, attempt) {
-    deliver_push(notifier, id, attempt)
+  |> jobs.handle(push_job(), fn(job, attempt) {
+    deliver_push(notifier, job, attempt)
   })
   |> jobs.handle(digest_job(), fn(recipient, attempt) {
     deliver_digest(notifier, recipient, attempt)
@@ -1128,7 +1227,7 @@ fn queue_deliveries(
   conn: Repo,
   notification: Notification,
   email: String,
-  push: Bool,
+  push: List(String),
 ) -> service.Result(Nil) {
   let now = notifier.clock()
   use _ <- result.try(case email {
@@ -1140,14 +1239,24 @@ fn queue_deliveries(
     "digest" -> queue_digest(notifier, conn, notification.recipient, now)
     _ -> Ok(Nil)
   })
-  case push {
-    True ->
-      jobs.new(push_job(), notification.id)
-      |> jobs.at(now)
-      |> jobs.insert(into: conn)
-      |> result.replace(Nil)
-    False -> Ok(Nil)
-  }
+  list.try_each(push, fn(service) {
+    use _ <- result.try(
+      database.execute(
+        conn,
+        "INSERT INTO howdy_notifications_push_deliveries
+           (item_id, service, user_id, state) VALUES ($1, $2, $3, 'pending')",
+        [
+          sql.string(notification.id),
+          sql.string(service),
+          sql.string(notification.recipient),
+        ],
+      ),
+    )
+    jobs.new(push_job(), PushJob(id: notification.id, service: Some(service)))
+    |> jobs.at(now)
+    |> jobs.insert(into: conn)
+    |> result.replace(Nil)
+  })
 }
 
 /// Queue the recipient's next digest for when it is due: now, or the
@@ -1238,17 +1347,65 @@ fn deliver_email(
 
 fn deliver_push(
   notifier: Notifier,
-  id: String,
+  job: PushJob,
   attempt: jobs.Attempt,
 ) -> jobs.Outcome {
-  case notifier.push, find(notifier, id) {
-    None, _ -> jobs.GiveUp("the notifier sends no push: see with_push")
-    _, Error(service.NotFound(_)) -> jobs.Cancel("the notification is gone")
-    _, Error(error) -> jobs.Retry(service.message(error))
-    Some(_), Ok(#(_, _, state)) if state != "pending" -> jobs.Done
-    Some(deliver), Ok(#(notification, _, _)) ->
-      guarded(fn() { deliver(notification) })
-      |> after_delivery(attempt, "push", set_state(notifier, "push", id, _))
+  let name = option.unwrap(job.service, default_push_service)
+  let record = fn(state) { set_push_state(notifier, job, state) }
+  let what = "push to " <> name
+  case find(notifier, job.id), push_state(notifier, job) {
+    Error(service.NotFound(_)), _ | _, Error(service.NotFound(_)) ->
+      jobs.Cancel("the notification is gone")
+    Error(error), _ | _, Error(error) -> jobs.Retry(service.message(error))
+    Ok(_), Ok(state) if state != "pending" -> jobs.Done
+    Ok(#(notification, _, _)), Ok(_) ->
+      case list.key_find(notifier.push, name) {
+        Error(Nil) ->
+          GiveUp(
+            "the notifier has no push service named "
+            <> name
+            <> ": see with_push_service",
+          )
+        Ok(deliver) -> guarded(fn() { deliver(notification) })
+      }
+      |> after_delivery(attempt, what, record)
+  }
+}
+
+/// Where a push job's delivery stands: pending, sent or failed.
+fn push_state(notifier: Notifier, job: PushJob) -> service.Result(String) {
+  case job.service {
+    None -> result.map(find(notifier, job.id), fn(found) { found.2 })
+    Some(service) -> {
+      use conn <- database.connect(notifier.repo)
+      database.one(
+        conn,
+        "SELECT state FROM howdy_notifications_push_deliveries
+         WHERE item_id = $1 AND service = $2",
+        [sql.string(job.id), sql.string(service)],
+        decode.field(0, decode.string, decode.success),
+        or: service.NotFound("push delivery not found"),
+      )
+    }
+  }
+}
+
+fn set_push_state(
+  notifier: Notifier,
+  job: PushJob,
+  state: String,
+) -> service.Result(Nil) {
+  case job.service {
+    None -> set_state(notifier, "push", job.id, state)
+    Some(service) -> {
+      use conn <- database.connect(notifier.repo)
+      database.execute(
+        conn,
+        "UPDATE howdy_notifications_push_deliveries SET state = $1
+         WHERE item_id = $2 AND service = $3",
+        [sql.string(state), sql.string(job.id), sql.string(service)],
+      )
+    }
   }
 }
 

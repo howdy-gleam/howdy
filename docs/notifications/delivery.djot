@@ -113,6 +113,8 @@ one.
 - A digest is one job per user, due when their last digest is a period
   old. Notifications sent while it waits join it; one sent while it is
   going out waits for the next.
+- Each [push service](/docs/notifications/web-push#Other-push-services)
+  is a job of its own, so a service that is down holds up only itself.
 - What fails is tried again, with the delay doubling from thirty seconds,
   five times in all; then it is given up and logged. A mail provider that
   is down or rate limiting is retried; one that refuses the message, or a

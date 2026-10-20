@@ -66,7 +66,8 @@ fn open() -> Repo {
               db,
               "DROP TABLE IF EXISTS howdy_notifications_items,
                 howdy_notifications_preferences, howdy_notifications_digests,
-                howdy_notifications_push_subscriptions, howdy_jobs,
+                howdy_notifications_push_subscriptions,
+                howdy_notifications_push_deliveries, howdy_jobs,
                 howdy_jobs_queues, howdy_jobs_schedules;
               CREATE TABLE IF NOT EXISTS howdy_migrations (package TEXT NOT NULL, version BIGINT NOT NULL, checksum TEXT NOT NULL, PRIMARY KEY(package, version));
               CREATE TABLE IF NOT EXISTS howdy_migration_schemas (package TEXT PRIMARY KEY NOT NULL, fingerprint TEXT NOT NULL);
@@ -85,7 +86,8 @@ fn open() -> Repo {
           db,
           "TRUNCATE howdy_notifications_items, howdy_notifications_preferences,
             howdy_notifications_digests, howdy_notifications_push_subscriptions,
-            howdy_jobs, howdy_jobs_queues, howdy_jobs_schedules",
+            howdy_notifications_push_deliveries, howdy_jobs, howdy_jobs_queues,
+            howdy_jobs_schedules",
         )
       db
     }
@@ -760,6 +762,151 @@ pub fn pushes_go_to_the_push_deliverer_test() {
   advance(30_000)
   assert deliver(notifier) == Drained(0, 1, 0, 0, 0)
   assert drain(pushed) == ["Later"]
+}
+
+pub fn each_push_service_is_delivered_and_retried_on_its_own_test() {
+  let pushed = process.new_subject()
+  let service = fn(name, outcome) {
+    fn(n: notifications.Notification) {
+      process.send(pushed, name <> ": " <> n.title)
+      outcome
+    }
+  }
+  let notifier =
+    notifier()
+    |> notifications.with_push_service("web", service("web", Delivered))
+    |> notifications.with_push_service(
+      "phones",
+      service("phones", Retry("busy")),
+    )
+  let _ = send(notifier, "u1", "Hello")
+  assert deliver(notifier) == Drained(1, 1, 0, 0, 0)
+  assert list.sort(drain(pushed), string.compare)
+    == ["phones: Hello", "web: Hello"]
+  // Only the service that asked to be tried again is.
+  advance(30_000)
+  assert deliver(notifier) == Drained(0, 1, 0, 0, 0)
+  assert drain(pushed) == ["phones: Hello"]
+}
+
+pub fn a_push_service_added_again_is_replaced_test() {
+  let pushed = process.new_subject()
+  let service = fn(name) {
+    fn(n: notifications.Notification) {
+      process.send(pushed, name <> ": " <> n.title)
+      Delivered
+    }
+  }
+  let notifier =
+    notifier()
+    |> notifications.with_push(service("first"))
+    |> notifications.with_push_service("phones", service("old phones"))
+    |> notifications.with_push(service("second"))
+    |> notifications.with_push_service("phones", service("new phones"))
+  let _ = send(notifier, "u1", "Hi")
+  assert deliver(notifier) == Drained(2, 0, 0, 0, 0)
+  assert list.sort(drain(pushed), string.compare)
+    == ["new phones: Hi", "second: Hi"]
+}
+
+pub fn a_push_for_a_service_that_is_gone_fails_test() {
+  let gone =
+    notifier()
+    |> notifications.with_push_service("phones", fn(_) { Delivered })
+  let sent = send(gone, "u1", "Hi")
+  // The app no longer has the service when the job runs.
+  let notifier =
+    notifications.new(notifications.repo(gone))
+    |> notifications.with_clock(clock)
+  assert deliver(notifier) == Drained(0, 0, 0, 0, 1)
+  // Failed, not pending, so pruning may remove it once read.
+  assert notifications.mark_read(notifier, "u1", sent.id) == Ok(Nil)
+  advance(1)
+  assert notifications.prune(notifier, read_before: clock()) == Ok(Nil)
+  assert titles(notifier, "u1", notifications.page()) == []
+  assert push_deliveries(notifier) == 0
+}
+
+pub fn pending_pushes_keep_a_notification_from_pruning_test() {
+  let notifier =
+    notifier()
+    |> notifications.with_push_service("phones", fn(_) { Delivered })
+  let sent = send(notifier, "u1", "Hi")
+  assert notifications.mark_read(notifier, "u1", sent.id) == Ok(Nil)
+  advance(1)
+  assert notifications.prune(notifier, read_before: clock()) == Ok(Nil)
+  assert titles(notifier, "u1", notifications.page()) == ["Hi"]
+  assert deliver(notifier) == Drained(1, 0, 0, 0, 0)
+  assert notifications.prune(notifier, read_before: clock()) == Ok(Nil)
+  assert titles(notifier, "u1", notifications.page()) == []
+  assert push_deliveries(notifier) == 0
+}
+
+pub fn deleting_clears_push_deliveries_test() {
+  let notifier =
+    notifier()
+    |> notifications.with_push_service("phones", fn(_) { Delivered })
+  let a = send(notifier, "u1", "A")
+  let _ = send(notifier, "u1", "B")
+  assert push_deliveries(notifier) == 2
+  assert notifications.delete(notifier, "u1", a.id) == Ok(Nil)
+  assert push_deliveries(notifier) == 1
+  assert notifications.delete_user(notifications.repo(notifier), "u1")
+    == Ok(Nil)
+  assert push_deliveries(notifier) == 0
+  // The job for the deleted notification is cancelled.
+  assert deliver(notifier) == Drained(0, 0, 0, 2, 0)
+}
+
+/// A push job as it was queued before there could be more than one push
+/// service: the bare ID, with its state in the items table.
+pub fn a_push_job_queued_before_push_services_is_delivered_test() {
+  let pushed = process.new_subject()
+  let notifier =
+    notifier()
+    |> notifications.with_push(fn(n) {
+      process.send(pushed, n.title)
+      Delivered
+    })
+  let repo = notifications.repo(notifier)
+  let assert Ok(Nil) =
+    database.execute(
+      repo,
+      "INSERT INTO howdy_notifications_items (id, user_id, kind, title, body,
+         link, data, inbox, created_at, email, push)
+       VALUES ('old', 'u1', 'x', 'Old', '', NULL, '{}', 1, 0, 'none', 'pending')",
+      [],
+    )
+  let old_job =
+    jobs.define(
+      "howdy_notifications.push",
+      encode: json.string,
+      decoder: decode.string,
+    )
+    |> jobs.on_queue(notifications.queue)
+  let assert Ok(_) =
+    jobs.new(old_job, "old") |> jobs.at(clock()) |> jobs.insert(into: repo)
+  assert deliver(notifier) == Drained(1, 0, 0, 0, 0)
+  assert drain(pushed) == ["Old"]
+  let assert Ok([state]) =
+    database.query(
+      repo,
+      "SELECT push FROM howdy_notifications_items WHERE id = 'old'",
+      [],
+      decode.field(0, decode.string, decode.success),
+    )
+  assert state == "sent"
+}
+
+fn push_deliveries(notifier: notifications.Notifier) -> Int {
+  let assert Ok([count]) =
+    database.query(
+      notifications.repo(notifier),
+      "SELECT COUNT(*) FROM howdy_notifications_push_deliveries",
+      [],
+      decode.field(0, decode.int, decode.success),
+    )
+  count
 }
 
 fn drain(subject: process.Subject(a)) -> List(a) {

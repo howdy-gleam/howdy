@@ -101,6 +101,30 @@ web_push.allow_endpoints(push, fn(endpoint) {
 })
 ```
 
+## Other push services
+
+Web Push is one way to push. To push to phones too, through Firebase Cloud
+Messaging, Apple's push service or one such as Expo, give the notifier a
+function for each, by name:
+
+```gleam
+notifier
+|> notifications.with_push_service("web", web_push.deliver(push))
+|> notifications.with_push_service("phones", send_to_phones)
+```
+
+`send_to_phones` is given each `Notification` to push, finds the user's
+devices itself, and says what became of it: `Delivered`, `Retry(reason)`
+when the service is down, or `GiveUp(reason)` when it never will work.
+`with_push` is the service named `"default"`.
+
+A notification the user wants pushed goes to every service, each in a job
+of its own, so one service that is down is retried without sending the
+others again. Each kind's `push` preference turns them all on or off; a
+user picks devices by turning push on in each one. Keep a service's name
+once notifications have gone out with it: jobs waiting for a name the
+notifier no longer has fail.
+
 ## Limits
 
 - Push needs HTTPS, except on `localhost`.
