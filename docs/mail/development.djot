@@ -75,10 +75,8 @@ on their own.
 
 The admin area is a dev dependency, so it never reaches a deployment:
 
-```toml
-[dev_dependencies]
-howdy_dev = { git = "https://github.com/howdy-gleam/howdy.git", ref = "v1.0.0", path = "howdy_dev" }
-howdy_admin = { git = "https://github.com/howdy-gleam/howdy.git", ref = "v1.0.0", path = "admin" }
+```sh
+gleam add --dev howdy_dev@1 howdy_admin@1
 ```
 
 In production, `my_app.app` gets a mailer with a real

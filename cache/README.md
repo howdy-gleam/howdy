@@ -5,11 +5,10 @@ expensive work for a while, and throw it away when the data it came from
 changes. Entries live in this node's memory or in the app's database,
 PostgreSQL or SQLite, or anywhere a store can reach.
 
-Add it to `[dependencies]` in `gleam.toml`, from the same release as your
-app's other Howdy packages:
+Add it to your project:
 
-```toml
-howdy_cache = { git = "https://github.com/howdy-gleam/howdy.git", ref = "v1.0.0", path = "cache" }
+```sh
+gleam add howdy_cache@1
 ```
 
 ## Fetch or compute

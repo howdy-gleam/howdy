@@ -18,10 +18,10 @@ your app.
 
 ## Install
 
-Add the package to `gleam.toml`, next to `howdy` and `howdy_database`:
+Add the package to your project, next to `howdy_database`:
 
-```toml
-howdy_jobs = { git = "https://github.com/howdy-gleam/howdy.git", ref = "v1.0.0", path = "jobs" }
+```sh
+gleam add howdy_jobs@1
 ```
 
 Its tables are created by a migration package, like any other:

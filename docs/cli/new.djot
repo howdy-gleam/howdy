@@ -139,7 +139,8 @@ database, with `docker compose --profile app up --build`.
 4. It downloads the dependencies with `gleam deps download`.
 5. It prints what to do next.
 
-Downloading the dependencies needs a network connection and Git. Pass
+Downloading the dependencies needs a network connection, and Git too
+with `--source git`. Pass
 `--skip-deps` to leave that step out, and run `gleam deps download` yourself
 later:
 
@@ -155,9 +156,10 @@ howdy new my_app --dry-run --json
 
 ## Which Howdy release
 
-Every Howdy package in a new project comes from the same release tag, such
-as `ref = "v1.0.0"`, so they always match and never change under you. By
-default that is the release the CLI's templates were written for. Pass
+Every Howdy package in a new project comes from Hex, as a range from its
+version in one Howdy release up to its next major, such as
+`howdy_ui = ">= 1.0.0 and < 2.0.0"`, so the packages always work together.
+By default that is the release the CLI's templates were written for. Pass
 `--howdy` to choose another:
 
 ```sh
@@ -166,6 +168,11 @@ howdy new my_app --howdy 1.0.0
 
 A release the templates predate may need changes to the generated code.
 The project's README says which release it uses and how to upgrade it.
+
+Pass `--source git` to take every package from the release's tag on GitHub
+instead, such as `ref = "v1.0.0"`, for a release that is not on Hex yet.
+That needs Git installed. `howdy add` follows the project, and adds its
+package from wherever `howdy` comes from.
 
 ## Flags
 
@@ -180,6 +187,8 @@ The project's README says which release it uses and how to upgrade it.
   `bin/start`.
 - `--howdy 1.0.0`: the Howdy release to depend on. Defaults to the one the
   CLI was written for.
+- `--source git`: take the Howdy packages from the release's tag on GitHub
+  instead of Hex.
 - `--skip-deps`: do not run `gleam deps download` after creating the files.
 - `--dry-run`: show which files would be created, without writing them.
 - `--json`: print the result as one JSON object.

@@ -18,7 +18,7 @@ tools installed:
 The Gleam website has up to date instructions for installing all three on
 every platform: [Installing Gleam](https://gleam.run/getting-started/installing/).
 
-You also need *Git*, which Gleam uses to download Howdy. The default SQLite
+The default SQLite
 database needs a C compiler to build, and a PostgreSQL project needs a
 PostgreSQL server, which the generated project can run for you with Docker.
 

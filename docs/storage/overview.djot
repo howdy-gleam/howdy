@@ -16,10 +16,10 @@ through your app.
 
 ## Install
 
-Add the package to `gleam.toml`, next to `howdy`:
+Add the package to your project, next to `howdy`:
 
-```toml
-howdy_storage = { git = "https://github.com/howdy-gleam/howdy.git", ref = "v1.0.0", path = "storage" }
+```sh
+gleam add howdy_storage@1
 ```
 
 ## Objects and keys

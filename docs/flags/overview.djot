@@ -8,8 +8,8 @@ users. Where the settings are kept is up to a [store](/docs/flags/management):
 the app's database, one process's memory, or a service that manages them
 for you.
 
-```toml
-howdy_flags = { git = "https://github.com/howdy-gleam/howdy.git", ref = "v1.0.0", path = "flags" }
+```sh
+gleam add howdy_flags@1
 ```
 
 In a project made with `howdy new`, `howdy add flags`

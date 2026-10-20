@@ -62,9 +62,10 @@ looks for `gleam` on your `PATH` before it writes anything, and stops with an
 error if it is missing. It warns you if `erl` is missing too, because the
 project will not run without Erlang.
 
-Howdy's packages are downloaded from GitHub as Git dependencies, so
-`howdy new` and `howdy add` also need *Git* installed. You do not need a
-copy of Howdy on your machine.
+Howdy's packages are downloaded from Hex, so you do not need a copy of
+Howdy on your machine. A project made with `--source git` takes them from
+GitHub instead, and then `howdy new` and `howdy add` also need *Git*
+installed.
 
 Every command but `new` runs inside a project. It looks for the nearest
 directory with a `gleam.toml`, starting where you are and walking up, so it

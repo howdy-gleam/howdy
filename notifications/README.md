@@ -4,8 +4,8 @@ Notifications for [howdy](https://github.com/howdy-gleam/howdy/blob/v1.0.0/READM
 pushed live to every page the user has open, with email, digests and Web
 Push.
 
-```toml
-howdy_notifications = { git = "https://github.com/howdy-gleam/howdy.git", ref = "v1.0.0", path = "notifications" }
+```sh
+gleam add howdy_notifications@1
 ```
 
 ## Sending

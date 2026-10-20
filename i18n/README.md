@@ -5,8 +5,8 @@ apps: ICU MessageFormat catalogues turned into typed Gleam functions, CLDR
 plural rules, and numbers, money, dates, relative times and lists written
 the way each locale writes them.
 
-```toml
-howdy_i18n = { git = "https://github.com/howdy-gleam/howdy.git", ref = "v1.0.0", path = "i18n" }
+```sh
+gleam add howdy_i18n@1
 ```
 
 It depends on nothing else from Howdy, and runs on Erlang and JavaScript.

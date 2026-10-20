@@ -16,15 +16,13 @@ do not need to know either to follow along.
 A project made with `howdy new` already has Howdy UI installed and a themed
 home page, so you can skip to the next section.
 
-To add it to another project, put these in the `[dependencies]` section of
-`gleam.toml`:
+To add it to another project:
 
-```toml
-howdy_ui = { git = "https://github.com/howdy-gleam/howdy.git", ref = "v1.0.0", path = "ui" }
-lustre = ">= 5.7.0 and < 6.0.0"
+```sh
+gleam add howdy_ui@1 lustre@5
 ```
 
-`lustre` is listed because your own code will import it to write HTML.
+`lustre` is added too because your own code will import it to write HTML.
 
 ## A first page
 

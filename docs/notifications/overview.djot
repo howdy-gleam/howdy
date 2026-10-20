@@ -15,10 +15,10 @@ form post, use [flash messages](/docs/controllers/flash-messages) instead.
 
 ## Install
 
-Add the package to `gleam.toml`, next to `howdy`:
+Add the package to your project, next to `howdy`:
 
-```toml
-howdy_notifications = { git = "https://github.com/howdy-gleam/howdy.git", ref = "v1.0.0", path = "notifications" }
+```sh
+gleam add howdy_notifications@1
 ```
 
 It keeps its tables in your app's database, through

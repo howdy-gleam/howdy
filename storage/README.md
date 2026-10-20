@@ -4,8 +4,8 @@ File storage for [howdy](https://github.com/howdy-gleam/howdy/blob/v1.0.0/README
 an S3-compatible bucket, a local folder, or memory, with signed URLs that
 let browsers fetch them directly.
 
-```toml
-howdy_storage = { git = "https://github.com/howdy-gleam/howdy.git", ref = "v1.0.0", path = "storage" }
+```sh
+gleam add howdy_storage@1
 ```
 
 ## Storing an upload

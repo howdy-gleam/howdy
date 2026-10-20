@@ -33,19 +33,14 @@ implemented.
 
 ## Install
 
-Add the packages to `gleam.toml`, next to `howdy`:
+Add the packages to your project, next to `howdy`:
 
-```toml
-howdy_auth = { git = "https://github.com/howdy-gleam/howdy.git", ref = "v1.0.0", path = "auth" }
-howdy_database = { git = "https://github.com/howdy-gleam/howdy.git", ref = "v1.0.0", path = "database" }
+```sh
+gleam add howdy_auth@1 howdy_database@1
 ```
 
 `howdy_database` provides the `howdy/migration` module you run the auth
-migrations with. Then download them:
-
-```sh
-gleam deps download
-```
+migrations with.
 
 Nothing native is built: passwords are hashed with OTP's own `crypto`.
 

@@ -20,11 +20,10 @@ package only receives the Gloo `Repo`.
 
 ## Install
 
-Add the package to `gleam.toml`, next to `howdy` and `gloo`:
+Add the package and Gloo to your project:
 
-```toml
-howdy_database = { git = "https://github.com/howdy-gleam/howdy.git", ref = "v1.0.0", path = "database" }
-gloo = ">= 1.0.2 and < 2.0.0"
+```sh
+gleam add howdy_database@1 gloo@1
 ```
 
 ## Opening SQLite

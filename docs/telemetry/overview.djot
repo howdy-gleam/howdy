@@ -16,9 +16,8 @@ they go:
 
 ## Install
 
-```toml
-[dependencies]
-howdy_telemetry = { git = "https://github.com/howdy-gleam/howdy.git", ref = "v1.0.0", path = "telemetry" }
+```sh
+gleam add howdy_telemetry@1
 ```
 
 ## Sending traces to a collector

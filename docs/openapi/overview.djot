@@ -4,8 +4,8 @@
 [OpenAPI 3.1](https://spec.openapis.org/oas/v3.1.0) document, and serves an
 interactive reference for it.
 
-```toml
-howdy_openapi = { git = "https://github.com/howdy-gleam/howdy.git", ref = "v1.0.0", path = "openapi" }
+```sh
+gleam add howdy_openapi@1
 ```
 
 Gleam cannot look inside a decoder or a handler, so there is nothing to read

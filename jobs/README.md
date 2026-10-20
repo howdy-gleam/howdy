@@ -13,11 +13,10 @@ request:
 - shown in the [admin area](https://github.com/howdy-gleam/howdy/blob/v1.0.0/admin/README.md), managed on servers from a
   command line, and traced with [howdy_telemetry](https://github.com/howdy-gleam/howdy/blob/v1.0.0/telemetry/README.md)
 
-Add it to `[dependencies]` in `gleam.toml`, from the same release as your
-app's other Howdy packages:
+Add it to your project:
 
-```toml
-howdy_jobs = { git = "https://github.com/howdy-gleam/howdy.git", ref = "v1.0.0", path = "jobs" }
+```sh
+gleam add howdy_jobs@1
 ```
 
 and its tables to your migrations: `migration.run(db, [jobs.schema(), ..])`.

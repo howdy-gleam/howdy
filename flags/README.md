@@ -13,11 +13,10 @@ one process's memory, or a service that manages them for you.
 - Behind a hosting service, a read-only store takes the settings from it,
   and the app only checks them.
 
-Add it to `[dependencies]` in `gleam.toml`, from the same release as your
-app's other Howdy packages (`howdy add flags` does this for you):
+Add it to your project (`howdy add flags` does this for you):
 
-```toml
-howdy_flags = { git = "https://github.com/howdy-gleam/howdy.git", ref = "v1.0.0", path = "flags" }
+```sh
+gleam add howdy_flags@1
 ```
 
 Put it in `[dependencies]` even when the admin, a dev dependency, already

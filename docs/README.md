@@ -12,9 +12,10 @@ tag.
 - Link to other docs as `/docs/<group>/<doc>`, and to the component gallery
   as `/components/<name>`. When the website shows an older release, it
   points these at that release.
-- Install instructions give `ref = "v<version>"`, and links to code on
-  GitHub use `/tree/v1/` or `/blob/v1/`. `scripts/release.sh` points both at
-  each new tag, so readers see the code of the release they are reading.
+- Install instructions use Hex, as `gleam add <package>@<major>`. Links to
+  code on GitHub use `/tree/v1/` or `/blob/v1/`, and `scripts/release.sh`
+  points them at each new tag, so readers see the code of the release they
+  are reading.
 - The site renders Djot with `jot`, which has no tables: use a list.
 
 ## Marking what is new

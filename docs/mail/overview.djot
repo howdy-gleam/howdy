@@ -17,11 +17,10 @@ gives you:
 
 ## Install
 
-Add the package to `gleam.toml`, next to `howdy` and `smail`:
+Add the package and smail to your project:
 
-```toml
-howdy_mail = { git = "https://github.com/howdy-gleam/howdy.git", ref = "v1.0.0", path = "mail" }
-smail = ">= 2.0.1 and < 3.0.0"
+```sh
+gleam add howdy_mail@1 smail@2
 ```
 
 ## Writing a message

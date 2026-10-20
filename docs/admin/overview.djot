@@ -17,13 +17,10 @@ reaches a deployment. Depending on what you give it, it lets you:
 
 ## Install
 
-Add the package to the dev dependencies in `gleam.toml`, next to
-`howdy_dev`:
+Add the package as a dev dependency, next to `howdy_dev`:
 
-```toml
-[dev_dependencies]
-howdy_dev = { git = "https://github.com/howdy-gleam/howdy.git", ref = "v1.0.0", path = "howdy_dev" }
-howdy_admin = { git = "https://github.com/howdy-gleam/howdy.git", ref = "v1.0.0", path = "admin" }
+```sh
+gleam add --dev howdy_dev@1 howdy_admin@1
 ```
 
 ## Mounting it

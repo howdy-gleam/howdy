@@ -6,8 +6,8 @@ owns the data, and call it from anywhere. The calls travel over Erlang
 distribution between your own nodes, or over HTTP across a trust boundary,
 and the call site is the same for both.
 
-```toml
-howdy_remote = { git = "https://github.com/howdy-gleam/howdy.git", ref = "v1.0.0", path = "remote" }
+```sh
+gleam add howdy_remote@1
 ```
 
 ## Procedures

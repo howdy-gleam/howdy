@@ -6,11 +6,10 @@ queries, a call to another service, a rendered page. It is the Howdy
 version of Rails' `Rails.cache.fetch` or Laravel's `Cache::remember`, with
 tags for invalidation like Next.js's `revalidateTag`.
 
-Add it to `[dependencies]` in `gleam.toml`, from the same release as your
-app's other Howdy packages:
+Add it to your project:
 
-```toml
-howdy_cache = { git = "https://github.com/howdy-gleam/howdy.git", ref = "v1.0.0", path = "cache" }
+```sh
+gleam add howdy_cache@1
 ```
 
 ## Fetch or compute
