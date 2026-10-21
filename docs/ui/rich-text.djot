@@ -1,0 +1,331 @@
+# Rich text
+
+`howdy/ui/rich_text` is an editor for formatted writing, like Rails' Action
+Text: bold, italic, strikethrough, links, headings, quotes, lists and code,
+with mentions of people or anything else, and files sent straight to
+storage. It looks like the rest of your [theme](/docs/ui/themes), and the
+server gets the writing as a typed Gleam value it can trust.
+
+## Storing documents, not HTML
+
+The editor posts a *document*: JSON describing paragraphs, headings, lists,
+marks, mentions and attachments, in the shape ProseMirror uses.
+`howdy/ui/rich_text/document` reads it into Gleam values:
+
+```gleam
+pub type Block {
+  Paragraph(content: List(Inline))
+  Heading(level: Int, content: List(Inline))
+  Quote(blocks: List(Block))
+  BulletList(items: List(List(Block)))
+  NumberedList(start: Int, items: List(List(Block)))
+  CodeBlock(code: String)
+  Divider
+  Attached(attachment: Attachment)
+}
+```
+
+Reading is the safety check. `document.decode` refuses anything the editor
+could not have made: an unknown kind of block, a `<script>` in place of
+JSON, a link that is not `http`, `https`, `mailto`, `tel` or a path on your
+own site, such as `javascript:alert(1)`, or a document nested deeper than
+any person would write. A forged post gets no further than a typed one.
+
+Showing it is safe too. `document.view` draws the document through Lustre,
+which escapes all its text, so there is no HTML to sanitise and nothing to
+forget. Store the document with `document.to_string`, in an ordinary text
+column, and decode it again when you read it.
+
+## The editor
+
+Put the editor in a form, like any other control:
+
+```gleam
+import howdy/ui
+import howdy/ui/button.{Primary}
+import howdy/ui/rich_text
+
+html.form([attribute.method("post"), attribute.action("/posts")], [
+  ui.stack([], [
+    ui.label([attribute.for("body")], [text("Post")]),
+    rich_text.new(name: "body")
+      |> rich_text.id("body")
+      |> rich_text.value(post.body)
+      |> rich_text.placeholder("Write something…")
+      |> rich_text.required
+      |> rich_text.view,
+    ui.submit_button(Primary, [], [text("Post")]),
+  ]),
+])
+```
+
+The editor is a builder, used from its own module:
+
+- `new(name:)` names the form field the document is posted as.
+- `value` is the document to start with; without one the editor is empty.
+- `placeholder` is shown, faintly, while the editor is empty.
+- `id` ties the editor to a `<label for>`, so clicking the label focuses
+  it and a screen reader announces it. Without one, the id is made from
+  the name.
+- `required` stops the form submitting while the editor is empty, with the
+  browser's own message.
+- `disabled` shows the document without letting it be edited, and posts
+  nothing. `invalid` marks it as holding a value that was refused, as a
+  field with an error does.
+- `tools` chooses the toolbar's buttons, in groups with a line between
+  each. `default_tools()` is the toolbar an editor has without it. An
+  empty list hides the toolbar; the keyboard shortcuts still work.
+
+```gleam
+rich_text.new(name: "note")
+|> rich_text.tools([
+  [rich_text.Bold, rich_text.Italic, rich_text.Link],
+  [rich_text.BulletList, rich_text.NumberedList],
+])
+|> rich_text.view
+```
+
+The editor understands Markdown-like shortcuts as you type: `#` for a
+heading, `>` for a quote, `-` or `1.` for a list, three backticks for code,
+and `**bold**`, `_italic_`, `~~strike~~` and `` `code` ``. Shift+Enter
+breaks a line within a paragraph.
+
+### The browser code
+
+The editor runs on [ProseMirror](https://prosemirror.net), bundled into
+`howdy_ui`. Mount `ui.rich_text()` in the app to serve it:
+
+```gleam
+howdy.new()
+|> howdy.controller(ui.rich_text())
+|> howdy.controller(pages())
+```
+
+Only pages with an editor load it, the first time one appears. Its URL
+changes whenever the code does, so browsers cache it for good. Until it
+loads, the page shows the document as it stands, in the same box the
+editor will take, so nothing jumps. If the code cannot load, the editor
+says so.
+
+## Reading what was posted
+
+In a form validator, `rich_text.field` reads the document and checks it
+with rules, like the other [form fields](/docs/controllers/forms):
+
+```gleam
+import howdy/form.{type Form}
+import howdy/ui/rich_text
+import howdy/validate
+
+fn post_from_form(fields: Form) -> validate.Result(Post) {
+  use title <- form.string(fields, "title", [validate.not_empty()])
+  use body <- rich_text.field(fields, "body", [
+    rich_text.not_empty(),
+    rich_text.max_length(10_000),
+  ])
+  validate.ok(Post(title:, body:))
+}
+```
+
+A field that fails reports a [problem](/docs/i18n/overview), which a page
+puts into words in the reader's language like any other:
+
+- A missing field is `problem.Required`.
+- A value that is not a document the editor could have made is
+  `problem.Custom("not_rich_text", "is not valid rich text")`, which keeps
+  its English message; a form that came from the editor never gets it.
+- `not_empty` refuses a document with no text, mentions, attachments or
+  dividers, as `problem.Blank`. Check it on the server even with
+  `required`, since a browser can be told anything.
+- `max_length` refuses a document whose plain text is longer than a number
+  of characters, as `problem.TooLong`.
+
+Outside a form, `document.decode` reads a document from a string, and
+`document.decoder()` reads one inside other JSON. Their errors say what
+was wrong, for your logs; they are not for people.
+
+To bring an existing plain text column into rich text, `document.from_text`
+makes a paragraph for each run of lines separated by a blank line.
+
+## Mentions
+
+Typing a trigger, such as `@`, suggests things to mention as the writer
+types. Each trigger has its own search:
+
+```gleam
+rich_text.new(name: "body")
+|> rich_text.mentions(trigger: "@", kind: "person", search: "/people/search")
+|> rich_text.mentions(trigger: "#", kind: "issue", search: "/issues/search")
+|> rich_text.view
+```
+
+The editor asks the `search` endpoint for what follows the trigger, as
+`?q=`, such as `GET /people/search?q=ad`. Answer with
+`rich_text.suggestions_to_json`, best first, ten or so at most:
+
+```gleam
+fn search_people(ctx: Context) {
+  use q <- query.string_or(ctx, "q", default: "")
+  let found =
+    people.search(db, q, limit: 10)
+    |> list.map(fn(person) {
+      rich_text.Suggestion(
+        id: person.id,
+        label: person.name,
+        detail: Some(person.email),
+        image: Some(person.avatar_url),
+      )
+    })
+  controller.json(ctx, rich_text.suggestions_to_json(found))
+}
+```
+
+`label` is what the mention shows after its trigger, such as
+`@Ada Lovelace`. `detail` and `image` appear in the list of suggestions
+only. Guard the endpoint as you would any other: it tells whoever asks who
+there is to mention.
+
+A mention keeps its trigger, its kind, the id you gave it and the label
+shown when it was made. `document.mentions` lists everyone and everything
+mentioned, once each, in order. The ids came from a browser, so check each
+against your own records before acting on it, such as before telling
+someone they were mentioned with [notifications](/docs/notifications/overview):
+
+```gleam
+use person <- list.each(document.mentions(post.body))
+case person.kind, people.may_mention(db, author, person.id) {
+  "person", True -> notify_mentioned(person.id, post)
+  _, _ -> Nil
+}
+```
+
+## Attachments
+
+Writers can attach files by the toolbar, by pasting or by dropping them.
+The browser sends each file straight to storage, with progress, and the
+document keeps its key:
+
+```gleam
+rich_text.new(name: "body")
+|> rich_text.attachments(start: "/posts/uploads", url: fn(file) {
+  option.from_result(storage.url(files, file.key, expires_in: 3600))
+})
+|> rich_text.accept(["image/*", ".pdf"])
+|> rich_text.max_size(10_000_000)
+|> rich_text.view
+```
+
+`start` is the same kind of endpoint as the
+[uploader's](/docs/ui/components#Uploads): the browser posts it each file's
+name, type and size, and it answers with a key and where to send the file,
+which `howdy_storage` gives you; see
+[direct uploads](/docs/storage/overview#Direct-uploads). Check the type and
+size there too: `accept` and `max_size` only stop the browser sending files
+it should not. `url` gives the address to show an attached file by, so
+images appear in the editor, or `None` to show only its name. The form
+will not submit while a file is still on its way.
+
+`document.attachments` lists every attached file. Check each key is one
+your app handed to this writer, such as by its prefix, before you keep the
+document, as with any [direct upload](/docs/storage/overview#Direct-uploads).
+
+## Showing a document
+
+`document.view` draws a document as prose, in the theme's prose styles,
+with mentions as chips and attachments as cards:
+
+```gleam
+import howdy/ui/rich_text/document
+
+html.article([], [document.view(post.body)])
+```
+
+A mention's label and an attachment's name are what they were when the
+document was written. As with Action Text, draw them from your records as
+they are now with `document.view_with`, so a renamed person shows their
+new name and a deleted file shows as gone:
+
+```gleam
+document.view_with(
+  post.body,
+  mention: fn(mention) {
+    case people.get(db, mention.id) {
+      Ok(person) ->
+        document.mention_view(
+          document.Mention(..mention, label: person.name),
+          href: Some("/people/" <> person.id),
+        )
+      Error(_) -> document.mention_view(mention, href: None)
+    }
+  },
+  attachment: fn(file) {
+    let url = storage.url(files, file.key, expires_in: 3600)
+    document.attachment_view(file, url: option.from_result(url))
+  },
+)
+```
+
+`document.attachment_view` shows an image as a picture when it has a
+`url`, and any other file as a card with its name and size, linked to the
+file when there is a `url`. `document.elements` gives the document's
+elements without the prose around them, for a container of your own.
+
+For search, previews, notifications and email, `document.to_plain_text`
+gives the text: paragraphs separated by blank lines, list items marked `-`
+or `1.`, quotes with `>`, mentions as `@Ada Lovelace` and attachments as
+their names in brackets. `document.is_empty` says whether there is
+anything worth keeping.
+
+## In a live view
+
+In a [live component](/docs/ui/live-components),
+`live.on_value(name, message)` on any element around the editor hears the
+document, as JSON, each time the editor loses focus:
+
+```gleam
+html.div([live.on_value("body", BodyChanged)], [
+  rich_text.new(name: "body") |> rich_text.value(model.body) |> rich_text.view,
+])
+```
+
+Decode it with `document.decode` in `update`. Giving the editor a
+different `value` from the server, such as an empty document after a
+message is sent, replaces what is in it; re-rendering with the value it
+already has leaves the writer undisturbed.
+
+## Words and other languages
+
+The editor's labels, from the toolbar's buttons to its upload errors, are
+the `rich_text` field of Howdy UI's `howdy/ui/words.Words`, a
+`RichTextWords` record. The editor speaks English unless given words with
+`rich_text.words`, which takes the whole `Words`, as `data_table.words`
+does:
+
+```gleam
+let w = words.translated(t)
+
+rich_text.new(name: "body")
+|> rich_text.words(w)
+|> rich_text.view
+```
+
+`words.translated` has the editor's words in every language Howdy UI
+translates; see [internationalisation](/docs/i18n/overview). To change a
+few, update the record. `heading` may contain `{level}`, and `too_large`
+`{limit}`, which the editor fills in:
+
+```gleam
+let w = words.english()
+let w =
+  words.Words(
+    ..w,
+    rich_text: words.RichTextWords(..w.rich_text, strike: "Strike out"),
+  )
+```
+
+## Copying the editor
+
+`gleam run -m howdy/ui add rich_text` copies the editor's Gleam source into
+your project to change, as with any [component](/docs/ui/components). The
+copy still loads its browser code, and the document module, from
+`howdy_ui`, so keep `ui.rich_text()` mounted.

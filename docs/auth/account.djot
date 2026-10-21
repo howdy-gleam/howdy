@@ -1,0 +1,105 @@
+# Account changes
+
+Signed-in users can change their email address, unlink a
+[provider](/docs/auth/providers) and delete their account. The starter
+`/auth/account` page has a control for each, and each has a JSON endpoint
+and a function for pages of your own.
+
+All of them need a *recent* sign-in: a session made within
+`fresh_session_seconds` of the [policy](/docs/auth/sessions), ten minutes
+by default. Using a session does not make it recent again.
+
+## Changing the email address
+
+1. The user signs in again, and asks for the new address with
+   `POST /email/change` and `{"email":"new@example.com"}`.
+2. A token is emailed to the new address.
+3. The user pastes it, from the same session, into `POST /email/confirm`
+   with `{"token":"…"}`.
+
+Nothing changes until the token is confirmed. Then every session of the
+user is signed out, including this one, and the old address is sent a
+notice. The user keeps their id, password, fields, roles and linked
+providers.
+
+Handle two more purposes in your [`deliver` function](/docs/auth/signing-in):
+
+- `auth.EmailChange` carries the token for the new address. It cannot be
+  used to sign in.
+- `auth.EmailChanged` is the notice to the old address, and its token is
+  empty. Tell a reader who did not make the change to contact you, since
+  that mailbox can no longer recover the account.
+
+### Asking the old address too
+
+By default only the new mailbox is checked, so somebody who took over a
+fresh session could move the account to an address they control. To also
+require the current mailbox:
+
+```gleam
+let identity = auth.with_email_change_approval(identity)
+```
+
+`POST /email/change` then emails an `auth.EmailChangeApproval` token to the
+**current** address, and nothing to the new one. Pasting it into
+`POST /email/approve` sends the usual `EmailChange` token to the new
+address. All three steps must finish within `fresh_session_seconds` of
+signing in, so consider raising it. A user who has lost their old mailbox
+can then only change address through
+[administration](/docs/auth/administration).
+
+## Unlinking a provider
+
+`GET /providers` lists the providers linked to the account, and
+`POST /providers/unlink` with `{"issuer":"…"}` removes one.
+
+The recent sign-in must be through a *different* method than the provider
+being removed, so a stolen Google session cannot cut off the other ways
+in. Unlinking signs out every session.
+
+## Deleting the account
+
+Deleting is off until your app says what else to delete with the user:
+
+```gleam
+let identity =
+  auth.with_account_deletion(identity, fn(conn, user) {
+    database.execute(conn, "DELETE FROM notes_notes WHERE user_id = $1", [
+      sql.string(user.id),
+    ])
+  })
+```
+
+Your function runs inside the transaction that deletes the user, on the
+`conn` it is given. Return an error to refuse the deletion, and everything
+rolls back. Do not call other auth functions from it, or send email or
+make network calls: if you need to clean up somewhere else, record the work
+in the transaction and do it afterwards.
+
+Users delete their own account with `POST /account/delete`, confirming
+their current address:
+
+```json
+{"email": "ada@example.com"}
+```
+
+Auth removes the user, their passwords, linked identities, fields,
+sessions, pending tokens and role assignments. Groups, roles and the audit trail are
+kept. Deleting is not a ban: if registration is open, the same address can
+register again.
+
+## Without HTTP
+
+```gleam
+auth.request_email_change(identity, principal, "new@example.com")
+auth.approve_email_change(identity, principal, token)
+auth.confirm_email_change(identity, principal, token)
+
+auth.linked_providers(identity, principal)
+auth.unlink_provider(identity, principal, "https://accounts.google.com")
+
+auth.delete_account(identity, principal, confirm_email: "ada@example.com")
+```
+
+Each checks again, inside its transaction, that the session is still live
+and recent and the user still active.

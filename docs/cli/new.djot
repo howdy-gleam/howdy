@@ -1,0 +1,201 @@
+# Creating a project
+
+```sh
+howdy new my_app
+```
+
+`howdy new` creates a Howdy project in a new folder. The project is a Gleam
+application with:
+
+- a themed home page built from [Howdy UI](/docs/ui/pages), rendered
+  through a layout in `src/<project>/layouts/`
+- static assets served from `priv/public`
+- hot reload for development, with the [admin](/docs/admin/overview) at
+  `/_howdy` and a [console](/docs/guides/console) ready to attach
+- a test suite, and `howdy check` to run it
+- a `Dockerfile` and a health check at `/up`, ready to
+  [deploy](/docs/guides/deployment)
+- `AGENTS.md`, `CLAUDE.md` and `.claude/skills/`, guides for coding agents
+  working on the project
+
+By default it also has a SQLite database with an example todo list: a
+migration, a `todos` feature with its record, database operations and a JSON
+API at `/api/todos`, and a live todo list on the home page, rendered as a
+[live component](/docs/ui/live-components).
+
+## Project names
+
+The name must be a valid Gleam project name: lowercase letters, digits and
+underscores, starting with a letter. It cannot be the name of a module that
+ships with Erlang, such as `pg`, `auth` or `timer`, which the project's own
+module would replace.
+
+You can give a path instead, and the last segment becomes the project name:
+
+```sh
+howdy new apps/my_app
+```
+
+## Choosing a database
+
+`--database` picks the database, and `sqlite` is the default. SQLite needs no
+setup: the database is a file, created and migrated the first time the app
+starts.
+
+```sh
+howdy new my_app --database postgres
+```
+
+`--database postgres` builds the same project on PostgreSQL. The app
+connects through a connection pool configured from `DATABASE_URL`, and the
+project gets a `docker-compose.yml` that starts PostgreSQL with a development
+database and a test database.
+
+```sh
+howdy new my_app --no-database
+```
+
+`--no-database` leaves out the database and the todo list, which gives you a
+page-only project. The [`howdy create`](/docs/cli/create) commands that
+write a table, and the [`howdy add`](/docs/cli/add) packages that keep
+their data in the database, need one, so they do not work in a project made
+this way.
+
+`--database` and `--no-database` cannot be used together.
+
+## Leaving things out
+
+```sh
+howdy new my_app --minimal
+```
+
+`--minimal` leaves out the dev admin, telemetry and the console, for a
+project that wants nothing beyond the server.
+
+```sh
+howdy new my_api --api-only
+```
+
+`--api-only` makes a JSON backend with no pages. It leaves out Howdy UI,
+Lustre, the home page, the layouts, the static files and the HTML 404 page.
+With a database it keeps the todos JSON API. Packages added later follow suit: `howdy add auth` in
+such a project adds the JSON API without the sign-in pages.
+
+```sh
+howdy new my_app --no-agents
+```
+
+`--no-agents` leaves out `AGENTS.md`, `CLAUDE.md` and `.claude/skills/`.
+
+```sh
+howdy new my_app --no-docker
+```
+
+`--no-docker` leaves out the `Dockerfile`, `.dockerignore` and `bin/start`,
+for an app deployed some other way. The rest of
+[Ready to deploy](#Ready-to-deploy) still applies, and
+[`howdy add docker`](/docs/cli/add) adds the files later.
+
+## Ready to deploy
+
+Every project runs in production the way it runs in development, and a
+platform can manage it:
+
+- `GET /up` answers `{"status":"ok"}` while the app runs, for load
+  balancers and container platforms. It is a
+  [health check](/docs/guides/health-checks), answered before the routes
+  and middleware and never logged.
+- `main` starts the server as an OTP application, so on `SIGTERM` it stops
+  taking connections and gives requests in flight 8 seconds to finish. See
+  [Supervision and shutdown](/docs/guides/supervision).
+- With a database, the app applies pending migrations as it starts, holding
+  a lock so copies that start together take turns. `MIGRATE_ON_START=false`
+  leaves them to a step of their own.
+- `HOST` and `PORT` say where it listens; it reads its configuration from
+  the environment.
+
+It also gets three files for containers:
+
+- `Dockerfile` builds an image of the app with
+  `gleam export erlang-shipment`, on the Gleam and Erlang/OTP versions
+  installed where you ran `howdy new`, and runs it as an unprivileged user
+  with a `HEALTHCHECK` on `/up`.
+- `.dockerignore` keeps `build/`, `.env` and local databases out of it.
+- `bin/start` starts the app in the image: `run` serves it, `migrate`
+  applies the migrations and exits, and `remote` opens a shell inside the
+  running app.
+
+With PostgreSQL, `docker-compose.yml` can also run the image beside the
+database, with `docker compose --profile app up --build`.
+[Deploying](/docs/guides/deployment) takes it from there.
+
+## What happens
+
+`howdy new` works through these steps, and shows its progress as it goes:
+
+1. It checks that `gleam` is installed, and warns you if `erl` is missing.
+2. It writes the project files.
+3. It formats them with `gleam format`.
+4. It downloads the dependencies with `gleam deps download`.
+5. It prints what to do next.
+
+Downloading the dependencies needs a network connection, and Git too
+with `--source git`. Pass
+`--skip-deps` to leave that step out, and run `gleam deps download` yourself
+later:
+
+```sh
+howdy new my_app --skip-deps
+```
+
+To see the files a command would write without writing them:
+
+```sh
+howdy new my_app --dry-run --json
+```
+
+## Which Howdy release
+
+Every Howdy package in a new project comes from Hex, as a range from its
+version in one Howdy release up to its next major, such as
+`howdy_ui = ">= 1.0.0 and < 2.0.0"`, so the packages always work together.
+By default that is the release the CLI's templates were written for. Pass
+`--howdy` to choose another:
+
+```sh
+howdy new my_app --howdy 1.0.0
+```
+
+A release the templates predate may need changes to the generated code.
+The project's README says which release it uses and how to upgrade it.
+
+Pass `--source git` to take every package from the release's tag on GitHub
+instead, such as `ref = "v1.0.0"`, for a release that is not on Hex yet.
+That needs Git installed. `howdy add` follows the project, and adds its
+package from wherever `howdy` comes from.
+
+## Flags
+
+- `--database sqlite` or `--database postgres`: the database to use.
+  Defaults to `sqlite`.
+- `--no-database`: leave out the database and the todo list example.
+- `--minimal`: leave out the admin, telemetry and the console.
+- `--api-only`: a JSON backend only, without Howdy UI, pages, layouts or
+  static files.
+- `--no-agents`: leave out `AGENTS.md`, `CLAUDE.md` and `.claude/skills/`.
+- `--no-docker`: leave out the `Dockerfile`, `.dockerignore` and
+  `bin/start`.
+- `--howdy 1.0.0`: the Howdy release to depend on. Defaults to the one the
+  CLI was written for.
+- `--source git`: take the Howdy packages from the release's tag on GitHub
+  instead of Hex.
+- `--skip-deps`: do not run `gleam deps download` after creating the files.
+- `--dry-run`: show which files would be created, without writing them.
+- `--json`: print the result as one JSON object.
+- `--plain`: print progress as plain lines instead of animating.
+
+## Next
+
+Move into the project and start it with `howdy dev`. If you chose
+PostgreSQL, start the database first with `docker compose up -d`.
+[Getting started](/docs/guides/getting-started) walks through the first run.

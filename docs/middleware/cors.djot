@@ -1,0 +1,192 @@
+# CORS
+
+Browsers do not let JavaScript on one site read responses from another. A
+page on `https://app.example.com` that calls `fetch` on
+`https://api.example.com` is blocked, unless the API's responses say that
+site is allowed. The rules for saying so are called cross-origin resource
+sharing, or CORS.
+
+You need this page if a browser calls your Howdy app from pages served
+somewhere else: a separate frontend, a single-page app on its own domain, or
+a dev server on another port. You do not need it when Howdy serves the pages
+too, or when the callers are not browsers. CORS is enforced by browsers
+only; `curl` and other servers ignore it.
+
+## A policy
+
+Build a policy, turn it into middleware, and add it to the app:
+
+```gleam
+import gleam/http
+import howdy
+import howdy/cors
+
+pub fn app() {
+  let policy =
+    cors.new()
+    |> cors.allow_origins(["https://app.example.com"])
+    |> cors.allow_methods([http.Get, http.Post, http.Delete])
+    |> cors.allow_headers(["content-type", "authorization"])
+    |> cors.max_age(600)
+
+  howdy.new()
+  |> howdy.middleware(cors.middleware(policy))
+  |> howdy.controller(user_controller())
+}
+```
+
+For a public API with no cookies or sign-in, `cors.allow_all()` is a
+complete policy: any origin, the default methods, and whatever request
+headers the browser asks for.
+
+```gleam
+howdy.new()
+|> howdy.middleware(cors.middleware(cors.allow_all()))
+```
+
+## Origins
+
+An origin is the scheme, host and port a page was loaded from, such as
+`https://app.example.com` or `http://localhost:5173`. `cors.new()` allows
+none, so a policy must say which to allow:
+
+- `allow_origins` takes an exact list. Give each origin in full, with no
+  path and no trailing slash. Comparison ignores case. Anything that is not
+  an origin panics when the policy is built, so a typo shows up at startup.
+- `allow_any_origin` allows every site, and answers with
+  `access-control-allow-origin: *`.
+- `allow_origins_matching` takes a function from the origin to a `Bool`, for
+  rules a list cannot express, such as every subdomain of your own domain:
+
+```gleam
+import gleam/string
+
+cors.new()
+|> cors.allow_origins_matching(fn(origin) {
+  string.ends_with(origin, ".example.com")
+})
+```
+
+The function receives the `origin` header exactly as the browser sent it,
+and runs on every cross-origin request, so keep it quick. Be careful with
+matching: a test for `string.contains(origin, "example.com")` would also
+allow `https://example.com.evil.net`.
+
+## The rest of the policy
+
+- `allow_methods` lists the methods a cross-origin request may use. The
+  default is `GET`, `HEAD`, `POST`, `PUT`, `PATCH` and `DELETE`.
+- `allow_headers` lists the request headers a page may send beyond the few
+  browsers always allow. You need `content-type` for JSON bodies and
+  `authorization` for bearer tokens. `allow_any_header` allows whatever the
+  browser asks for.
+- `expose_headers` lists the response headers JavaScript may read. Without
+  it a script sees only a few basic ones such as `content-type`, so a page
+  that reads `x-ratelimit-remaining` needs it exposed.
+- `max_age` is how many seconds a browser may remember a preflight answer,
+  which saves it asking again before every request.
+- `allow_credentials` lets cross-origin requests carry cookies and
+  `authorization` headers.
+
+### Credentials
+
+By default a browser makes cross-origin requests without cookies. If your
+frontend signs in with a cookie set by the API, the policy needs
+`cors.allow_credentials()`, and the page must ask for them too, with
+`fetch(url, { credentials: "include" })`.
+
+Credentials cannot be combined with `allow_any_origin`. That pairing would
+let any website on the internet make signed-in requests as your visitors,
+so `cors.middleware` panics at startup if a policy has both. List the
+origins instead.
+
+## What the middleware does
+
+Requests with no `origin` header are not cross-origin, and pass straight
+through.
+
+Before a cross-origin request that could change something, a browser first
+sends a *preflight*: an `OPTIONS` request asking whether the real one is
+allowed. The middleware answers it directly with `204`, and the handler
+never runs:
+
+```
+access-control-allow-origin: https://app.example.com
+access-control-allow-methods: GET, POST, DELETE
+access-control-allow-headers: content-type, authorization
+access-control-max-age: 600
+vary: origin
+```
+
+If the origin is not allowed, the `204` carries none of those headers, and
+the browser blocks the real request. You do not need to declare `OPTIONS`
+routes for this: the [router](/docs/controllers/router) answers `OPTIONS`
+for any path that has routes, through the controller's middleware.
+
+Any other request with an `origin` runs as normal, and the response gains
+`access-control-allow-origin` when the origin is allowed. That includes
+error responses, so a page can read the body of a `422` from your API
+rather than seeing an unexplained CORS failure.
+
+Responses carry `vary: origin`, which tells caches that the answer depends
+on who asked.
+
+## Where to add it
+
+Add CORS before any [middleware](/docs/middleware/overview) that can reject
+a request, such as authentication or rate limiting:
+
+```gleam
+howdy.new()
+|> howdy.middleware(logger.log)
+|> howdy.middleware(cors.middleware(policy))
+|> howdy.middleware(require_api_key)
+```
+
+Browsers send preflights without credentials. If `require_api_key` ran
+first, it would answer every preflight with `401`, and the browser would
+never send the real request.
+
+Two limits to know about:
+
+- A request to a path with no routes is a `404` before any middleware runs,
+  so it has no CORS headers. In the browser that shows up as a CORS error,
+  not a `404`. If a page reports one, check the URL first.
+- CORS is not access control. It tells browsers which pages may read your
+  responses; it does not stop anyone making requests. Protect routes with a
+  [guard](/docs/controllers/guards).
+- CORS does not stop cross-site form posts either. A browser sends those
+  without a preflight, cookies attached. If visitors sign in with a cookie,
+  add [CSRF protection](/docs/middleware/csrf).
+
+## Testing CORS
+
+Send the headers a browser would. A preflight is an `OPTIONS` request with
+an `origin` and an `access-control-request-method`:
+
+```gleam
+import gleam/http
+import gleam/http/response
+import howdy/testing
+
+pub fn preflight_is_allowed_test() {
+  let res =
+    testing.request(http.Options, "/users")
+    |> testing.header("origin", "https://app.example.com")
+    |> testing.header("access-control-request-method", "POST")
+    |> testing.send(app())
+
+  assert res.status == 204
+  assert response.get_header(res, "access-control-allow-origin")
+    == Ok("https://app.example.com")
+}
+
+pub fn other_sites_are_not_allowed_test() {
+  let res =
+    testing.get("/users")
+    |> testing.header("origin", "https://evil.example")
+    |> testing.send(app())
+
+  assert response.get_header(res, "access-control-allow-origin") == Error(Nil)
+}
+```

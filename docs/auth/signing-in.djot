@@ -1,0 +1,237 @@
+# Signing in
+
+Out of the box, `howdy_auth` signs people in with a token sent to their
+email address:
+
+1. The visitor gives their address. Your app emails them a token.
+2. They paste the token into the page.
+3. The app exchanges the token for a session.
+
+There is no password to choose, forget or leak, and owning the inbox is the
+proof. [Passwords](/docs/auth/passwords), [passkeys](/docs/auth/passkeys)
+and [social providers](/docs/auth/providers) can be added as other ways in.
+An app that only uses providers can leave email tokens out altogether, with
+`auth.new_without_email`.
+
+Registration works the same way, and the account is only created once the
+token has been exchanged, so every account has a working address.
+Registration is off until you call `auth.allow_registration`.
+
+## Sending the email
+
+The `deliver` function you give `auth.new` is called with an
+`auth.Delivery`: the `email` to write to, the `token`, and a `purpose`.
+
+The quickest way to write one is `howdy/auth/emails`, which has a
+ready-made email for every purpose, sent with
+[Howdy Mail](/docs/mail/overview):
+
+```gleam
+import howdy/auth
+import howdy/auth/emails
+import howdy/mail
+import howdy/mail/smtp
+
+let assert Ok(config) = smtp.from_env()
+let mailer =
+  mail.mailer(smtp.adapter(config))
+  |> mail.default_from(mail.named("Acme", "hello@acme.test"))
+let auth_emails = emails.new(mailer, app_name: "Acme")
+
+let assert Ok(identity) =
+  auth.new(repo: db, origin:, deliver: emails.deliver(auth_emails))
+```
+
+Each email is tagged `auth.<purpose>`, such as `auth.sign_in`, and
+`emails.previews(auth_emails)` gives the admin area a
+[preview](/docs/mail/development) of every one.
+`emails.with_template(auth_emails, for: auth.SignIn, build: ...)` replaces
+one with your own.
+
+You can also write `deliver` yourself:
+
+```gleam
+import gleam/result
+import howdy/auth
+import howdy/auth/secret
+import howdy/mail
+
+pub fn send_email(mailer: mail.Mailer, delivery: auth.Delivery) {
+  let subject = case delivery.purpose {
+    auth.SignIn -> "Your sign-in token"
+    auth.Registration -> "Confirm your new account"
+    auth.AlreadyRegistered -> "You already have an account"
+    auth.EmailChange -> "Confirm your new email address"
+    auth.EmailChangeApproval -> "Approve changing your email address"
+    auth.EmailChanged -> "Your email address was changed"
+    auth.PasswordChanged -> "Your password was changed"
+  }
+  mail.message()
+  |> mail.to([mail.address(delivery.email)])
+  |> mail.subject(subject)
+  |> mail.text(
+    "Paste this token into the page: " <> secret.reveal(delivery.token),
+  )
+  |> mail.send(mailer, _)
+  |> result.replace(Nil)
+  |> result.replace_error(Nil)
+}
+```
+
+Give `auth.new` the function `send_email(mailer, _)`.
+
+`AlreadyRegistered` arrives when somebody registers an address that has an
+account. The token it carries signs them in, so say that, instead of
+inviting them to register again. Whoever made the request sees the same
+answer in every case, so only the owner of the inbox learns anything.
+
+The other four purposes come from [account changes](/docs/auth/account)
+and [password changes](/docs/auth/passwords):
+
+- `EmailChange` and `EmailChangeApproval` carry tokens that confirm or
+  approve a new address. They cannot be used to sign in.
+- `EmailChanged` and `PasswordChanged` are notices, and their token is
+  empty. Tell a reader who did not make the change what to do: contact you,
+  or reset their password from a fresh email sign-in.
+
+The token is a `secret.Secret`, which does not print its contents when the
+record around it is logged. Call `secret.reveal` only where the email is
+written. Do not log tokens, and do not put them in links: they are exchanged
+by `POST`, never from a URL.
+
+A token is random, works once, and lasts ten minutes. Returning `Error(Nil)`
+from `deliver` cancels it. Exchanging a token spends it even when the
+exchange then fails, for instance because the user is suspended.
+
+While you develop, print the token instead of sending it:
+
+```gleam
+fn(delivery: auth.Delivery) {
+  io.println(delivery.email <> ": " <> secret.reveal(delivery.token))
+  Ok(Nil)
+}
+```
+
+## Asking twice
+
+A request for a token that finds a usable one already waiting for that
+address sends nothing, and still reports success, because there is already
+one in the inbox. A new request never cancels tokens sent before it: the
+three most recent stay valid.
+
+That is what stops a stranger from flooding somebody's inbox, or from
+locking its owner out by asking again just before they paste. It holds
+however many machines the stranger asks from, because the limit belongs to
+the inbox and not to the asker. The numbers are part of the
+[policy](/docs/auth/sessions).
+
+## The JSON API
+
+`routes.api(identity, at: "/api/auth")` mounts these, relative to the mount
+path:
+
+- `POST /register` with `{"email":"…"}` sends a registration token.
+  Answers `202`.
+- `POST /login` with `{"email":"…"}` sends a sign-in token. Answers `202`
+  whether or not the address has an account.
+- `POST /session` with `{"token":"…"}` exchanges a token. Answers with the
+  user as JSON, and sets the session cookie.
+- `POST /token` with `{"token":"…"}` exchanges a token for a bearer token:
+  `access_token`, `token_type`, `expires_in` and `user`.
+- `GET /me` answers with the signed-in user.
+- `GET /sessions` lists the caller's sessions.
+- `POST /sessions/revoke` with `{"id":"…"}` ends one of them. Answers
+  `204`.
+- `POST /logout` with a JSON body such as `{}` ends this session. Answers
+  `204`.
+
+With [passwords](/docs/auth/passwords) on there are more under
+`/password`, and [passkeys](/docs/auth/passkeys),
+[second factors](/docs/auth/mfa), [several accounts](/docs/auth/sessions)
+and [account changes](/docs/auth/account) each add their own. The endpoints that take an `email` also take an optional
+`"group"`: see [Groups](/docs/auth/groups).
+
+A user with a [second factor](/docs/auth/mfa) does not get a session from
+`/session` or `/token` straight away. The answer is `202` with
+`{"mfa_required": true}`, and the code is checked at `/mfa/verify` or
+`/mfa/token`.
+
+The user is `id`, `email`, `group_id`, and `created_at` and `updated_at` as
+RFC 3339 strings. Errors have the usual
+[Howdy shape](/docs/controllers/services).
+
+Every `POST` must have the content type `application/json`. Responses carry
+`cache-control: no-store`. Endpoints that send email, exchange tokens or
+check passwords allow each client 30 requests a minute, and the signed-in
+ones allow 300; behind a proxy, see
+[Behind a proxy](/docs/auth/administration).
+
+## From a browser
+
+Use the cookie endpoints. The cookie is `HttpOnly`, so scripts on the page
+cannot read it, and it is sent with every request to your app:
+
+```javascript
+await fetch('/api/auth/login', {
+  method: 'POST',
+  headers: {'Content-Type': 'application/json'},
+  body: JSON.stringify({email}),
+});
+
+// Once the visitor has pasted the token:
+const response = await fetch('/api/auth/session', {
+  method: 'POST',
+  credentials: 'same-origin',
+  headers: {'Content-Type': 'application/json'},
+  body: JSON.stringify({token}),
+});
+```
+
+`POST /session` requires the `origin` header to match the origin you
+configured, which a browser on your own site sends without being asked.
+Avoid `/token` in a browser: a bearer token kept in JavaScript storage can
+be read by any script on the page.
+
+The cookie is named `__Host-howdy_session` on HTTPS and `howdy_dev_session`
+on a loopback origin; `auth.cookie_name(identity)` tells you which. It is
+`Secure`, `HttpOnly`, `SameSite=Lax` and scoped to `/`.
+
+## From other clients
+
+A native app or a script exchanges at `/token`, and sends the result with
+each request:
+
+```
+Authorization: Bearer <access_token>
+```
+
+These clients need not send `origin`. A request whose `origin` is present
+and wrong is refused, as is one carrying both a cookie and a bearer token.
+
+## Without HTTP
+
+Every endpoint is a thin layer over a function that returns a
+[`service.Result`](/docs/controllers/services), with no HTML, cookies or
+redirects. Use them to build server-rendered forms, or another transport
+altogether:
+
+- `auth.request_token_from(identity, email, auth.Login, client)`, or
+  `auth.Register`
+- `auth.exchange_from(identity, token, client)` returns an `auth.Session`:
+  the `user`, the secret `token`, and `expires_at`
+- `auth.authenticate_from(identity, token, client)` returns the
+  `user.Principal` for a session token
+- `auth.sessions`, `auth.revoke_session` and `auth.logout`
+
+With [multi-factor authentication](/docs/auth/mfa) on, use
+`auth.exchange_step` instead of `auth.exchange`. It says whether the user is
+signed in, or must pass a second factor first.
+
+`client` is a string naming where the request came from, normally the IP
+address. It is used for throttling and recorded in the audit trail. The
+shorter names `request_token`, `exchange` and `authenticate` leave it out,
+and share one bucket between all callers.
+
+A transport of your own is responsible for what the routes did for you:
+checking `origin` on cookie writes with `auth.check_origin`, setting the
+cookie, `no-store` on responses, and limiting how fast clients can call.

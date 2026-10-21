@@ -1,0 +1,157 @@
+# Transactions and queries
+
+`howdy/database` runs SQL through a Gloo `Repo` in the same way on
+PostgreSQL and SQLite. Every function returns a
+[`service.Result`](/docs/controllers/services), so a service can pass its
+answer straight to `service.respond`.
+
+## Queries
+
+```gleam
+import gleam/dynamic/decode
+import gloo/sql
+import howdy/database
+import howdy/service
+
+pub fn titles(db, user_id: String) -> service.Result(List(String)) {
+  use conn <- database.connect(db)
+  database.query(
+    conn,
+    "SELECT title FROM notes_notes WHERE user_id = $1 ORDER BY title",
+    [sql.string(user_id)],
+    decode.field(0, decode.string, decode.success),
+  )
+}
+```
+
+- `database.query(conn, sql, args, decoder)` returns every row.
+- `database.one(conn, sql, args, decoder, or: error)` returns the first
+  row, or your error when there is none, such as
+  `service.NotFound("note")`.
+- `database.execute(conn, sql, args)` runs a statement and returns `Nil`.
+- `database.exec(conn, statements)` runs several statements separated by
+  semicolons, with no arguments.
+
+`database.connect` runs its function without a transaction. On SQLite it
+also waits its turn for the Repo's one connection; see
+[Sharing a SQLite Repo](/docs/database/overview).
+
+A database error becomes `service.Internal("database operation failed")`.
+The driver's own message is thrown away, because it can contain the
+personal data you were storing.
+
+Gloo's SQLite adapter binds `$1`, `$2` and so on by position. Never use one
+placeholder twice in a query: pass the value again as a new placeholder.
+
+## Transactions
+
+```gleam
+use conn <- database.transaction(db)
+use _ <- result.try(database.execute(conn, "…", [ … ]))
+database.execute(conn, "…", [ … ])
+```
+
+`database.transaction` commits when its function returns `Ok`, and rolls
+back when it returns `Error`. The error you return comes back unchanged,
+so a `Conflict` stays a `Conflict`.
+
+A transaction that *reads before it writes*, such as checking a count and
+then inserting, should use `write_transaction` instead:
+
+```gleam
+pub fn create(db, owner, title) -> service.Result(Nil) {
+  use conn <- database.write_transaction(db, touching: "notes_notes")
+  use held <- result.try(database.one(
+    conn,
+    "SELECT COUNT(*) FROM notes_notes WHERE user_id = $1",
+    [sql.string(owner.id)],
+    decode.field(0, decode.int, decode.success),
+    or: service.Internal("count returned no row"),
+  ))
+  case held < 100 {
+    False -> Error(service.Conflict("delete a note before adding another"))
+    True ->
+      database.execute(
+        conn,
+        "INSERT INTO notes_notes (user_id, title) VALUES ($1, $2)",
+        [sql.string(owner.id), sql.string(title)],
+      )
+  }
+}
+```
+
+SQLite only takes its write lock at the first write, so two requests could
+both read the old count and both insert. `write_transaction` takes the lock
+up front. `touching` names one of the tables the transaction writes to. On
+PostgreSQL it is an ordinary transaction.
+
+## Constraints
+
+`execute_or` turns a violated constraint into an error of your choosing:
+
+```gleam
+database.execute_or(
+  conn,
+  "UPDATE notes_notes SET slug = $1 WHERE id = $2",
+  [sql.string(slug), sql.string(id)],
+  on_constraint: fn(_) { service.Conflict("that slug is taken") },
+)
+```
+
+The function receives the constraint's name on PostgreSQL, or SQLite's
+description of it, such as `UNIQUE constraint failed: notes_notes.slug`.
+Use it to choose an error, but do not show it to users. On PostgreSQL a
+violation has already aborted the transaction, so return the error rather
+than carrying on.
+
+## Returning the row
+
+`database.returning` runs an `INSERT`, `UPDATE` or `DELETE` built with
+`gloo/query`, and returns the row it touched:
+
+```gleam
+query.from(todo_item.table())
+|> query.update(todo_item.values(input))
+|> query.where(query.Eq("id", sql.int(id)))
+|> database.returning(
+  db,
+  _,
+  todo_item.columns,
+  or: service.NotFound("todo not found"),
+)
+```
+
+The change and its result are one statement, so there is no gap between
+them where another request could step in. A statement that matched no row
+returns your `or` error, and a violated constraint is a `Conflict`. Code
+made by [`howdy create`](/docs/cli/create) uses it. Gloo's own
+`returning_columns` only works for `INSERT`; do not combine the two.
+
+## SQL that differs
+
+A few things are written differently on the two databases. These functions
+write the right SQL for the Repo you pass:
+
+- `database.for_update(conn, "n")` locks the selected rows, with
+  `FOR UPDATE OF n` on PostgreSQL. SQLite transactions already hold the
+  whole database, so it adds nothing there.
+- `database.read_time(conn, "created")` reads a time column as unix
+  seconds.
+- `database.write_time(conn, "$4")` writes the unix seconds in `$4` to a
+  time column.
+
+Times are kept as `TIMESTAMPTZ` on PostgreSQL, and as unix seconds on
+SQLite, which has no type for an instant:
+
+```gleam
+database.query(
+  conn,
+  "SELECT id, " <> database.read_time(conn, "created")
+    <> " FROM notes_notes n WHERE id = $1" <> database.for_update(conn, "n"),
+  [sql.string(id)],
+  decoder,
+)
+```
+
+`database.backend(conn)` tells you which database a Repo is, as
+`database.Postgres` or `database.Sqlite`, for anything else that differs.

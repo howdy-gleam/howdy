@@ -1,0 +1,109 @@
+# Clusters and security
+
+[Remote calls](/docs/remote/procedures) travel one of two ways. Choose by
+how much the two services trust each other:
+
+- **Erlang distribution**, with `remote.cluster()` or `remote.node(name)`,
+  between your own nodes on a private network. It is fast, and nodes find
+  each other's procedures automatically.
+- **HTTP**, with `remote.controller` and `remote.http`, across a trust
+  boundary: another team's service, another network, anything public.
+
+## Running a cluster
+
+Each node needs a name and a shared secret cookie:
+
+```sh
+ERL_FLAGS="-sname users -setcookie $COOKIE" gleam run -m users
+ERL_FLAGS="-sname web -setcookie $COOKIE" gleam run -m web
+```
+
+`-sname` is enough for nodes on one machine. For nodes on different hosts,
+use a full name such as `-name users@10.0.0.5`.
+
+In a project made by `howdy new`, `bin/start` takes them from the
+environment instead: `HOWDY_NODE_NAME`, `HOWDY_COOKIE`, and
+`HOWDY_DIST_PORT` to pin the distribution port. See
+[Deploying](/docs/guides/deployment#Clusters).
+
+Connect each node to one other, and Erlang connects it to the rest:
+
+```gleam
+let assert Ok(_) = remote.connect("users@10.0.0.5")
+```
+
+`remote.self()` returns this node's name, or `"nonode@nohost"` when
+distribution is off.
+
+Nodes join `remote.cluster()` as they start a server, and leave it as they
+stop or disconnect. Erlang does not reconnect a lost node by itself, so a
+node that must stay connected asks the package to keep it so:
+
+```gleam
+let assert Ok(Nil) = remote.connect_to(["users@10.0.0.5"])
+```
+
+A connector under the `howdy_remote` application's supervisor connects to
+each node, watches for it to drop, and reconnects with a backoff that
+doubles from a second to half a minute, logging each connection and loss
+once. `remote.connector_supervised(nodes)` is the same as a child of your
+own supervision tree.
+
+## Distribution is full trust
+
+**Connected Erlang nodes trust each other completely.** A node that holds
+the cookie can run any code on yours, whatever `howdy_remote` allows. So:
+
+- Use `remote.cluster()` and `remote.node` only between your own nodes, on
+  a private network.
+- Never expose the distribution ports to the internet: epmd's port 4369,
+  and the node's own port.
+- Consider TLS distribution, with `-proto_dist inet_tls`.
+- Keep the cookie as secret as a database password.
+
+## Over HTTP
+
+`remote.controller(server, at: "/rpc", token: secret)` mounts one
+`POST /rpc/<procedure name>` route for each procedure the server handles.
+The body is the input as JSON, and the answer is the output as JSON:
+
+```sh
+curl -X POST https://users.internal/rpc/users.get \
+  -H 'authorization: Bearer <token>' -d 2
+```
+
+The endpoint:
+
+- only runs the procedures you registered
+- requires `authorization: Bearer <token>`, compared in constant time, and
+  answers `401` otherwise
+- answers a handler's error with its usual status, so `NotFound` is `404`
+- caps request bodies at 1 MiB
+
+Use a long random token, and TLS. An empty token refuses every request.
+Callers use `remote.http(url, token:)` with the URL of the mount, and
+nothing else changes.
+
+A crash's detail stays in the serving node's log; the caller only learns
+that it crashed.
+
+## Plain Erlang and Elixir
+
+`remote.apply` calls any exported function on a node, for services that do
+not use `howdy_remote`:
+
+```gleam
+remote.apply(
+  on: "billing@10.0.0.7",
+  module: "Elixir.Billing",
+  function: "balance",
+  args: [dynamic.int(account_id)],
+  decoder: decode.int,
+  timeout: 5000,
+)
+```
+
+`module` is the Erlang module name: `"Elixir.Billing"` for Elixir's
+`Billing`, or `"users@api"` for the Gleam module `users/api`. Nothing checks
+the arguments, so build them carefully with `gleam/dynamic`. The result is
+checked with the decoder, and a mismatch is a `BadResponse`.

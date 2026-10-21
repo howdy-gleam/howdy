@@ -1,0 +1,99 @@
+# Schemas
+
+A schema from `howdy/openapi/schema` describes a JSON value once. From that
+one description you get a decoder, an encoder, and the JSON Schema an
+OpenAPI document shows.
+
+## Objects
+
+Objects are built the way `gleam/dynamic/decode` decoders are, with one more
+argument per field: a function that reads the field back out of the value.
+That function is what lets the same schema encode.
+
+```gleam
+import howdy/openapi/schema.{type Schema}
+
+pub type User {
+  User(id: Int, name: String, nickname: Option(String))
+}
+
+pub fn user() -> Schema(User) {
+  {
+    use id <- schema.field("id", schema.int(), fn(user: User) { user.id })
+    use name <- schema.field("name", schema.string(), fn(user: User) {
+      user.name
+    })
+    use nickname <- schema.optional_field(
+      "nickname",
+      schema.string(),
+      fn(user: User) { user.nickname },
+    )
+    schema.success(User(id:, name:, nickname:))
+  }
+  |> schema.named("User")
+}
+```
+
+`optional_field` decodes a missing field or `null` as `None`, and leaves
+`None` out when encoding.
+
+`schema.named` shows the schema once in the document, under
+`components/schemas/User`, and refers to it everywhere else. Two different
+schemas with the same name make building the document panic.
+
+To document an object, the fields after each one are found by running the
+rest of the chain with placeholder values. Keep the chain to `field` calls
+and a final `success`: if it branches on a field's value, only the branch
+the placeholder takes is documented.
+
+## Types
+
+- `string()`, `int()`, `float()` and `bool()`. `float` also accepts
+  integers such as `5`.
+- `list(of:)` and `dict(of:)`, a JSON object used as a map with string keys.
+- `nullable(schema)`, a value or `null`, as an `Option`.
+- `enum([Admin, Member], name)`, a string standing for one of your values,
+  where `name` gives each variant its string; written as a `case` it cannot
+  miss one.
+- `one_of([variant(card_schema, to: Card), variant(bank_schema, to: Bank)],
+  encode:)`, a value that is one of several shapes, decoded by the first
+  variant that matches and shown as `anyOf`. `encode` is your `fn(a) -> Json`,
+  usually a `case` calling `schema.to_json` with the matching inner schema.
+- `map(schema, to:, from:)` changes the type, such as wrapping an `Int` in a
+  `UserId`. `try_map` is for changes that can fail, such as parsing a date,
+  and fails with your message.
+
+To use a schema outside an endpoint, `schema.to_json(value, schema)` encodes
+and `schema.decoder(schema)` gives a `gleam/dynamic/decode` decoder.
+
+## Constraints
+
+Constraints are checked while decoding, and shown in the document as the
+matching JSON Schema keyword. Their messages are the ones `howdy/validate`
+uses:
+
+- `min_length`, `max_length` and `not_empty` for strings.
+- `email`, the light check from `validate.email`, shown as `format: email`.
+- `minimum` and `maximum` for integers; `float_minimum` and `float_maximum`
+  for floats.
+- `min_items` and `max_items` for lists.
+
+```gleam
+schema.string()
+|> schema.rule(validate.trim())
+|> schema.not_empty
+|> schema.max_length(50)
+```
+
+`schema.rule` runs any `howdy/validate` rule. Rules can change the value, as
+`validate.trim()` does, so later constraints see the trimmed text. The
+document cannot show what a rule checks, so add a `description` when
+clients need to know.
+
+## Documentation
+
+- `description(schema, text)`.
+- `example(schema, value)`, encoded with the schema itself.
+- `format(schema, name)`, such as `"date-time"` or `"uuid"`. This only
+  documents the value; pair it with `try_map` or `rule` to check it.
+- `deprecated(schema)`.

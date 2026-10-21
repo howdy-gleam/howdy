@@ -1,0 +1,9 @@
+name = "parity_test"
+version = "0.1.0"
+description = "Checks howdy_ui renders the same HTML and CSS on Erlang and JavaScript"
+
+[dependencies]
+gleam_stdlib = ">= 1.0.0 and < 2.0.0"
+lustre = ">= 5.7.0 and < 6.0.0"
+howdy = { path = "../.." }
+howdy_ui = { path = ".." }

@@ -1,0 +1,215 @@
+# Howdy Database
+
+`howdy_database` is an optional package for apps that keep data in
+PostgreSQL or SQLite through [Gloo](https://hexdocs.pm/gloo). It gives you:
+
+- a way to open PostgreSQL with safe production defaults, and the settings
+  SQLite needs
+- [transactions and queries](/docs/database/transactions) that behave the
+  same on both databases, and return
+  [`service.Result`](/docs/controllers/services) so a failure maps straight
+  to an HTTP response
+- [migrations](/docs/database/migrations) owned by a package, checksummed
+  and checked at startup
+
+[Howdy Auth](/docs/auth/overview) is built on it, so an app with auth
+already has it. You can use it for your own tables with or without auth.
+
+Your app opens, configures and closes the database. Everything in this
+package only receives the Gloo `Repo`.
+
+## Install
+
+Add the package and Gloo to your project:
+
+```sh
+gleam add howdy_database@1 gloo@1
+```
+
+## Opening SQLite
+
+Open the Repo with Gloo, then call `database.sqlite_defaults` once:
+
+```gleam
+import gloo/adapter/sqlite
+import howdy/database
+
+pub fn connect() {
+  let assert Ok(db) = sqlite.start(sqlite.file("app.db"))
+  let assert Ok(_) = database.sqlite_defaults(db)
+  db
+}
+```
+
+It turns on foreign keys, which SQLite leaves off, waits up to five seconds
+for another connection's write lock instead of failing at once, and
+switches the file to write-ahead logging, so a backup or another reader
+never blocks the writer. On PostgreSQL it does nothing.
+
+## Opening PostgreSQL
+
+`howdy/database/postgres` opens a Repo with production defaults:
+
+```gleam
+import gleam/result
+import howdy/database/postgres
+
+pub fn connect() {
+  let assert Ok(db) =
+    postgres.from_env()
+    |> result.try(postgres.start)
+  db
+}
+```
+
+`from_env` reads `DATABASE_URL`. `from_url` takes the same
+`postgres://user:password@host:port/database?sslmode=…` form directly. The
+URL is never repeated in an error, so the password stays out of your logs.
+
+`start` waits up to 10 seconds for the server to answer, and refuses a
+server older than PostgreSQL 14. A wrong host, password or database fails
+as the app starts, not at the first request.
+
+### TLS
+
+Without an `sslmode`:
+
+- TLS is off for loopback addresses, and for host names without a dot, such
+  as a Compose service called `db`.
+- Everything else gets TLS, verified against the system's certificate
+  authorities.
+
+`sslmode=require` encrypts without verifying, and `sslmode=disable` turns
+TLS off. `allow` and `prefer` are refused, because they fall back to
+plain text without telling you.
+
+### Timeouts
+
+Every connection starts with:
+
+- `timezone` UTC
+- a 30 second `statement_timeout`
+- a 5 second `lock_timeout`
+- a 60 second `idle_in_transaction_session_timeout`
+
+Change them before `start`, in milliseconds. Zero turns one off:
+
+```gleam
+postgres.from_env()
+|> result.map(postgres.statement_timeout(_, 10_000))
+|> result.map(postgres.pool_size(_, 20))
+|> result.try(postgres.start)
+```
+
+`postgres.parameter(config, name, value)` sets any other server parameter.
+Migrations lift the statement and lock timeouts for their own transaction,
+so a long migration is not cut short.
+
+Behind a pooler such as PgBouncer that rejects unknown startup parameters,
+set the timeouts on the database role with `ALTER ROLE … SET`, and pass
+zero here.
+
+### Querying with pog or Squirrel
+
+Code that talks to pog directly, such as the functions
+[Squirrel](https://hexdocs.pm/squirrel) generates, can share the same pool.
+`start_pool` starts it like `start`, but keeps the `pog.Connection` as well
+as the Repo:
+
+```gleam
+let assert Ok(pool) =
+  postgres.from_env()
+  |> result.try(postgres.start_pool)
+
+let db = postgres.repo(pool)          // for auth and other Howdy modules
+let conn = postgres.connection(pool)  // for pog and Squirrel
+```
+
+`postgres.transaction` opens one transaction and gives you both handles to
+it. Everything commits or rolls back together, and a Howdy module's own
+transaction becomes a savepoint inside it:
+
+```gleam
+use conn, db <- postgres.transaction(pool)
+use note <- result.try(
+  sql.insert_note(conn, owner, body) |> result.map_error(postgres.error),
+)
+audit.record(db, owner, note.id)
+```
+
+Open the transaction this way, not with `database.transaction`: a Repo
+does not give up its pog connection, so Squirrel queries cannot join a
+transaction the Repo opened. `postgres.error` turns a pog error into a
+`service.Error` the way `howdy/database` does: a constraint violation
+becomes a `Conflict`, anything else an `Internal`, without the driver's
+message.
+
+If your app starts pog itself, `postgres.from_pog(started)` wraps the pool
+in the same way, without waiting for the server. Queries sent straight to
+pog skip the query spans that the Repo records.
+
+### Listening for changes
+
+PostgreSQL can tell every connection to a database that something
+happened, with `NOTIFY`. `postgres.listen` hears a channel, and
+`postgres.notify` sends on one:
+
+```gleam
+let assert Ok(_listener) =
+  postgres.listen(db, "orders", fn(order_id) {
+    process.send(dashboard, OrderPlaced(order_id))
+  })
+
+use conn <- database.transaction(db)
+use order <- result.try(orders.insert(conn, cart))
+postgres.notify(conn, "orders", int.to_string(order.id))
+```
+
+A notification sent inside a transaction goes out when it commits, and
+not at all if it rolls back, so listeners never hear about a change they
+cannot see yet. It reaches every listener on the channel, on this node or
+any other, which makes it a way for app servers that are not connected to
+each other to share news. [Howdy Jobs](/docs/jobs/overview) wakes its
+runners this way, and the admin's database grid follows changes with it.
+
+The listener is a process linked to the one that called `listen`, with a
+connection of its own. It connects with the pool's settings, which a pool
+opened by `howdy/database/postgres` remembers. For a pool your app started
+some other way it looks for them inside pgo, and `postgres.listen_via`
+takes them from a `pog.Config` when it cannot. When the connection drops,
+the listener connects and listens again by itself, but what was sent
+meanwhile is not heard: if missing one matters, check now and then as
+well, more slowly.
+
+Channels are lowercase names, such as `orders` or `howdy_jobs`, and a
+payload is text of up to 8000 bytes, so send an id rather than the record.
+
+## Sharing a SQLite Repo
+
+Gloo gives a SQLite Repo exactly one connection. Everything that goes
+through `howdy/database` takes turns on it, first come first served, so
+auth and your own code can share one Repo safely.
+
+Calls made directly through `gloo/repo` do not take turns. If your app
+makes them while requests are being served, give that code a second Repo of
+its own, opened on the same file.
+
+PostgreSQL's pool hands each transaction its own connection, so none of
+this applies there.
+
+## Health checks
+
+`database.health_check(db)` is a check for a
+[health check](/docs/guides/health-checks): it runs `SELECT 1` and fails if
+the database does not answer.
+
+```gleam
+howdy.health_check(
+  app,
+  health.new() |> health.check("database", database.health_check(db)),
+)
+```
+
+On SQLite the check takes its turn on the connection like everything else,
+so a write that holds it for longer than the health check's timeout fails
+the check too.

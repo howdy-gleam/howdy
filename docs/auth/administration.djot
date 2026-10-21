@@ -1,0 +1,128 @@
+# User administration
+
+Some operations are for trusted code only: creating users, suspending them,
+changing [fields](/docs/auth/fields), [groups](/docs/auth/groups) and
+[roles](/docs/auth/roles). None of them is exposed over HTTP, because only
+your app knows who its administrators are.
+
+Each takes `by:`, a `user.Actor`, which is recorded with the change:
+
+- `user.Acting(principal)`: a signed-in user asked for this, such as an
+  administrator using your admin page.
+- `user.System`: code acting for nobody, such as a startup task or a
+  scheduled job.
+- `user.SystemFrom(client)`: the same, with where the request came from,
+  for an operator request that arrived over a transport of your own.
+
+`by:` records who acted. Deciding whether they were allowed is still your
+job, and comes first:
+
+```gleam
+fn suspend_user(ctx, identity, permissions) {
+  use admin <- guard.require(ctx, auth.required(identity))
+  use _ <- guard.require(
+    ctx,
+    access.require_permission(permissions, "users.suspend", access.Global),
+  )
+  use user_id <- param.string(ctx, "id")
+  auth.suspend(identity, user_id, by: user.Acting(admin))
+  |> service.no_content(ctx)
+}
+```
+
+## Creating users
+
+`auth.provision(identity, email, by:)` creates a user without asking them:
+an invitation, an import, a sync from a directory. It works with
+registration turned off, which makes it the way to run an app that is by
+invitation only.
+
+```gleam
+let assert Ok(ada) =
+  auth.provision(identity, "ada@example.com", by: user.System)
+```
+
+Nothing is emailed. The user signs in with an email token when they are
+ready, which is also what proves the address is theirs. An address that
+already has an account is a `Conflict`.
+
+`auth.provision_with` sets [fields](/docs/auth/fields) in the same
+transaction. Outside `group.Single`, choose the group with
+`auth.in_group(identity, group_id)`.
+
+## Suspending
+
+- `auth.suspend(identity, user_id, by:)` ends every session and cancels
+  every emailed token of that user, in one transaction. They cannot sign in
+  again until resumed.
+- `auth.resume(identity, user_id, by:)` lets them sign in again. Old
+  sessions do not come back.
+- `auth.revoke_sessions(identity, user_id, by:)` signs a user out
+  everywhere without suspending them.
+
+A user that does not exist is a `NotFound`. `howdy/auth/users` has
+`users.get` to look one up by id.
+
+## The audit trail
+
+Changes are recorded in the `howdy_auth_events` table, in the same
+transaction as the change itself: the user affected, the action, the acting
+user, the client, and a detail such as the role and scope or the sign-in
+method.
+
+Actions include `user.registered`, `user.provisioned`, `user.suspended`,
+`user.resumed`, `user.moved`, `user.fields_changed`, `session.created`,
+`session.revoked`, `sessions.revoked`, `password.set`, `token.requested`,
+`login.failed`, `group.created`, `group.renamed`, `group.deleted`,
+`role.defined`, `role.assigned` and `role.revoked`. A token request for an address that has an account is
+recorded with its purpose, so you can answer somebody who asks why they
+were sent an email.
+
+Read the table with your own queries. There is no API for it yet, no
+export, and nothing protecting it from a person with database access.
+
+A client address is personal data. Decide how long to keep events, and
+apply that from a scheduled job:
+
+```gleam
+auth.prune_events(identity, before: unix_seconds)
+```
+
+## Behind a proxy
+
+Rate limits, password back-off and the audit trail all need to know which
+client a request came from. By default that is the address of the socket,
+which behind a reverse proxy is the proxy, for everyone. Tell both the
+routes and the guard which header your proxy sets:
+
+```gleam
+import gleam/http/request
+import gleam/option
+
+let client = fn(ctx: controller.Context) {
+  request.get_header(ctx.request, "fly-client-ip") |> option.from_result
+}
+
+routes.api_limited_by(identity, at: "/api/auth", key: client)
+auth.required_from(identity, client)
+```
+
+Only read a header that your proxy overwrites. One the client can set lets
+anybody choose their own bucket, and claim to be anybody in the audit
+trail.
+
+The route limits are 30 requests a minute per client to the endpoints that
+send email, exchange tokens or check passwords, and 300 a minute to the
+signed-in ones. They are kept in memory, so with several instances each
+counts on its own. The per-address limits on
+[email](/docs/auth/signing-in) and [passwords](/docs/auth/passwords) are
+kept in the database, and are shared.
+
+Your mail provider should cap the total volume of outgoing mail too.
+Nothing here limits requests spread over many different addresses.
+
+## Housekeeping
+
+Expired tokens and sessions are removed as a side effect of sign-ins. On a
+quiet installation, call `auth.prune_expired(identity)` from a scheduled
+job. Nothing is scheduled for you.

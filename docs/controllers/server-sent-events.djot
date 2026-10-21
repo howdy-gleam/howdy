@@ -1,0 +1,278 @@
+# Server-sent events
+
+Sometimes the server has news and the browser only needs to listen: a
+notification, an order changing state, a build log, the progress of a long
+job. Server-sent events are made for that. The browser opens an ordinary
+`GET` request, and the server keeps the response open and writes events to
+it as things happen.
+
+Compared with a [WebSocket](/docs/controllers/websockets), an event stream
+only goes one way, from server to browser. In return:
+
+- It is plain HTTP, so proxies, load balancers and HTTP/2 handle it like
+  any other response, and the browser's usual cookie and CORS rules apply.
+- The browser's `EventSource` reconnects by itself if the connection drops,
+  and tells the server the last event it saw, so it can pick up where it
+  left off.
+
+When the browser needs to talk back, it sends ordinary requests. If it
+talks back a lot, use a WebSocket instead.
+
+In Howdy an event stream is an ordinary route. It goes through the same
+middleware, [guards](/docs/controllers/guards) and versioning as any other,
+and the handler finishes with `sse.start` where another would return a page.
+
+## A first stream
+
+```gleam
+import howdy/controller.{type Context}
+import howdy/sse
+
+pub fn orders_controller() {
+  controller.new("orders")
+  |> controller.get("/events", fn(ctx: Context) {
+    sse.new(fn(stream) {
+      sse.join(stream, "orders")
+      Nil
+    })
+    |> sse.start(ctx)
+  })
+}
+```
+
+Anything in your program can now send an event to every browser listening,
+from a handler, a service or a background job:
+
+```gleam
+import gleam/json
+
+sse.broadcast(
+  "orders",
+  sse.json(json.object([#("id", json.int(42))])) |> sse.name("order.created"),
+)
+```
+
+In the browser:
+
+```js
+const events = new EventSource("/orders/events")
+
+events.addEventListener("order.created", (event) => {
+  const order = JSON.parse(event.data)
+  console.log("new order", order.id)
+})
+```
+
+There are three parts to every stream, as with a WebSocket:
+
+- `sse.new` takes the function to run when the stream opens. What it
+  returns is the stream's starting state, here `Nil`.
+- Callbacks such as `on_message` handle what happens next. Each is given the
+  stream to send on and the current state.
+- Each callback returns what to do now: `sse.continue(state)` to carry on,
+  or `sse.stop()` to end the stream.
+
+Each stream runs in its own process, so its state is private to it, and a
+crash in one stream does not touch any other.
+
+## Events
+
+An event is some data with up to three optional fields. Build one with
+`sse.event` for text or `sse.json` for JSON, then add the others:
+
+```gleam
+sse.event("Deploy finished")
+|> sse.name("deploy")
+|> sse.id("1042")
+|> sse.retry(5000)
+```
+
+- `name` is the event's type. The browser delivers named events to
+  `addEventListener(name, ...)`, and unnamed ones to `onmessage`.
+- `id` is what the browser sends back when it reconnects. See
+  [Picking up where you left off](#Picking-up-where-you-left-off).
+- `retry` tells the browser how many milliseconds to wait before
+  reconnecting.
+
+Data spanning several lines arrives in the browser as it was sent. An event
+is an ordinary record, `sse.Event`, so tests can compare events with `==`.
+
+Send to the stream's own client with `sse.send`:
+
+```gleam
+let _ = sse.send(stream, sse.event("hello"))
+```
+
+It returns a `Result`, which is an error when the client has gone away.
+There is rarely anything useful to do about that, since the stream is about
+to end and `on_close` will run.
+
+## Topics
+
+A stream joins a topic with `sse.join`, and `sse.broadcast` sends an event
+to every stream on a topic. They work like WebSocket
+[channels](/docs/controllers/websockets#Channels):
+
+- A topic is just a string, and exists while it has members.
+- A stream that ends leaves all its topics by itself. Call `sse.leave` to
+  stop listening while staying open.
+- `broadcast` returns at once. Each stream sends from its own process, so a
+  slow client never holds up the others, or the caller.
+- `sse.size(topic)` tells you how many streams are on a topic.
+- If your app runs on several connected Erlang nodes, a broadcast reaches
+  the streams on all of them.
+
+Event stream topics are separate from WebSocket channel topics, even when
+the names match, because the two carry different kinds of message. A page
+that has both to serve broadcasts to each.
+
+## Messages from your own code
+
+To send a value to the stream's own code rather than straight to the
+client, use `sse.subject`. Whatever is sent to it arrives at `on_message`,
+which decides what to send and can update the state:
+
+```gleam
+pub type Progress {
+  Step(done: Int, of: Int)
+  Finished
+}
+
+fn job_progress(ctx: Context) {
+  use id <- param.string(ctx, "id")
+
+  sse.new(fn(stream) {
+    progress.watch(id, sse.subject(stream))
+    Nil
+  })
+  |> sse.on_message(fn(stream, state, message) {
+    case message {
+      Step(done:, of:) -> {
+        let _ =
+          sse.send(
+            stream,
+            sse.json(json.object([#("done", json.int(done)), #("of", json.int(of))]))
+              |> sse.name("progress"),
+          )
+        sse.continue(state)
+      }
+      Finished -> {
+        let _ = sse.send(stream, sse.event("") |> sse.name("finished"))
+        sse.stop()
+      }
+    }
+  })
+  |> sse.start(ctx)
+}
+```
+
+Here `progress.watch` stands for your own code, which keeps the subject and
+later calls `process.send(subject, Step(3, 10))`.
+
+`presence.subscribe` from `howdy/websocket/presence` sends to a subject in
+the same way, so a stream can show who is online. Callbacks run in the
+stream's own process, so a stream can be tracked with
+`presence.track(people(), process.self(), ...)` like a socket.
+
+## Ending a stream
+
+`sse.stop()` ends the stream, and `on_close` runs once when a stream ends,
+however that happens: your callback stopped it, the client went away, or
+the server is shutting down. Use it to tidy up. Nothing can be sent from
+there.
+
+The browser's `EventSource` reconnects after a stream ends, which is what
+you want when a connection drops, but not when the stream has nothing more
+to say. Either close it from the browser with `events.close()` when it
+receives a final event, as the `finished` event above allows, or answer the
+reconnecting request with a status other than `200`, such as `204`, which
+tells `EventSource` to stop.
+
+When the server stops, open streams end straight away, so browsers
+reconnect, perhaps to another server, rather than waiting on one that is
+going away.
+
+## Picking up where you left off
+
+When a browser reconnects it sends the `id` of the last event it saw, and
+`sse.last_event_id(stream)` returns it. A stream whose events carry IDs can
+send what was missed before anything new:
+
+```gleam
+sse.new(fn(stream) {
+  sse.join(stream, "orders")
+  case sse.last_event_id(stream) {
+    Some(id) ->
+      list.each(orders.changed_since(id), fn(order) {
+        let _ = sse.send(stream, order_event(order))
+      })
+    None -> Nil
+  }
+  Nil
+})
+```
+
+Join the topic first, as here, so nothing broadcast while catching up is
+lost. The client may then see an event twice, so make events safe to apply
+more than once, for instance by carrying the whole new state of an order
+rather than a change to it.
+
+Howdy does not store events for you; what "since" means is up to your app,
+whether that is a sequence number, a timestamp or a database row.
+
+## Keeping streams open
+
+Proxies and load balancers close connections that have been quiet for a
+while. To stop that, every stream sends a comment every 15 seconds, which
+browsers ignore. Change the interval with `sse.heartbeat(milliseconds)`, or
+turn it off with `sse.no_heartbeat`.
+
+The heartbeat also notices clients that went away without a word, such as a
+laptop closed mid-stream: when one cannot be sent, the stream ends and
+`on_close` runs.
+
+Responses carry `x-accel-buffering: no`, which asks nginx and proxies like
+it to pass events on as they come rather than buffering them.
+
+## Who may connect
+
+An event stream is an ordinary `GET`, so the browser's usual rules apply.
+Another website cannot read your stream unless your
+[CORS](/docs/middleware/cors) settings allow it, and `EventSource` sends
+cookies to your own site, so a guard that reads the session cookie protects
+a stream like any other route. `EventSource` cannot set headers, so a guard
+that expects an `authorization` header will not work from a browser.
+
+## Testing streams
+
+`howdy/testing` runs a stream without a socket. `testing.open_events` opens
+the stream a response describes, `testing.next_event` waits for the next
+event it sends, and `testing.close_events` ends it as a client going away
+would:
+
+```gleam
+import howdy/sse
+import howdy/testing
+
+pub fn new_orders_are_announced_test() {
+  let stream =
+    testing.get("/orders/events")
+    |> testing.send(app())
+    |> testing.open_events
+
+  sse.broadcast("orders", sse.event("42") |> sse.name("order.created"))
+
+  assert testing.next_event(stream)
+    == Ok(sse.event("42") |> sse.name("order.created"))
+  testing.close_events(stream)
+}
+```
+
+The stream's `on_open` has run by the time `open_events` returns, so it is
+already on its topics. Set the `last-event-id` header on the request to test
+a reconnect. `testing.sent_events` returns everything sent so far without
+waiting, which suits events sent from `on_open`. Heartbeats are not sent in
+tests.
+
+A guard that turns the request away answers as usual, so check the status
+before opening the stream.

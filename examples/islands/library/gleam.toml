@@ -1,0 +1,10 @@
+name = "howdy_islands_library"
+version = "0.1.0"
+gleam = ">= 1.18.0"
+description = "A package that ships an island, for the islands example"
+
+[dependencies]
+gleam_stdlib = ">= 1.0.0 and < 2.0.0"
+gleam_json = ">= 3.1.0 and < 4.0.0"
+lustre = ">= 5.7.0 and < 6.0.0"
+howdy_ui = { path = "../../../ui" }

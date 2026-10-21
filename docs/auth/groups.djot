@@ -1,0 +1,115 @@
+# Groups
+
+Every user belongs to exactly one group: a workspace, a tenant, an
+organization. A group is an `id`, a `name` and two timestamps. Keep more
+about it in [fields](/docs/auth/fields), or in tables of your own keyed by
+the id.
+
+An app that never mentions groups needs to do nothing. Everyone is in one
+group, whose id is `group.default_id`, `"default"`.
+
+## Choosing a mode
+
+Decide how users relate to groups once, at startup:
+
+```gleam
+import howdy/auth
+import howdy/auth/group
+
+let assert Ok(identity) = auth.with_groups(identity, group.OneGroupPerUser)
+```
+
+- `group.Single`, the default: one group, and one account per email
+  address.
+- `group.OneGroupPerUser`: many groups. An address has one account, which
+  is in one group.
+- `group.AccountPerGroup`: many groups. An address can have a separate
+  account in each group, with its own user id, password and sessions.
+
+## Acting in a group
+
+`auth.in_group(identity, id)` is the same configuration, acting in one
+group. Requests made through it apply to that group, and it only
+authenticates that group's users:
+
+```gleam
+let acme = auth.in_group(identity, "acme")
+
+// The new user joins acme.
+auth.request_token(acme, email, auth.Register)
+
+// Only acme's users get in.
+controller.guarded("/acme", auth.required(acme))
+```
+
+When a group must be named depends on the mode:
+
+- Under `OneGroupPerUser`, *registering* needs a group, because that is how
+  the new user's group is chosen. Signing in does not; if one is given, the
+  account must be in it.
+- Under `AccountPerGroup`, everything that takes an address needs a group,
+  because the address alone does not name an account. Without one the
+  answer is `400`.
+- A group that does not exist is `404`. Under `Single` that is every id but
+  `default`.
+
+Over HTTP, the endpoints that take an `email` also take an optional
+`"group"`, and the starter pages pass on a `?group=` query parameter:
+
+```json
+{"email": "ada@example.com", "group": "acme"}
+```
+
+That value is only the client's claim about where it wants to sign in. Once
+a request is authenticated, trust `principal.user.group_id`, or guard the
+route with `auth.required(auth.in_group(identity, id))`.
+
+With registration on, anybody who knows a group's id can register into it.
+If membership is by invitation, leave `allow_registration` off and create
+members with [`auth.provision`](/docs/auth/administration).
+
+## Managing groups
+
+`howdy/auth/groups` creates and changes groups. These are trusted
+operations: none is exposed over HTTP, and each records who acted in `by:`.
+Check that the caller is allowed before you call one.
+
+```gleam
+import howdy/auth/groups
+import howdy/auth/user
+
+let assert Ok(acme) = groups.create(identity, name: "Acme", by: user.System)
+let assert Ok(_) =
+  groups.create_with_id(identity, id: "globex", name: "Globex", by: user.System)
+
+groups.list(identity)
+groups.get(identity, "globex")
+groups.rename(identity, acme.id, to: "Acme Ltd", by: user.Acting(principal))
+groups.members(identity, acme.id)
+groups.move(identity, user_id, to: "globex", by: user.Acting(principal))
+groups.delete(identity, acme.id, by: user.System)
+```
+
+- `create` generates the id. `create_with_id` takes one of your own: 1 to
+  64 letters, digits, hyphens and underscores, such as a tenant slug.
+- `move` takes the user's sessions and password with them. Under
+  `AccountPerGroup` it is a `Conflict` if the destination already has an
+  account for that address.
+- `delete` is a `Conflict` while the group has users.
+- Groups cannot be created under `Single`.
+
+Groups are separate from [roles](/docs/auth/roles). To give somebody a role
+within a group, use the scope `authorization.Organization(group_id)`, and
+revoke those roles yourself when you move a user.
+
+## Changing mode
+
+The mode is recorded in the database. `auth.new` adopts the recorded mode,
+and `auth.with_groups` with a different one converts the installation in a
+single transaction, or refuses with `Conflict` when the existing users do
+not fit: `Single` needs everyone in `default`, and leaving `AccountPerGroup`
+needs no address to have accounts in two groups.
+
+Sessions survive a conversion. Emailed tokens that have not been exchanged
+do not. Stop your other nodes first, because a running node keeps the mode
+it started with.

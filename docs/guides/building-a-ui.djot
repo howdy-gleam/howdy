@@ -1,0 +1,215 @@
+# Building a UI
+
+This guide builds a small, themed web page with Howdy UI, then brings part
+of it to life with a component that runs on the server. It takes about
+fifteen minutes and touches every part of the UI package, with links to the
+page that covers each part in depth.
+
+Howdy UI is a separate package from Howdy itself, so an app that only serves
+JSON never pulls it in. It is built on two Gleam libraries:
+[Lustre](https://hexdocs.pm/lustre), for writing HTML as Gleam functions,
+and [Sketch](https://hexdocs.pm/sketch), for writing CSS the same way. You
+do not need to know either to follow along.
+
+## Before you start
+
+A project made with `howdy new` already has Howdy UI installed and a themed
+home page, so you can skip to the next section.
+
+To add it to another project:
+
+```sh
+gleam add howdy_ui@1 lustre@5
+```
+
+`lustre` is added too because your own code will import it to write HTML.
+
+## A first page
+
+A page is a handler like any other. Build it with `howdy/ui/page`, fill the
+body with components from `howdy/ui`, and answer the request with
+`page.respond`:
+
+```gleam
+import howdy/controller.{type Context}
+import howdy/ui
+import howdy/ui/page
+import lustre/element.{text}
+
+pub fn home_controller() {
+  controller.new("")
+  |> controller.get("/", home)
+}
+
+fn home(ctx: Context) {
+  page.new("Orders")
+  |> page.body([
+    ui.container([], [
+      ui.stack([], [
+        ui.h1("Orders"),
+        ui.p([text("Nothing here yet.")]),
+      ]),
+    ]),
+  ])
+  |> page.respond(ctx)
+}
+```
+
+Open the page and you have a complete HTML document: a title, a viewport
+tag, and a centred column with a heading and a paragraph, already styled.
+There is no CSS file to link and no build step. The page carries the styles
+for the components it uses.
+
+[Pages](/docs/ui/pages) covers the document, and
+[Components](/docs/ui/components) lists what `howdy/ui` offers.
+
+## Light and dark
+
+The page already follows your system's light or dark setting. Try switching
+it and reloading. Every component reads its colours from the *theme*, and a
+page offers a light and a dark one unless you say otherwise.
+
+Let visitors choose for themselves with a toggle, and remember the choice
+in a cookie:
+
+```gleam
+import howdy/cookie
+
+fn home(ctx: Context) {
+  use theme <- cookie.string_or(ctx, "theme", default: "system")
+
+  page.new("Orders")
+  |> page.theme(theme)
+  |> page.body([
+    ui.container([], [
+      ui.stack([], [
+        ui.h1("Orders"),
+        ui.p([text("Nothing here yet.")]),
+        ui.theme_toggle([text("Toggle theme")], from: "light", to: "dark"),
+      ]),
+    ]),
+  ])
+  |> page.respond(ctx)
+}
+```
+
+The toggle switches the theme in the browser at once and stores the choice
+in a `theme` cookie. On the next request `cookie.string_or` reads it back
+and `page.theme` puts it on the document, so the page arrives in the right
+theme with no flash. A visitor who has never chosen has no cookie, gets
+`"system"`, which is not a theme the page offers, and so is left to their
+system setting.
+
+## Your own colours
+
+A theme is a record. Make your own by starting from a built-in one and
+changing what you want:
+
+```gleam
+import howdy/ui/theme.{Colors}
+
+pub fn brand() -> theme.Theme {
+  theme.light()
+  |> theme.named("brand")
+  |> theme.colors(fn(c) { Colors(..c, primary: "#0f766e", on_primary: "#fff") })
+}
+```
+
+```gleam
+page.new("Orders")
+|> page.themes(theme.themes(default: brand(), alternatives: [theme.dark()]))
+```
+
+Every button and link on the page is now teal, without touching a single
+component. [Themes](/docs/ui/themes) has the full list of what a theme can
+set.
+
+## Bringing it to life
+
+So far the page is plain HTML. For something interactive, Howdy UI can run a
+*live component*: a piece of UI whose state and logic stay on the server.
+The browser sends clicks up a WebSocket and applies the changes that come
+back. You write no JavaScript.
+
+A live component is a Lustre app: a starting state, a function that updates
+it for each message, and a view.
+
+```gleam
+import gleam/int
+import howdy/ui
+import howdy/ui/button.{Primary, Secondary}
+import lustre
+import lustre/element.{text}
+import lustre/event
+
+pub type Msg {
+  Increment
+  Decrement
+}
+
+pub fn counter() {
+  lustre.simple(init, update, view)
+}
+
+fn init(start: Int) -> Int {
+  start
+}
+
+fn update(count: Int, msg: Msg) -> Int {
+  case msg {
+    Increment -> count + 1
+    Decrement -> count - 1
+  }
+}
+
+fn view(count: Int) {
+  ui.card([], [
+    ui.h2("Counter"),
+    ui.p([text(int.to_string(count))]),
+    ui.row([], [
+      ui.button(Secondary, [event.on_click(Decrement)], [text("-")]),
+      ui.button(Primary, [event.on_click(Increment)], [text("+")]),
+    ]),
+  ])
+}
+```
+
+It needs two things: a route for the socket, and a place in a page.
+
+```gleam
+import howdy/ui/live
+
+pub fn home_controller() {
+  controller.new("")
+  |> controller.get("/", home)
+  |> controller.get("/counter", fn(ctx) {
+    live.serve(ctx, counter(), with: 0)
+  })
+}
+```
+
+```gleam
+page.new("Orders")
+|> page.live
+|> page.body([
+  ui.container([], [ui.h1("Orders"), live.mount("/counter")]),
+])
+|> page.respond(ctx)
+```
+
+`page.live` adds the small script that connects, and `live.mount` marks
+where the component goes. Click the buttons and the count changes, with the
+number held on the server. Open the page in two tabs and each has its own
+count, because each connection gets its own copy of the component.
+
+[Live components](/docs/ui/live-components) covers sharing one component
+between every visitor, sending it messages from elsewhere, and protecting
+it with a guard.
+
+## Going further
+
+- When the built-in components are not enough, copy one into your project
+  to change it, or write your own from the same building blocks. See
+  [Custom components](/docs/ui/custom-components).
+- Before you put a site in front of visitors, write the CSS out as one
+  cacheable file. See [Publishing](/docs/ui/publishing).

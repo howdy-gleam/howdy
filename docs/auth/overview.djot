@@ -1,0 +1,219 @@
+# Howdy Auth
+
+`howdy_auth` is an optional package that signs people in to a Howdy app. It
+gives you:
+
+- sign-in by a token sent to the visitor's email address, with no password
+  to keep
+- optional [passwords](/docs/auth/passwords) alongside the email tokens
+- [social sign-in](/docs/auth/providers) with Google, Apple, GitHub,
+  Facebook and Microsoft Entra
+- [passkeys](/docs/auth/passkeys) and
+  [multi-factor authentication](/docs/auth/mfa)
+- [enterprise single sign-on](/docs/auth/sso) over OpenID Connect and SAML
+- a [guard](/docs/controllers/guards) that hands your handlers the signed-in
+  user
+- JSON endpoints, minimal starter pages, and the same operations as plain
+  functions for when you bring your own pages
+- [groups](/docs/auth/groups) for workspaces and tenants, and
+  [fields](/docs/auth/fields) for small facts about a user
+- separate [roles and permissions](/docs/auth/roles)
+
+It stores everything in your app's own database, through the `gloo` Repo you
+already have, using [Howdy Database](/docs/database/overview). SQLite and
+PostgreSQL both work. Your app owns the connection and supplies the function
+that sends email; the package never opens a database or talks to a mail
+server itself.
+
+An account is identified by its *email address*. There is no username login
+built in, though a username fits well as a field: see
+[Username and password sign-in](/docs/guides/username-and-password). SCIM,
+invitations by email and a hosted management dashboard are not
+implemented.
+
+## Install
+
+Add the packages to your project, next to `howdy`:
+
+```sh
+gleam add howdy_auth@1 howdy_database@1
+```
+
+`howdy_database` provides the `howdy/migration` module you run the auth
+migrations with.
+
+Nothing native is built: passwords are hashed with OTP's own `crypto`.
+
+## Create the tables
+
+The package brings its own [migrations](/docs/auth/migrations). Run them
+before the app starts, with the same Repo your app uses:
+
+```gleam
+import howdy/auth
+import howdy/authorization
+import howdy/migration
+
+pub fn migrate(db) {
+  migration.run(db, [auth.schema(), authorization.schema()])
+}
+```
+
+Leave out `authorization.schema()` if you do not need roles. The tables are
+named `howdy_auth_*` and `howdy_authz_*`, and the package checks at startup
+that nobody has changed them by hand.
+
+## Configure
+
+Build one `Auth` value when the app starts, and share it:
+
+```gleam
+import howdy/auth
+
+pub fn identity(db, send_email) {
+  let assert Ok(identity) =
+    auth.new(
+      repo: db,
+      origin: "https://app.example.com",
+      deliver: send_email,
+    )
+  auth.allow_registration(identity)
+}
+```
+
+- `repo` is your database. With SQLite, auth and your own code can share
+  it, as long as your code goes through
+  [`howdy/database`](/docs/database/transactions). If your code calls
+  `gloo/repo` directly while requests are being served, give auth a second
+  Repo of its own, opened on the same file.
+- `origin` is the public address of your site: scheme, host and optional
+  port. It must be `https`, except for `http://localhost`,
+  `http://127.0.0.1` and `http://[::1]` while you develop. Auth never trusts
+  the `host` header to work this out.
+- `deliver` sends an email. See [Sending the email](/docs/auth/signing-in).
+  An app that only uses providers can use `auth.new_without_email` instead.
+
+Everything else is opt-in, and returns a new `Auth`:
+
+- `auth.allow_registration(identity)` lets visitors create accounts.
+  Without it, only [provisioned](/docs/auth/administration) users exist.
+- `auth.with_passwords(identity)` turns on [passwords](/docs/auth/passwords).
+- `auth.with_provider(identity, provider)` adds a
+  [social sign-in provider](/docs/auth/providers).
+- `auth.with_passkeys(identity, name)` turns on
+  [passkeys](/docs/auth/passkeys).
+- `auth.with_mfa(identity, config)` turns on
+  [second factors](/docs/auth/mfa).
+- `auth.with_sso(identity, config)` turns on
+  [single sign-on connections](/docs/auth/sso).
+- `auth.with_policy(identity, policy)` changes
+  [lifetimes and limits](/docs/auth/sessions).
+- `auth.with_multi_session(identity, max:)` lets one browser stay signed in
+  to [several accounts](/docs/auth/sessions).
+- `auth.with_groups(identity, mode)` turns on [groups](/docs/auth/groups).
+- `auth.with_session_store(identity, store)` keeps
+  [sessions](/docs/auth/sessions) somewhere other than the database.
+- `auth.with_account_deletion` and `auth.with_email_change_approval` shape
+  [account changes](/docs/auth/account).
+
+## Mount the routes
+
+```gleam
+import howdy
+import howdy/auth/pages
+import howdy/auth/routes
+
+pub fn app(identity) {
+  howdy.new()
+  |> howdy.controller(routes.api(identity, at: "/api/auth"))
+  |> howdy.controller(pages.routes(identity, at: "/auth", api_at: "/api/auth"))
+}
+```
+
+`routes.api` is the JSON API. `pages.routes` adds starter pages that call
+it: `/auth/register`, `/auth/login`, `/auth/mfa` and `/auth/account`, plus
+`/auth/password/register` and `/auth/password/login` when passwords are on.
+The account page grows controls for whatever you turn on: passwords,
+passkeys, second factors, linked providers, sessions and account changes.
+The pages are deliberately plain and need JavaScript. Leave `pages.routes`
+out to write your own; [Signing in](/docs/auth/signing-in) lists the
+endpoints they would call.
+
+[Providers](/docs/auth/providers) and [SSO](/docs/auth/sso) sign in through
+browser redirects, and have routes of their own: `routes.providers` and
+`routes.sso`.
+
+## Protect your routes
+
+`auth.required(identity)` is a [guard](/docs/controllers/guards). On a
+guarded controller, the signed-in user arrives on `ctx.guard`:
+
+```gleam
+import howdy/auth
+import howdy/auth/user
+import howdy/controller
+
+pub fn account_controller(identity) {
+  controller.guarded("/account", auth.required(identity))
+  |> controller.get("/me", fn(ctx) {
+    controller.json(ctx, user.to_json(ctx.guard.user))
+  })
+  |> controller.build()
+}
+```
+
+For one route on an ordinary controller, use `guard.require`:
+
+```gleam
+use principal <- guard.require(ctx, auth.required(identity))
+```
+
+The value is a `user.Principal`: the `user`, a `session_id`, and the
+`client` the request came from. The user is a `user.User` with an `id`, an
+`email`, a `group_id`, and `created_at` and `updated_at` timestamps.
+
+The guard accepts a session cookie or an `Authorization: Bearer` header,
+and rejects a request that carries both. A visitor who is not signed in gets
+`401` with `{"error":"unauthorized"}`; the guard never redirects to a login
+page, so that choice stays with your app. A visitor who has passed their
+first factor but not yet their [second](/docs/auth/mfa) is not signed in.
+
+A write made with the cookie must carry an `origin` header matching the
+configured origin, which is what browsers send. That protects your own
+guarded routes from [CSRF](/docs/middleware/csrf) as well as the package's.
+Do not change anything in a `GET` handler.
+
+## Testing
+
+Auth works with [`howdy/testing`](/docs/guides/testing). Give each test an
+in-memory database, and a `deliver` function that hands the token to the
+test instead of sending it:
+
+```gleam
+import gleam/erlang/process
+import gloo/adapter/sqlite
+import howdy/auth/secret
+
+pub fn register_test() {
+  let assert Ok(db) = sqlite.start(sqlite.memory())
+  let assert Ok(_) = my_app.migrate(db)
+  let inbox = process.new_subject()
+  let identity =
+    my_app.identity(db, fn(delivery: auth.Delivery) {
+      process.send(inbox, secret.reveal(delivery.token))
+      Ok(Nil)
+    })
+
+  let res =
+    testing.post(
+      "/api/auth/register",
+      json.object([#("email", json.string("ada@example.com"))]),
+    )
+    |> testing.send(my_app.app(identity))
+  assert res.status == 202
+
+  let assert Ok(token) = process.receive(inbox, 1000)
+  let assert Ok(session) = auth.exchange(identity, token)
+  assert session.user.email == "ada@example.com"
+}
+```

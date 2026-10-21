@@ -1,0 +1,196 @@
+# Enterprise single sign-on
+
+When you sell to businesses, each customer usually wants their staff to
+sign in through the customer's own identity provider: Okta, Entra, Google
+Workspace, or anything that speaks OpenID Connect or SAML 2.0. In
+`howdy_auth`, each of these is a *connection*.
+
+Unlike the [built-in providers](/docs/auth/providers), connections are
+data. You create them while the app runs, they are stored in the auth
+database, and each is bound to the [group](/docs/auth/groups) its users
+belong to.
+
+## Turning it on
+
+```gleam
+import howdy/auth
+import howdy/auth/connection
+import howdy/auth/routes
+
+let assert Ok(sso) = connection.config(sso_key)
+let identity = auth.with_sso(identity, sso)
+
+howdy.new()
+|> howdy.controller(routes.sso(
+  identity,
+  at: "/auth",
+  success_path: "/account",
+  failure_path: "/login",
+))
+```
+
+`sso_key` seals client secrets in the database. Like the
+[MFA key](/docs/auth/mfa) it is 32 random bytes as unpadded base64url, kept
+outside the database, and it may be the same key.
+
+Mount the routes once. Connections created later are served without
+remounting.
+
+## Creating a connection
+
+`howdy/auth/connections` manages connections. Like
+[user administration](/docs/auth/administration) these operations are for
+trusted code, take `by:`, and are not exposed over HTTP: check the caller is
+allowed first.
+
+```gleam
+import howdy/auth/connection
+import howdy/auth/connections
+import howdy/auth/user
+
+let assert Ok(acme) =
+  connections.create_with_id(
+    identity,
+    id: "acme",
+    group: "acme",
+    name: "Acme",
+    protocol: connection.oidc(
+      issuer: "https://acme.okta.com",
+      client_id: okta_client_id,
+      client_secret: okta_client_secret,
+    ),
+    domains: ["acme.com"],
+    by: user.Acting(admin),
+  )
+```
+
+For SAML, pass what the customer's administrator gives you:
+
+```gleam
+connection.Saml(
+  entity_id: "http://www.okta.com/exk1abc",
+  sso_url: "https://acme.okta.com/app/acme/exk1abc/sso/saml",
+  certificates: [signing_certificate_pem],
+)
+```
+
+Give the customer **one URL**:
+
+```
+https://app.example.com/auth/sso/acme/callback
+```
+
+It is the redirect URI for OpenID Connect. For SAML it is both the
+assertion consumer service URL and the service provider's entity id. Ask
+SAML customers for a persistent NameID and an email attribute.
+
+`connections` also has `get`, `list`, `in_group`, `rename`,
+`set_protocol`, `set_domains`, `enable`, `disable` and `delete`. Every
+change is recorded in the audit trail, as `sso.created`,
+`sso.protocol_changed` and so on. Under `group.Single` a connection's group
+is `group.default_id`.
+
+## The routes
+
+Relative to the mount:
+
+- `POST /sso/login` with a form field `email` picks the connection by the
+  address's domain, and starts signing in.
+- `POST /sso/<connection>/login` starts at a known connection.
+- `POST /sso/<connection>/link` links the signed-in user. It needs a recent
+  sign-in.
+- `GET /sso/<connection>/callback` is where OpenID Connect returns.
+- `POST /sso/<connection>/callback` is where SAML posts back.
+- `GET /sso/<connection>/metadata` is the SAML service provider metadata.
+
+In your own code, `auth.sso_for_email(identity, email)` finds the
+connection for an address, if there is one.
+
+## What a connection is believed about
+
+The identity provider belongs to the customer, so it may claim anything.
+Three rules keep that in bounds:
+
+- **Domains.** An address is only believed if it is in the connection's
+  `domains`, and a domain can belong to one connection only. Confirm that
+  the customer controls a domain before you add it. Howdy does not.
+- **Group.** A connection's users only sign in to, or are created in, its
+  own group.
+- **Identities belong to the connection.** One customer's provider cannot
+  claim another customer's users. Deleting a connection, or pointing it at
+  a different provider with `set_protocol`, forgets its identities.
+  Rotating a secret or a certificate does not.
+
+Inside those rules the connection is trusted about who holds an address,
+since the customer's administrator can read those mailboxes anyway. So the
+first sign-in with an address in the connection's domains either takes up
+the existing account with that address in the connection's group, or
+creates one, whether or not registration is on. Nobody has to link
+beforehand.
+
+A suspended account stays suspended, and an account with the same address
+in another group is never touched. Someone whose address is outside the
+domains, such as a contractor, signs in another way and links from a fresh
+session.
+
+## Second factors
+
+By default the customer's provider is the first factor, and a user's own
+[second factor](/docs/auth/mfa), if they have one, is still asked for
+afterwards. If the customer's provider already demands MFA, you can skip
+the second prompt for that connection:
+
+```gleam
+connections.trust_provider_mfa(identity, "acme", by: user.Acting(admin))
+connections.require_local_mfa(identity, "acme", by: user.Acting(admin))
+```
+
+This is trust, not verification: providers report how somebody signed in
+too inconsistently to check, so Howdy takes the customer's word for it.
+Each sign-in that skips a factor is recorded as `mfa.provider_trusted`. A
+session made this way cannot turn off the user's factor or replace their
+recovery codes.
+
+## Enforcing a connection
+
+```gleam
+connections.enforce(identity, "acme", by: user.Acting(admin))
+connections.stop_enforcing(identity, "acme", by: user.Acting(admin))
+```
+
+An enforced connection is the only way in for the members it *covers*:
+those in its group whose address is in one of its domains. For them, email
+tokens, passwords, passkeys and the built-in providers are all refused.
+Other members of the group, such as guests, sign in as before.
+
+- A refusal is a plain `401`, as for a wrong password, so it does not
+  confirm that the password was right. Send users to the connection first,
+  with `auth.sso_for_email` or `POST /sso/login`.
+- Enforcing signs out covered members, so their next sign-in is through
+  the provider.
+- Enforcement needs at least one domain, and is paused while the
+  connection is disabled.
+- If the customer's provider breaks, `stop_enforcing` is the way back in.
+  Keep an operator account outside every enforced domain.
+
+## Offboarding
+
+Disabling or deleting a connection stops new sign-ins through it, but does
+not end the sessions it already made. Call `auth.revoke_sessions` for its
+users when a customer leaves.
+
+## Protocol support
+
+- **OpenID Connect**: the authorization code flow, with PKCE, state and a
+  nonce. Discovery at the configured issuer only, RS256 ID tokens, and
+  `client_secret_post` or `client_secret_basic`.
+- **SAML 2.0**: started by your app only, sent by redirect and answered by
+  `POST`. The response or its assertion must be signed with RSA and SHA-256
+  or better, by a certificate you pinned when you created the connection.
+
+Not supported: sign-ins started by the identity provider, signed requests,
+encrypted assertions, single logout and ECDSA signatures. The SAML
+signature checks are Howdy's own and have not been independently audited.
+
+Requests to a customer's OpenID Connect endpoints use HTTPS only, follow no
+redirects, and refuse hosts that resolve to private addresses.

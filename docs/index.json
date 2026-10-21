@@ -1,0 +1,537 @@
+{
+  "groups": [
+    {
+      "slug": "guides",
+      "title": "User guides",
+      "docs": [
+        {
+          "slug": "getting-started",
+          "title": "Getting started",
+          "description": "Install the Howdy CLI and create your first Howdy project."
+        },
+        {
+          "slug": "building-a-ui",
+          "title": "Building a UI",
+          "description": "Build a themed page with Howdy UI, add a theme toggle, and bring it to life with a live component."
+        },
+        {
+          "slug": "supervision",
+          "title": "Supervision and shutdown",
+          "description": "Run the server and everything else your app keeps alive under a supervisor, as an OTP application, so crashes are restarted and SIGTERM lets requests finish."
+        },
+        {
+          "slug": "health-checks",
+          "title": "Health checks",
+          "description": "Answer load balancers and container platforms at /up, check the database and other dependencies, and give Kubernetes separate liveness and readiness probes."
+        },
+        {
+          "slug": "deployment",
+          "title": "Deploying",
+          "description": "Build a Howdy app into a container image and run it in production: configuration, migrations, clean stops, a shell on the running app, clusters, and examples for Kamal, Kubernetes and systemd."
+        },
+        {
+          "slug": "testing",
+          "title": "Testing",
+          "description": "Test a Howdy app by sending it requests with howdy/testing, without starting a server."
+        },
+        {
+          "slug": "username-and-password",
+          "title": "Username and password sign-in",
+          "description": "Add accounts to a Howdy app with Howdy Auth: register with a password, choose a unique username, and sign in with it."
+        },
+        {
+          "slug": "console",
+          "title": "A console on your running app",
+          "description": "Attach a Gleam REPL to a running Howdy app with GSH, and call your code with the same database, auth and caches the server uses."
+        }
+      ]
+    },
+    {
+      "slug": "cli",
+      "title": "CLI",
+      "docs": [
+        {
+          "slug": "overview",
+          "title": "The howdy command",
+          "description": "What the howdy command line does: new projects, generated code, added packages, checks, routes, and how to run a project with howdy dev."
+        },
+        {
+          "slug": "new",
+          "title": "Creating a project",
+          "description": "Create a Howdy project with howdy new, on SQLite, PostgreSQL or with no database, as a full site or a JSON backend only, ready to deploy."
+        },
+        {
+          "slug": "create",
+          "title": "Generating code",
+          "description": "Generate JSON controllers, CRUD pages, repos, migrations, pages, live pages, components, layouts and emails for a Howdy project with howdy create."
+        },
+        {
+          "slug": "add",
+          "title": "Adding packages",
+          "description": "Add Howdy Auth, Mail, Flags, OpenAPI or Remote to a project with howdy add, wired into the app, the dev server, the tests and the admin, or the files to deploy it with Docker."
+        },
+        {
+          "slug": "check",
+          "title": "Checking the project",
+          "description": "Format, build and test a project with howdy check, and list every route it serves with howdy routes."
+        }
+      ]
+    },
+    {
+      "slug": "controllers",
+      "title": "Controllers",
+      "docs": [
+        {
+          "slug": "router",
+          "title": "Router",
+          "description": "How Howdy matches requests to routes, and how to declare routes, parameters and wildcards."
+        },
+        {
+          "slug": "path-parameters",
+          "title": "Path parameters",
+          "description": "Capture parts of the URL with :name and *name, and read them as typed values with howdy/param."
+        },
+        {
+          "slug": "query-strings",
+          "title": "Query strings",
+          "description": "Read typed values from the query string, with defaults, optional values and automatic 400 responses."
+        },
+        {
+          "slug": "cookies",
+          "title": "Cookies",
+          "description": "Read, set and delete cookies, choose safe cookie options, and test handlers that use them."
+        },
+        {
+          "slug": "flash-messages",
+          "title": "Flash messages",
+          "description": "Show a short message such as \"Settings saved\" on the page after a redirect, with howdy/flash: signed, shown once, and turned into toasts by howdy_ui."
+        },
+        {
+          "slug": "forms",
+          "title": "Forms",
+          "description": "Read JSON bodies, HTML forms and file uploads with howdy/body and howdy/form, validate the input, and report every field error."
+        },
+        {
+          "slug": "conditional-requests",
+          "title": "Conditional requests",
+          "description": "Answer 304 Not Modified when the client already has the current version, refuse writes to an old version with 412, and choose who may cache a response."
+        },
+        {
+          "slug": "responses",
+          "title": "Responses",
+          "description": "Send text, HTML and JSON, set status codes and headers, and redirect from a Howdy handler."
+        },
+        {
+          "slug": "guards",
+          "title": "Guards",
+          "description": "Protect routes with guards that reject a request or hand the handler a typed value, such as the signed-in user."
+        },
+        {
+          "slug": "services",
+          "title": "Services and errors",
+          "description": "Keep handlers lean by returning results from services, and learn the JSON shape of every Howdy error response."
+        },
+        {
+          "slug": "websockets",
+          "title": "WebSockets",
+          "description": "Open WebSockets as ordinary routes, keep state per connection, broadcast to groups of sockets with channels, and track who is online with presence."
+        },
+        {
+          "slug": "server-sent-events",
+          "title": "Server-sent events",
+          "description": "Push events to browsers over an ordinary response with howdy/sse: broadcast to topics, resume after a reconnect, keep idle streams open, and test streams without a socket."
+        }
+      ]
+    },
+    {
+      "slug": "middleware",
+      "title": "Middleware",
+      "docs": [
+        {
+          "slug": "overview",
+          "title": "Middleware",
+          "description": "Write middleware that rejects requests or changes responses, and attach it to an app, a controller or a route."
+        },
+        {
+          "slug": "logging",
+          "title": "Request logging",
+          "description": "Log the method, path and status of every request with the logger middleware."
+        },
+        {
+          "slug": "cors",
+          "title": "CORS",
+          "description": "Let pages on other origins call your Howdy API with the CORS middleware."
+        },
+        {
+          "slug": "csrf",
+          "title": "CSRF protection",
+          "description": "Reject cross-site writes to a cookie-authenticated app with the CSRF middleware, which checks the Origin header and needs no tokens."
+        },
+        {
+          "slug": "rate-limiting",
+          "title": "Rate limiting",
+          "description": "Cap how fast clients can make requests with fixed window and token bucket rate limits."
+        },
+        {
+          "slug": "versioning",
+          "title": "API versioning",
+          "description": "Serve several versions of an API side by side with version groups, fallback and a choice of versioning strategy."
+        }
+      ]
+    },
+    {
+      "slug": "database",
+      "title": "Database",
+      "docs": [
+        {
+          "slug": "overview",
+          "title": "Howdy Database",
+          "description": "Install the optional howdy_database package, and open SQLite or PostgreSQL with safe defaults."
+        },
+        {
+          "slug": "transactions",
+          "title": "Transactions and queries",
+          "description": "Run queries and transactions that behave the same on PostgreSQL and SQLite, and turn constraint violations into errors."
+        },
+        {
+          "slug": "migrations",
+          "title": "Migrations",
+          "description": "Create and upgrade your own tables with checksummed, package-owned migrations, and check the schema at startup."
+        }
+      ]
+    },
+    {
+      "slug": "mail",
+      "title": "Mail",
+      "docs": [
+        {
+          "slug": "overview",
+          "title": "Howdy Mail",
+          "description": "Install the optional howdy_mail package, write messages with smail templates, and send them with a mailer."
+        },
+        {
+          "slug": "adapters",
+          "title": "Adapters",
+          "description": "Send mail over SMTP, Resend or SendGrid, redirect it on staging, fall back to a second provider, or write your own adapter."
+        },
+        {
+          "slug": "development",
+          "title": "Outbox and previews",
+          "description": "Keep mail in an outbox while you develop, read it and preview your templates in the admin area, and check it in tests."
+        }
+      ]
+    },
+    {
+      "slug": "storage",
+      "title": "Storage",
+      "docs": [
+        {
+          "slug": "overview",
+          "title": "Howdy Storage",
+          "description": "Keep files in an S3-compatible bucket, a local folder or memory with the optional howdy_storage package, and let browsers fetch and upload them directly through signed URLs."
+        }
+      ]
+    },
+    {
+      "slug": "jobs",
+      "title": "Jobs",
+      "docs": [
+        {
+          "slug": "overview",
+          "title": "Background jobs",
+          "description": "Queue work in your database inside your own transactions, and have it done outside the request, tried again when it fails."
+        },
+        {
+          "slug": "schedules",
+          "title": "Schedules",
+          "description": "Run jobs on a cron schedule, once per time across every node, and clean up after auth, uploads and old jobs."
+        },
+        {
+          "slug": "production",
+          "title": "Running jobs",
+          "description": "What happens when nodes stop, how jobs spread across them, and how to watch and manage jobs from the admin, the command line and traces."
+        }
+      ]
+    },
+    {
+      "slug": "notifications",
+      "title": "Notifications",
+      "docs": [
+        {
+          "slug": "overview",
+          "title": "Howdy Notifications",
+          "description": "Tell users what happened with the optional howdy_notifications package: an inbox kept until read, pushed live to every open page, with a notification bell, live view subscriptions and per-kind preferences."
+        },
+        {
+          "slug": "delivery",
+          "title": "Email and digests",
+          "description": "Email notifications one by one or in a digest, skip the ones read in the app first, and send and retry them with background jobs."
+        },
+        {
+          "slug": "web-push",
+          "title": "Web Push",
+          "description": "Show notifications through the browser itself, even with the app closed: VAPID keys, a service worker, and turning push on from the bell."
+        }
+      ]
+    },
+    {
+      "slug": "cache",
+      "title": "Cache",
+      "docs": [
+        {
+          "slug": "overview",
+          "title": "Caching",
+          "description": "Keep the results of expensive work with howdy_cache, in memory or the database, and invalidate them by tag when the data changes."
+        }
+      ]
+    },
+    {
+      "slug": "i18n",
+      "title": "Internationalisation",
+      "docs": [
+        {
+          "slug": "overview",
+          "title": "Internationalisation",
+          "description": "Answer each request in the reader's language: choose a locale, translate messages, and translate Howdy's own words."
+        },
+        {
+          "slug": "catalogues",
+          "title": "Message catalogues",
+          "description": "Write messages in ICU MessageFormat catalogues, generate typed Gleam functions from them, and check them in CI."
+        },
+        {
+          "slug": "formatting",
+          "title": "Formatting",
+          "description": "Write numbers, money, dates, relative times and lists the way each locale does, from CLDR data."
+        }
+      ]
+    },
+    {
+      "slug": "auth",
+      "title": "Authentication",
+      "docs": [
+        {
+          "slug": "overview",
+          "title": "Howdy Auth",
+          "description": "Install the optional howdy_auth package, create its tables, mount its routes and protect your own with its guard."
+        },
+        {
+          "slug": "providers",
+          "title": "Social sign-in",
+          "description": "Sign people in with Google, Apple, GitHub, Facebook or Microsoft Entra, and link those accounts to existing users."
+        },
+        {
+          "slug": "passkeys",
+          "title": "Passkeys",
+          "description": "Sign in and register with passkeys, offer them in the browser's autofill, and share them across subdomains."
+        },
+        {
+          "slug": "mfa",
+          "title": "Multi-factor authentication",
+          "description": "Ask for a second factor after every sign-in: authenticator apps, delivered codes, recovery codes and remembered devices."
+        },
+        {
+          "slug": "sso",
+          "title": "Enterprise single sign-on",
+          "description": "Connect each customer's own identity provider over OpenID Connect or SAML, and require it for their staff."
+        },
+        {
+          "slug": "signing-in",
+          "title": "Signing in",
+          "description": "Sign visitors in with emailed tokens: sending the email, the JSON API, browser cookies, bearer tokens and headless operations."
+        },
+        {
+          "slug": "passwords",
+          "title": "Passwords",
+          "description": "Turn on password sign-in, and learn how passwords are registered, reset, checked, rate limited and stored."
+        },
+        {
+          "slug": "sessions",
+          "title": "Sessions and policy",
+          "description": "List and revoke sessions, renew them while in use, sign in to several accounts at once, and keep sessions in an external store."
+        },
+        {
+          "slug": "account",
+          "title": "Account changes",
+          "description": "Let users change their email address, unlink providers and delete their account."
+        },
+        {
+          "slug": "groups",
+          "title": "Groups",
+          "description": "Put users in workspaces or tenants with groups, and choose whether an email address has one account or one per group."
+        },
+        {
+          "slug": "fields",
+          "title": "Fields",
+          "description": "Keep small typed facts about users and groups, such as a unique username, without a table of your own."
+        },
+        {
+          "slug": "roles",
+          "title": "Roles and permissions",
+          "description": "Define roles, grant them to users globally or per organization, and check permissions from a guard."
+        },
+        {
+          "slug": "migrations",
+          "title": "Migrations",
+          "description": "Run the package's checksummed migrations, add tables of your own alongside them, and understand the startup schema check."
+        },
+        {
+          "slug": "administration",
+          "title": "User administration",
+          "description": "Provision, suspend and resume users from trusted code, read the audit trail, and set client limits behind a proxy."
+        }
+      ]
+    },
+    {
+      "slug": "admin",
+      "title": "Admin area",
+      "docs": [
+        {
+          "slug": "overview",
+          "title": "Howdy Admin",
+          "description": "Mount the development admin area from dev/, choose what it shows, and keep it away from anyone else."
+        },
+        {
+          "slug": "database",
+          "title": "Database browser",
+          "description": "Search, filter, sort and edit your tables in a grid that follows the database as it changes, on PostgreSQL or SQLite."
+        },
+        {
+          "slug": "users",
+          "title": "Users and roles",
+          "description": "Create, suspend and delete users, revoke their sessions, manage groups and roles, and sign in to your app as any user."
+        },
+        {
+          "slug": "telemetry",
+          "title": "Telemetry",
+          "description": "See each request as a timeline of its queries, calls, emails and logs, with repeated and slow queries pointed out."
+        },
+        {
+          "slug": "api",
+          "title": "Calling your API",
+          "description": "Browse the endpoints of your OpenAPI document and call them from the admin, anonymously or signed in as any user."
+        }
+      ]
+    },
+    {
+      "slug": "remote",
+      "title": "Remote calls",
+      "docs": [
+        {
+          "slug": "procedures",
+          "title": "Remote calls",
+          "description": "Define typed procedures once, serve them from one Howdy service and call them from another with howdy_remote."
+        },
+        {
+          "slug": "clusters",
+          "title": "Clusters and security",
+          "description": "Run services as an Erlang cluster, call across a trust boundary over HTTP, and call plain Erlang and Elixir nodes."
+        }
+      ]
+    },
+    {
+      "slug": "openapi",
+      "title": "OpenAPI",
+      "docs": [
+        {
+          "slug": "overview",
+          "title": "OpenAPI documents",
+          "description": "Document a JSON API as OpenAPI 3.1 with howdy_openapi, from endpoints that read their inputs through schemas, and serve an interactive reference."
+        },
+        {
+          "slug": "schemas",
+          "title": "Schemas",
+          "description": "Describe a JSON value once and get its decoder, its encoder and its JSON Schema, with constraints checked while decoding."
+        }
+      ]
+    },
+    {
+      "slug": "flags",
+      "title": "Feature flags",
+      "docs": [
+        {
+          "slug": "overview",
+          "title": "Feature flags",
+          "description": "Define feature flags in code with howdy_flags, check them for a user or organization on every request, and switch them while the app runs."
+        },
+        {
+          "slug": "rollouts",
+          "title": "Rollouts, rules and groups",
+          "description": "Kill a flag for everyone, roll it out to a share of users or organizations, ramp it on a schedule, allow or block groups, and undo any change from its history."
+        },
+        {
+          "slug": "management",
+          "title": "Managing flags",
+          "description": "Change flags from the admin area, the command line or your own store, keep them in the database or in memory, and test code that checks them."
+        }
+      ]
+    },
+    {
+      "slug": "telemetry",
+      "title": "Telemetry",
+      "docs": [
+        {
+          "slug": "overview",
+          "title": "Telemetry",
+          "description": "Switch on OpenTelemetry: send traces to a collector in production, or record them for the admin in development."
+        },
+        {
+          "slug": "tracing",
+          "title": "Tracing",
+          "description": "The spans Howdy opens for requests, queries, remote calls, email and sign-in, and how to add your own."
+        },
+        {
+          "slug": "logs",
+          "title": "Logs",
+          "description": "Tie log lines to their traces, record crashes, and write logs as JSON with trace ids."
+        }
+      ]
+    },
+    {
+      "slug": "ui",
+      "title": "Howdy UI",
+      "docs": [
+        {
+          "slug": "pages",
+          "title": "Pages",
+          "description": "Render whole HTML documents with howdy/ui/page, with the theme and styles in place before first paint."
+        },
+        {
+          "slug": "components",
+          "title": "Components",
+          "description": "The ready-made Howdy UI components: headings, text, buttons, form fields and layout."
+        },
+        {
+          "slug": "rich-text",
+          "title": "Rich text",
+          "description": "Let people write formatted text with mentions and attachments, store it as a JSON document, and show it safely with Howdy UI's rich text editor."
+        },
+        {
+          "slug": "themes",
+          "title": "Themes",
+          "description": "Define light, dark and brand themes as Gleam records, and let visitors switch between them."
+        },
+        {
+          "slug": "custom-components",
+          "title": "Custom components",
+          "description": "Copy a built-in Howdy UI component to change it, or write your own from theme tokens."
+        },
+        {
+          "slug": "live-components",
+          "title": "Live components",
+          "description": "Run interactive Lustre components on the server over a WebSocket, and move between live pages without a reload, with no JavaScript to write."
+        },
+        {
+          "slug": "islands",
+          "title": "Islands",
+          "description": "Run parts of a server-rendered page in the browser as Gleam islands: rendered on the server, brought to life with Lustre, and bundled for release."
+        },
+        {
+          "slug": "publishing",
+          "title": "Publishing",
+          "description": "Serve Howdy UI styles as one cacheable CSS file, in development and when published."
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+name = "howdy_remote_example"
+version = "0.1.0"
+gleam = ">= 1.18.0"
+description = "Two howdy services calling each other with howdy_remote"
+
+[dependencies]
+gleam_stdlib = ">= 1.0.0 and < 2.0.0"
+gleam_erlang = ">= 1.3.0 and < 2.0.0"
+gleam_otp = ">= 1.3.0 and < 2.0.0"
+gleam_json = ">= 3.1.0 and < 4.0.0"
+envoy = ">= 1.0.0 and < 2.0.0"
+howdy = { path = "../.." }
+howdy_remote = { path = "../../remote" }
+
+[dev_dependencies]
+gleeunit = ">= 1.0.0 and < 2.0.0"

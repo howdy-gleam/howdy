@@ -1,0 +1,59 @@
+{
+  "@@locale": "de",
+  "@@x-review": "machine translation, not yet reviewed by a native speaker",
+  "sign_in": {
+    "subject": "Bei {app} anmelden",
+    "heading": "Bei {app} anmelden",
+    "body": "Nutzen Sie dies, um sich anzumelden. Es funktioniert nur einmal und läuft bald ab.",
+    "action": "Anmelden",
+    "closing": "Wenn Sie keine Anmeldung angefordert haben, können Sie diese E-Mail ignorieren."
+  },
+  "registration": {
+    "subject": "Bestätigen Sie Ihr {app}-Konto",
+    "heading": "Willkommen bei {app}",
+    "body": "Bestätigen Sie diese Adresse, um die Erstellung Ihres Kontos abzuschließen.",
+    "action": "Bestätigen und anmelden",
+    "closing": "Wenn Sie kein Konto erstellt haben, können Sie diese E-Mail ignorieren."
+  },
+  "already_registered": {
+    "subject": "Sie haben bereits ein {app}-Konto",
+    "heading": "Sie haben bereits ein Konto",
+    "body": "Jemand wollte diese Adresse registrieren, für sie besteht aber bereits ein Konto. Nutzen Sie dies stattdessen, um sich dort anzumelden.",
+    "action": "Anmelden",
+    "closing": "Wenn Sie das nicht waren, können Sie diese E-Mail ignorieren. Es hat sich nichts geändert."
+  },
+  "email_change": {
+    "subject": "Bestätigen Sie Ihre neue E-Mail-Adresse",
+    "heading": "Bestätigen Sie Ihre neue E-Mail-Adresse",
+    "body": "Bestätigen Sie diese Adresse, damit Sie sich künftig mit ihr bei Ihrem {app}-Konto anmelden.",
+    "action": "Diese Adresse bestätigen",
+    "closing": "Wenn Sie das nicht angefordert haben, können Sie diese E-Mail ignorieren."
+  },
+  "email_change_approval": {
+    "subject": "Genehmigen Sie die Änderung Ihrer {app}-E-Mail-Adresse",
+    "heading": "Änderung der E-Mail-Adresse genehmigen",
+    "body": "Jemand, der in Ihrem Konto angemeldet ist, möchte es auf eine andere E-Mail-Adresse umstellen. Genehmigen Sie dies, während Sie angemeldet sind, um fortzufahren.",
+    "action": "Änderung genehmigen",
+    "closing": "Wenn Sie das nicht waren, genehmigen Sie es nicht. Melden Sie sich an, ändern Sie Ihr Passwort und melden Sie Ihre anderen Sitzungen ab."
+  },
+  "email_changed": {
+    "subject": "Ihre {app}-E-Mail-Adresse wurde geändert",
+    "heading": "Ihre E-Mail-Adresse wurde geändert",
+    "body": "Ihr Konto meldet sich jetzt mit einer anderen E-Mail-Adresse an, und diese Adresse kann nicht mehr zur Wiederherstellung verwendet werden.",
+    "closing": "Wenn Sie das nicht waren, wenden Sie sich sofort an den Support."
+  },
+  "password_changed": {
+    "subject": "Ihr {app}-Passwort wurde geändert",
+    "heading": "Ihr Passwort wurde geändert",
+    "body": "Das Passwort für Ihr Konto wurde soeben geändert.",
+    "closing": "Wenn Sie das nicht waren, melden Sie sich über einen per E-Mail gesendeten Link an und legen Sie ein neues Passwort fest."
+  },
+  "code_prompt": "Oder geben Sie diesen Code ein:",
+  "token_prompt": "Fügen Sie dieses Token dort ein, wo Sie danach gefragt wurden:",
+  "mfa": {
+    "subject": "Ihr {app}-Bestätigungscode",
+    "heading": "Ihr Bestätigungscode",
+    "body": "Geben Sie diesen Code ein, um die Anmeldung abzuschließen:",
+    "closing": "Wenn Sie sich gerade nicht anmelden, kennt jemand Ihr Passwort: Ändern Sie es."
+  }
+}

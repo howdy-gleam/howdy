@@ -1,0 +1,204 @@
+# Conditional requests
+
+A browser that has seen a page before can ask "has this changed?" instead
+of "send me this". When it hasn't, the answer is an empty `304 Not
+Modified`, and the browser shows the copy it already has. `howdy/conditional`
+answers those questions for your handlers, the same way `howdy/static`
+already does for files.
+
+The same headers protect writes. A client that edited an old copy of a
+record can be refused with `412 Precondition Failed` instead of overwriting
+someone else's change.
+
+## Answering 304
+
+Describe the version of what the handler is about to send, then hand the
+rest of the handler to `conditional.when`:
+
+```gleam
+import gleam/int
+import howdy/conditional
+import howdy/controller.{type Context}
+import howdy/param
+import howdy/service
+
+fn show(ctx: Context) {
+  use id <- param.int(ctx, "id")
+  case notes.find(db, id) {
+    Error(error) -> service.error_response(ctx, error)
+    Ok(note) -> {
+      use <- conditional.when(
+        ctx,
+        conditional.etag(["note", int.to_string(id), int.to_string(note.version)])
+          |> conditional.last_modified(note.updated_at),
+      )
+      controller.json(ctx, note_to_json(note))
+    }
+  }
+}
+```
+
+The first response carries an `etag` and a `last-modified` header. When the
+browser asks again it sends them back, in `if-none-match` and
+`if-modified-since`. While the note is unchanged, `when` answers `304`
+straight away: the rest of the handler never runs, the JSON is never built
+and no body is sent. Once the note changes, its version changes, so does the
+etag, and the handler runs as usual.
+
+The database read still happens, because that is how the handler learns
+the version. When that read is the expensive part, keep it in the
+[cache](/docs/cache/overview) too.
+
+## Choosing the parts
+
+`conditional.etag` hashes the parts you give it into a short tag. List
+everything that changes the response:
+
+- the record's id and a version or update time;
+- the signed-in user, for anything that differs per user;
+- the language, for a translated page;
+- a number you bump by hand when the template changes, if a deploy can
+  change the output while the data stays the same.
+
+Getting this wrong only ever sends a `304` too often, so err on the side of
+more parts. A missing user id would confirm one user's page to another.
+
+`conditional.modified_at(seconds)` builds validators from a modification
+time alone. HTTP dates count whole seconds, so two changes in the same
+second look like one; prefer an etag when that matters.
+
+## Who may store the response
+
+`when` sends `cache-control: private, no-cache` unless you say otherwise.
+The browser keeps the response but asks before every use, which is what
+makes the `304`s happen, and shared caches such as a CDN never store it.
+
+For a response that is the same for everyone, and may be a little stale,
+let shared caches keep it:
+
+```gleam
+let validators =
+  conditional.etag(["pricing", pricing.version])
+  |> conditional.cache_control(
+    conditional.public()
+    |> conditional.max_age(60)
+    |> conditional.shared_max_age(600),
+  )
+```
+
+That sends `public, max-age=60, s-maxage=600`: browsers use their copy for
+a minute, a CDN for ten. The `304` carries the same header, so a cache
+that asked keeps the policy.
+
+The builder starts from `private`, `public` or `no_store`, and adds
+`max_age`, `shared_max_age`, `stale_while_revalidate`, `must_revalidate`
+and `immutable`. `conditional.set_cache_control` puts a policy on any
+response, and `conditional.without_cache_control` leaves the header to the
+handler.
+
+When a response depends on a request header, such as `accept-language`,
+name it in `vary` so caches keep one copy per value:
+
+```gleam
+controller.html(ctx, page) |> conditional.vary(["accept-language"])
+```
+
+## Protecting writes
+
+`when` also checks `if-match` and `if-unmodified-since`, on any method.
+Describe the record as it is before the write, and a client that edited an
+older copy gets `412 Precondition Failed` before the handler runs.
+
+`if-match` compares only strong tags, so the `GET` the client edits from
+has to send a strong one too. Build the validators in one function and use
+it in both handlers:
+
+```gleam
+fn note_validators(note: Note) -> conditional.Validators {
+  conditional.strong_etag(["note", int.to_string(note.id), int.to_string(note.version)])
+}
+
+fn show(ctx: Context) {
+  use id <- param.int(ctx, "id")
+  case notes.find(db, id) {
+    Error(error) -> service.error_response(ctx, error)
+    Ok(note) -> {
+      use <- conditional.when(ctx, note_validators(note))
+      controller.json(ctx, note_to_json(note))
+    }
+  }
+}
+
+fn update(ctx: Context) {
+  use id <- param.int(ctx, "id")
+  case notes.find(db, id) {
+    Error(error) -> service.error_response(ctx, error)
+    Ok(note) -> {
+      use <- conditional.when(ctx, note_validators(note))
+      // The client's copy was current: go ahead.
+      save(ctx, note)
+    }
+  }
+}
+```
+
+`when` checks the version before the handler runs, so two `PUT`s that
+read the same version can both pass it. To stop the second one
+overwriting the first, make the write itself conditional: update only the
+version the client saw, and answer `412` when no row matched.
+
+```gleam
+// UPDATE app_notes SET body = $1, version = version + 1
+// WHERE id = $2 AND version = $3
+case notes.update_if_version(db, id, input, expected: note.version) {
+  Ok(saved) -> controller.json(ctx, note_to_json(saved))
+  Error(service.NotFound(_)) -> controller.status(ctx, 412)
+  Error(error) -> service.error_response(ctx, error)
+}
+```
+
+Locking the row with `SELECT ... FOR UPDATE` in a transaction around the
+read, the check and the write works too.
+
+A strong tag promises the bytes are the same, not just the data, which is
+true of a body rendered from the same data by the same code. Leave such
+responses uncompressed by middleware that rewrites bodies, or use a weak
+`etag` and give up `if-match`. The client reads the tag from `GET`, and
+sends it back with its `PUT`:
+
+```sh
+curl -X PUT -H 'if-match: "kZ2..."' -d @note.json https://example.com/notes/1
+```
+
+Without `if-match` the write goes ahead as before. The response to a write
+is not given the old validators, since it describes the new version.
+
+## Without the handler's help
+
+`conditional.auto_etag` is middleware that hashes the body of every `200`
+text or JSON response to a `GET` and answers `304` when the client already
+has it:
+
+```gleam
+howdy.new()
+|> howdy.middleware(conditional.auto_etag)
+```
+
+It saves bandwidth, not work: the handler still runs in full each time.
+Responses with their own etag, `no-store`, a `set-cookie` header, or a
+streamed body are left alone.
+
+## Checking it in tests
+
+Send the validators back with `testing.header`:
+
+```gleam
+let first = testing.get("/notes/1") |> testing.send(app())
+let assert Ok(etag) = response.get_header(first, "etag")
+
+let again =
+  testing.get("/notes/1")
+  |> testing.header("if-none-match", etag)
+  |> testing.send(app())
+assert again.status == 304
+```

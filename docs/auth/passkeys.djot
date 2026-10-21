@@ -1,0 +1,119 @@
+# Passkeys
+
+A passkey is a key pair kept by the visitor's device or password manager,
+unlocked with a fingerprint, a face or a PIN. There is nothing to type,
+nothing to phish, and nothing in your database that could be used to sign
+in. Turn them on as the app starts:
+
+```gleam
+let assert Ok(identity) = auth.with_passkeys(identity, "My app")
+```
+
+The name is what the browser shows when it asks the visitor to choose a
+passkey.
+
+Passkeys need migrations 11 and 15 of the package. Run
+[the migrations](/docs/auth/migrations) before starting this version.
+
+## On the starter pages
+
+With passkeys on, the [starter pages](/docs/auth/overview) do the rest:
+
+- The account page adds, renames and removes passkeys.
+- The sign-in page has a **Sign in with a passkey** button.
+- The email field is marked `autocomplete="username webauthn"`. In
+  browsers that support it, saved passkeys appear in the field's autofill
+  as the page loads, without a button press.
+
+Adding or managing a passkey needs a recent sign-in. Removing one needs a
+recent sign-in through a *different* method, and signs out every session.
+An account can have up to 20 passkeys.
+
+## Registering with a passkey
+
+With passkeys, [registration](/docs/auth/overview) and email tokens all on,
+a visitor can create an account that never has a password:
+
+1. They give their address and create a passkey.
+2. Howdy checks the passkey, keeps it, and emails a registration token.
+3. Exchanging the token creates the account and its passkey together, and
+   signs in.
+
+As with every other way to register, no account exists until its address
+has been proved. Registering an address that already has an account looks
+the same to whoever asked; the passkey is discarded, and the owner gets an
+`AlreadyRegistered` email.
+
+## The JSON API
+
+Relative to the API mount:
+
+- `GET /passkeys` lists the caller's passkeys.
+- `POST /passkeys/register` with `{"name":"…"}` starts adding one, and
+  answers `{challenge, options}`.
+- `POST /passkeys/register/confirm` with `{challenge, credential}` finishes.
+- `POST /passkeys/login` with `{}`, or `{"group":"…"}`, starts a sign-in.
+- `POST /passkeys/session` with `{challenge, credential}` finishes it, and
+  sets the session cookie, or asks for a
+  [second factor](/docs/auth/mfa).
+- `POST /passkeys/signup` with `{email, name}` starts registering while
+  signed out.
+- `POST /passkeys/signup/confirm` with `{challenge, credential}` checks the
+  passkey and emails the token. Answers `202`.
+- `POST /passkeys/rename` with `{id, name}`, and `POST /passkeys/delete`
+  with `{id}`.
+
+`options` is the WebAuthn `publicKey` object to pass to
+`navigator.credentials.create` or `.get`. Its binary fields are base64url
+text, which the browser code must turn into `ArrayBuffer`s. `challenge` is
+an opaque Howdy token that goes back with the answer. `credential` is the
+browser's response, serialized to a JSON *string*. A challenge lasts five
+minutes and works once.
+
+## Sharing passkeys between subdomains
+
+A passkey belongs to a *relying party id*, which by default is your
+origin's host name, such as `app.example.com`. To share passkeys with other
+subdomains, name the parent domain:
+
+```gleam
+let assert Ok(identity) = auth.with_passkeys(identity, "Example")
+let assert Ok(identity) =
+  auth.with_passkey_relying_party(identity, id: "example.com", origins: [
+    "https://admin.example.com",
+  ])
+```
+
+The id must be your origin's host name or a parent domain of it, and of
+every listed origin. Browsers refuse a public suffix such as `com` or
+`co.uk`.
+
+**Choose it before launch.** A passkey is bound to the id it was created
+under, so changing the id later strands every existing passkey.
+
+The listed origins are accepted by the passkey checks, but the bundled
+JSON routes still only answer your one configured origin. Another origin
+needs its own deployment, configured with the same id, or a transport of
+its own.
+
+## What is checked
+
+The origin must match exactly, and the visitor must be present and
+verified with a PIN or biometric. ES256, Ed25519 and RS256 keys are
+accepted. Howdy keeps each passkey's public key, signature counter, AAGUID,
+transports and backup state.
+
+The WebAuthn checks are done by the `glasslock` package, pinned to
+`1.0.0-rc1`, a prerelease that has not been independently audited. Review
+its upgrades with care.
+
+## Without HTTP
+
+- `auth.begin_passkey_registration` and `auth.finish_passkey_registration`
+- `auth.begin_passkey_login` and `auth.finish_passkey_login`
+- `auth.begin_passkey_signup` and `auth.finish_passkey_signup`
+- `auth.passkeys`, `auth.rename_passkey` and `auth.delete_passkey`
+
+The `begin_` functions return an `auth.PasskeyChallenge`, with the secret
+`challenge` and the `options` JSON. A session made with a passkey has the
+method `auth.Passkey`, so handle it if you match on `auth.Method`.

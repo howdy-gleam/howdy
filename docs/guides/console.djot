@@ -1,0 +1,194 @@
+# A console on your running app
+
+A console lets you type Gleam into your app while it runs: look up a user,
+grant a role, sign someone out, or call a function you just wrote to see what
+it does. [GSH](https://hexdocs.pm/gsh/) is a Gleam REPL that can attach to a
+running Erlang node, and `howdy/console` gives it the values your `main` built,
+so what you type works on the same database connection, auth configuration
+and caches as the server's own requests.
+
+Unlike `rails console`, which starts a second copy of the app, this runs inside
+the server itself. A role you grant is seen by the next request, and
+processes, ETS tables and caches are the live ones.
+
+## Install GSH
+
+GSH is a development tool, so add it as a dev dependency:
+
+```sh
+gleam add gsh --dev
+```
+
+List the modules you want imported in every session in `gleam.toml`:
+
+```toml
+[tools.gsh]
+imports = ["console", "gleam/list", "gleam/option", "gleam/result"]
+```
+
+## Expose what main builds
+
+Code typed into the console can call any module, but the values `main`
+built, such as the database connection, exist only as its local variables.
+Put the ones a console needs in a record, declare a key for it, and expose it
+before starting the server:
+
+```gleam
+import howdy/console
+
+pub type Services {
+  Services(db: Repo, identity: auth.Auth, permissions: access.Authorization)
+}
+
+pub fn services_key() -> console.Key(Services) {
+  console.key("my_app")
+}
+
+pub fn main() {
+  let db = database.connect()
+  let assert Ok(identity) = auth.new(repo: db, ...)
+  let assert Ok(permissions) = access.new(db)
+  console.expose(services_key(), Services(db:, identity:, permissions:))
+  let assert Ok(_) = howdy.start(app(db, identity, permissions))
+  process.sleep_forever()
+}
+```
+
+Declare each key once, in a function with its type written out. Two keys with
+the same name and different types would read each other's values as the wrong
+type.
+
+`howdy dev` starts your app from `dev/my_app_dev.gleam` rather than `main`,
+so expose the services there too if you want a console on the development
+server.
+
+Exposing a value costs almost nothing to read later, but replacing one makes
+the VM scan every process. Expose values once at startup, never per request.
+
+## Write your shortcuts
+
+The console is more pleasant with a module of shortcuts for the jobs you do
+often. Keep it in `src/console.gleam`, so its name is short to type:
+
+```gleam
+import howdy/auth/user
+import howdy/authorization as access
+import howdy/console as exposed
+import my_app
+
+// Recorded as the client of every audit event the console causes.
+const actor = user.SystemFrom(client: "console")
+
+pub fn services() -> my_app.Services {
+  let assert Ok(services) = exposed.get(my_app.services_key())
+    as "the server is not running on this node"
+  services
+}
+
+pub fn grant(user_id: String, role: String) {
+  access.assign(services().permissions, user_id, role, access.Global, by: actor)
+}
+```
+
+Operations like these are privileged and check nothing themselves. That is
+right for a console, because only the people who run the app can reach it.
+
+## Run the app inside the console
+
+The quickest start runs the server and the console in one VM. Pass the
+module whose `main` starts your app:
+
+```sh
+gleam run -m gsh -- my_app
+```
+
+GSH starts `main` in the background and opens a prompt. The server is on its
+usual port, so you can use the site in a browser and the console at once:
+
+```
+gsh(1)> console.grant("s8nOmB5I6M8Q...", "reader")
+Ok(Nil) : Result(Nil, Error)
+```
+
+After you change the code, `:cc` recompiles it and reloads it into the
+running VM.
+
+## Attach to a server that is already running
+
+To attach to a server started on its own, start it as a named Erlang node.
+`ERL_FLAGS` passes the flags to the VM without changing your code, and works
+the same with `gleam run` and `howdy dev`:
+
+```sh
+ERL_EPMD_ADDRESS=127.0.0.1 \
+ERL_FLAGS="-sname my_app@localhost -setcookie dev -kernel inet_dist_use_interface {127,0,0,1}" \
+gleam run
+```
+
+Then attach from a second terminal in the same project:
+
+```sh
+ERL_FLAGS="-kernel inet_dist_use_interface {127,0,0,1}" \
+gleam run -m gsh -- --remsh my_app@localhost --cookie dev
+```
+
+GSH prints `Connected to remote node: my_app@localhost`, and everything you
+type from then on runs inside the server. It compiles each line on your side,
+so the project must be built from the same code the server is running.
+
+If it cannot connect, GSH carries on with a local session, and your
+shortcuts report that the server is not running on this node. Check that
+both sides use the same node name and cookie.
+
+## Keep the node private
+
+Anyone who can connect to an Erlang node can run any code in it, with the
+same access as your app. The cookie is the only thing that stops them, so the
+node must not be reachable by anyone who should not have that power.
+
+The commands above keep everything on your own machine:
+
+- `@localhost` in the node name makes GSH connect over loopback. A bare
+  `-sname my_app` uses your hostname, which can resolve to a network address.
+- `inet_dist_use_interface` makes the VM listen for other nodes on
+  `127.0.0.1` only, rather than on every interface.
+- `ERL_EPMD_ADDRESS` does the same for EPMD, the port mapper nodes use to find
+  each other. It only applies when it starts EPMD: one already running from an
+  earlier node keeps listening where it was started, until you stop it with
+  `epmd -kill`.
+
+Never expose Erlang distribution to the internet. To reach a server on another
+machine, use a long random cookie kept out of source control, and connect
+through a private network or an SSH tunnel. Treat console access like root
+access to the database.
+
+GSH is a dev dependency, so a deployed app does not have it. An app deployed
+from a `howdy new` project's image has `bin/start remote` instead, an Erlang
+shell inside it where the same shortcuts work; see
+[A shell on the running app](/docs/guides/deployment#A-shell-on-the-running-app).
+
+## Pause a request and look inside
+
+GSH can also stop a process at a point in your code and let you evaluate
+expressions inside it, with its variables in scope. Declare its `pry`
+function and call it where you want to stop:
+
+```gleam
+@external(erlang, "gsh_pry", "pry")
+fn pry(value: a, label: String) -> a
+
+fn show(ctx) {
+  let current = pry(ctx.guard.user, "current")
+  controller.json(ctx, user.to_json(current))
+}
+```
+
+When a request reaches it, the console announces it. `:pry` attaches,
+and `:continue` lets the request carry on. A pry call only pauses while a GSH
+session runs in the same VM, so leave none in code you deploy.
+
+## More examples
+
+The [authentication examples](https://github.com/howdy-gleam/howdy/tree/v1.0.0/examples/auth)
+expose their services this way and include a `console` module for users,
+roles and sessions.

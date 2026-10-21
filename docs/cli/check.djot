@@ -1,0 +1,102 @@
+# Checking the project
+
+Two commands answer questions about the project you are in: `howdy check`
+says whether it is in good shape, and `howdy routes` says what it serves.
+
+## howdy check
+
+```sh
+howdy check
+```
+
+`howdy check` checks the project the way to check any change to it:
+
+- *format*: `gleam format --check`, over `src`, `test` and `dev`;
+- *build*: `gleam build`, reporting the compiler's warnings;
+- *test*: `gleam test`.
+
+Every check runs, except the tests when the build fails. The output of a
+check that fails is shown, and the command exits with status 1 if any did:
+
+```
+🤠 howdy check
+
+  ✓ format  gleam format --check src test dev
+  ✓ build   gleam build
+  ✓ test    gleam test
+```
+
+Pass `--fix` to format the sources first, rather than report them:
+
+```sh
+howdy check --fix
+```
+
+`howdy check --json` prints one object with each check's outcome, for a
+script or a coding agent, with the output of a check that failed:
+
+```json
+{
+  "ok": true,
+  "checks": [
+    {"name": "format", "status": "passed", "command": "gleam format --check src test dev"},
+    {"name": "build", "status": "passed", "command": "gleam build"},
+    {"name": "test", "status": "passed", "command": "gleam test"}
+  ]
+}
+```
+
+A project made by `howdy new` tells coding agents, in `AGENTS.md`, to run
+`howdy check` after every change and fix what it reports before moving on.
+The tests need the database: on PostgreSQL, start it with
+`docker compose up -d` first.
+
+## howdy routes
+
+```sh
+howdy routes
+```
+
+`howdy routes` lists every route the project serves: its method and path,
+the controller that declares it, and the file and line it is on, so a
+route can be found from its path:
+
+```
+METHOD  PATH            CONTROLLER          DEFINED AT
+GET     /up             howdy.health_check  src/my_app.gleam:47
+GET     /api/todos      todos.controller    src/my_app/features/todos/todo_controller.gleam:21
+GET     /api/todos/:id  todos.controller    src/my_app/features/todos/todo_controller.gleam:24
+POST    /api/todos      todos.controller    src/my_app/features/todos/todo_controller.gleam:28
+GET     /               home.controller     src/my_app/features/home/home_controller.gleam:13
+*       /               static.serve        src/my_app.gleam:42
+```
+
+Routes are read from the sources, without building the app: the
+controllers registered in `app()` in `src/<project>.gleam`, in the order
+they are registered, and the routes each one declares with
+`controller.get`, `post`, `put`, `patch`, `delete` or `route`, and the
+endpoint functions of Howdy OpenAPI. A controller that comes from a
+package, such as auth's pages or the static files, is a mount, with method
+`*`, at the path it is given. Routes from `dev/`, such as the admin at
+`/_howdy`, are served only by `gleam dev`. A
+[health check](/docs/guides/health-checks) mounted with
+`howdy.health_check` comes first, at `/up` or the path `health.at` gives
+it, because it is answered before any route.
+
+A route built some other way, such as in a loop or a helper, is not seen.
+
+`howdy routes --json` prints the routes as an array, with whether each is
+guarded:
+
+```json
+[
+  {
+    "method": "GET",
+    "path": "/api/todos",
+    "file": "src/my_app/features/todos/todo_controller.gleam",
+    "line": 21,
+    "controller": "todos.controller",
+    "guarded": false
+  }
+]
+```

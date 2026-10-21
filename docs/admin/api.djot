@@ -1,0 +1,61 @@
+# Calling your API
+
+When your app serves an OpenAPI document with
+[`openapi.serve`](/docs/openapi/overview), the admin finds it on its own and
+adds **API → Endpoints** to the sidebar. There is nothing to register:
+`admin.mount` looks through the app's routes for the documents
+`howdy_openapi` serves, so mount the admin after `openapi.serve`.
+
+```gleam
+my_app.app(db, identity)   // ends with openapi.serve(spec, at: "/openapi.json")
+|> admin.mount(admin.new() |> admin.auth(identity))
+```
+
+## Endpoints
+
+The endpoints page lists every operation in the document, grouped by tag,
+with the ones that need authentication marked. With a
+[version group](/docs/middleware/versioning), each version has its own list;
+the links at the top switch between them.
+
+The admin reads the document as JSON, the way any client would, so what it
+shows is what the document says.
+
+## Calling an endpoint
+
+Each endpoint's page has a form built from the document:
+
+- A field for each path, query and header parameter, marked when it is
+  required. A parameter that can only take one value, such as a version
+  header, starts filled in. Array query parameters take values separated by
+  commas.
+- A JSON body, started from an example made from the body's schema.
+- A field for each security scheme the endpoint requires: a bearer token,
+  or an API key in a header, cookie or query parameter.
+- **Send as**, when `admin.auth` is registered.
+
+**Send request** runs the request through the app in the same process, past
+its middleware and guards exactly as a request from outside would go, and
+shows the response: its status, how long it took, the body pretty-printed,
+the headers, and the same request as a `curl` command against the server.
+
+Below the form are the documented responses, and the fields of the schemas
+they and the body use.
+
+## Calling as a user
+
+To call an endpoint behind `auth.required` without knowing anyone's
+password, choose a user under **Send as**. The admin opens a session for
+them with `auth.impersonate`, the same way **Sign in as** on a user's page
+does, and sends its token as `authorization: Bearer <token>`. Your guard
+sees a real session for that user, so permission checks apply exactly as
+they would for them.
+
+The session is kept for later calls as the same user, so calling again does
+not open another. If it is revoked or expires, the admin opens a new one
+when the app answers `401`. Each session appears on the user's page with
+the method `impersonation`, and the audit trail records it.
+
+Your browser's own cookies are never sent, so being signed in to the app in
+another tab makes no difference: a call is anonymous unless you choose a
+user or type a credential.

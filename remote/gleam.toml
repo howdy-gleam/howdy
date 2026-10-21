@@ -1,0 +1,27 @@
+name = "howdy_remote"
+version = "1.0.0"
+gleam = ">= 1.18.0"
+description = "Typed remote procedure calls between Howdy services, over Erlang distribution or HTTP"
+licences = ["Apache-2.0"]
+repository = { type = "github", user = "howdy-gleam", repo = "howdy", path = "remote", tag-prefix = "howdy_remote-" }
+links = [{ title = "Website", href = "https://tryhowdy.dev" }]
+target = "erlang"
+
+[dependencies]
+gleam_stdlib = ">= 1.0.0 and < 2.0.0"
+gleam_erlang = ">= 1.3.0 and < 2.0.0"
+gleam_otp = ">= 1.3.0 and < 2.0.0"
+gleam_json = ">= 3.1.0 and < 4.0.0"
+gleam_http = ">= 4.4.0 and < 5.0.0"
+gleam_httpc = ">= 5.0.0 and < 6.0.0"
+gleam_crypto = ">= 1.5.0 and < 2.0.0"
+logging = ">= 1.5.0 and < 2.0.0"
+howdy = { path = ".." }
+
+[dev_dependencies]
+ewe = ">= 8.0.0 and < 9.0.0"
+gleeunit = ">= 1.0.0 and < 2.0.0"
+howdy_telemetry = { path = "../telemetry" }
+
+[erlang]
+application_start_module = "howdy_remote_app"

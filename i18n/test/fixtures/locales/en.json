@@ -1,0 +1,16 @@
+{
+  "greeting": "Hello, {name}!",
+  "cart": {
+    "items": "{count, plural, =0 {Your cart is empty} one {# item} other {# items}}"
+  },
+  "invite": "{host} invited {guests, plural, offset:1 =0 {nobody} =1 {{guest}} one {{guest} and one other} other {{guest} and # others}}",
+  "reply": "{gender, select, female {She} male {He} other {They}} replied",
+  "place": "You came {place, selectordinal, one {#st} two {#nd} few {#rd} other {#th}}",
+  "saved": "Saved on {when, date, long} at {at, time, short}",
+  "progress": "{ratio, number, percent} done",
+  "quote": "It''s '{literal}'",
+  "signIn": "Sign in",
+  "@signIn": {
+    "description": "A button"
+  }
+}

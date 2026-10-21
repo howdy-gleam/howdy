@@ -1,0 +1,205 @@
+# Pages
+
+`howdy/ui/page` turns a list of elements into a whole HTML document and
+sends it as the response. It writes the parts every page needs, such as the
+doctype, the character set and the viewport tag, and it makes sure the
+theme and the styles for your components are in place before the browser
+paints anything.
+
+## A page
+
+```gleam
+import howdy/controller.{type Context}
+import howdy/ui
+import howdy/ui/page
+import lustre/element.{text}
+
+fn orders(ctx: Context) {
+  page.new("Orders")
+  |> page.body([
+    ui.container([], [
+      ui.h1("Orders"),
+      ui.p([text("Nothing here yet.")]),
+    ]),
+  ])
+  |> page.respond(ctx)
+}
+```
+
+`page.new` takes the title and starts a page with sensible defaults:
+English as the language, and the built-in light and dark themes. The
+functions after it each adjust one thing, and `page.respond` finishes the
+page and answers the request with `text/html`.
+
+The elements in the body are [Lustre](https://hexdocs.pm/lustre) elements.
+The components in `howdy/ui` are one source of them, and anything from
+`lustre/element/html` works beside them. Lustre escapes text and attribute
+values for you, so it is safe to put user input into a page.
+
+## Building the page
+
+- `page.body(elements)` adds elements to the `<body>`. Call it more than
+  once and the elements are added in order, which is handy when a shared
+  function adds the header and the handler adds the rest.
+- `page.head(elements)` adds elements to the `<head>`, after the title and
+  the styles. Use it for a description, icons, fonts or your own scripts.
+- `page.lang(code)` sets the `lang` attribute, which screen readers and
+  search engines use. The default is `"en"`.
+- `page.theme(name)` selects a theme for this response.
+- `page.themes(themes)` replaces the themes the page offers.
+- `page.stylesheet(at: path)` links a CSS file, where the page would
+  otherwise embed its styles.
+- `page.live` adds the scripts that
+  [live components](/docs/ui/live-components) and live links need.
+
+```gleam
+import lustre/attribute
+import lustre/element/html
+
+page.new("Orders")
+|> page.lang("en-GB")
+|> page.head([
+  html.meta([
+    attribute.name("description"),
+    attribute.content("Every order, newest first."),
+  ]),
+  html.link([attribute.rel("icon"), attribute.href("/favicon.svg")]),
+])
+```
+
+## Choosing the theme
+
+A page offers a set of [themes](/docs/ui/themes). With nothing else said,
+the browser picks between them using the visitor's system setting for light
+or dark.
+
+`page.theme` overrides that for one response, by putting a `data-theme`
+attribute on the `<html>` element. The usual source is a cookie, so that a
+visitor's choice is remembered:
+
+```gleam
+import howdy/cookie
+
+fn orders(ctx: Context) {
+  use theme <- cookie.string_or(ctx, "theme", default: "system")
+
+  page.new("Orders")
+  |> page.theme(theme)
+  |> page.body([ui.h1("Orders")])
+  |> page.respond(ctx)
+}
+```
+
+A name the page does not offer is ignored, and the attribute is left off.
+That is what makes `"system"` a good default: it is not a theme, so a
+visitor who has never chosen falls through to their system setting. It also
+means a cookie someone has tampered with cannot put a strange value into
+your page.
+
+Because the theme is part of the HTML the server sends, the first paint is
+already in the right colours. Pages that choose the theme with JavaScript
+after loading flash the wrong one first; these do not.
+
+`ui.theme_toggle` is the button that sets the cookie. See
+[Themes](/docs/ui/themes).
+
+## Where the styles come from
+
+Every component's CSS is written in Gleam, and a page needs that CSS to look
+right. By default the page embeds it: the `<head>` gets a `<style>` element
+with the theme's variables, a few base styles, and the rules for the
+components used so far.
+
+Embedding needs no extra route or file, which makes it the right choice
+while you are building. Its cost is that the CSS travels with every page and
+cannot be cached on its own. For a published site, write it to a file once
+and link that from every page:
+
+```gleam
+page.new("Orders")
+|> page.stylesheet(at: "/assets/ui.css")
+```
+
+[Publishing](/docs/ui/publishing) covers both ways of serving that file.
+
+## A shared layout
+
+Most sites want the same header, footer and head elements on every page.
+There is nothing special to learn for that. Write a function that takes the
+part that varies and returns a page:
+
+```gleam
+import howdy/ui/page.{type Page}
+import lustre/element.{type Element}
+
+pub fn layout(title: String, theme: String, content: List(Element(msg))) -> Page(msg) {
+  page.new(title <> " · My shop")
+  |> page.theme(theme)
+  |> page.stylesheet(at: "/assets/ui.css")
+  |> page.body([
+    site_header(),
+    ui.container([], content),
+    site_footer(),
+  ])
+}
+```
+
+```gleam
+fn orders(ctx: Context) {
+  use theme <- cookie.string_or(ctx, "theme", default: "system")
+  layout("Orders", theme, [ui.h1("Orders")])
+  |> page.respond(ctx)
+}
+```
+
+A handler can still pipe the result through `page.head` or `page.live` to
+add what only that page needs.
+
+## Without a response
+
+`page.respond` is the usual ending. Two others give you the document
+without sending it:
+
+- `page.to_string` returns the HTML as a string, doctype included. Use it
+  to set a different status, as for a `404` page, or to write pages to disk.
+- `page.render` returns the document as a Lustre element.
+
+```gleam
+fn not_found(ctx: Context) {
+  let html =
+    page.new("Not found")
+    |> page.body([ui.h1("There is nothing here")])
+    |> page.to_string
+
+  controller.html(ctx, html)
+  |> controller.with_status(404)
+}
+```
+
+## Testing pages
+
+A page is an ordinary response, so send a request and look at the HTML:
+
+```gleam
+import gleam/string
+import howdy/testing
+
+pub fn orders_page_test() {
+  let res = testing.get("/orders") |> testing.send(app())
+
+  assert res.status == 200
+  assert string.contains(testing.text(res), "<title>Orders</title>")
+}
+
+pub fn theme_cookie_is_applied_test() {
+  let res =
+    testing.get("/orders")
+    |> testing.cookie("theme", "dark")
+    |> testing.send(app())
+
+  assert string.contains(testing.text(res), "<html data-theme=\"dark\"")
+}
+```
+
+Assert on the text a visitor would see, not on class names. Class names are
+made from the content of each style, so they change whenever a style does.

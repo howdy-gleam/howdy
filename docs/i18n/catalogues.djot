@@ -1,0 +1,156 @@
+# Message catalogues
+
+A catalogue holds the messages for one locale. It is a JSON file named by
+the locale's tag, such as `locales/de.json`. Messages are written in
+[ICU MessageFormat](https://unicode-org.github.io/icu/userguide/format_parse/messages/),
+which translation tools such as Crowdin, Lokalise, Phrase, Weblate and
+Tolgee understand.
+
+```json
+{
+  "@@locale": "de",
+  "cart.items": "{count, plural, =0 {Ihr Warenkorb ist leer} one {# Artikel} other {# Artikel}}",
+  "nav": {
+    "home": "Startseite"
+  }
+}
+```
+
+Nested objects are flattened with dots, so the last message's key is
+`nav.home`. Keys that start with `@` are notes for people and tools, as in
+the ARB format. They are not messages:
+
+- `@@locale` names the catalogue's locale and must match its file name.
+- `@@x-review` marks a catalogue that still needs checking by a native
+  speaker. `check` lists those catalogues.
+- `@key` objects, such as `{"description": "..."}`, describe a message for
+  translators.
+
+## The source catalogue
+
+One locale is the source, `en` unless you pass `--source`. Its catalogue
+decides which messages exist and what arguments they take.
+
+The other catalogues translate it. A message missing from a translation
+falls back to the next locale the translator would try, and finally to the
+source. A missing translation never shows a blank or a key.
+
+## Writing messages
+
+```text
+Hello, {name}!
+{count, plural, =0 {No items} one {# item} other {# items}}
+{gender, select, female {She} male {He} other {They}} replied.
+You came {place, selectordinal, one {#st} two {#nd} few {#rd} other {#th}}.
+Saved on {when, date, long} at {at, time, short}.
+{ratio, number, percent} done.
+{guests, plural, offset:1 =0 {Nobody} =1 {{host}} other {{host} and # others}} came.
+```
+
+- `{name}` is text.
+- `{n, plural, ...}` chooses a form by the number's plural category:
+  `zero`, `one`, `two`, `few`, `many` and `other`. Each language uses only
+  some of them: English uses `one` and `other`, and Polish adds `few` and
+  `many`. `=0` matches an exact number. Inside a plural, `#` is the number,
+  written for the locale.
+- `{n, selectordinal, ...}` does the same for positions: 1st, 2nd, 3rd.
+- `{x, select, ...}` chooses by a string, with `other` for anything else.
+- `{n, number}` writes a whole number with the locale's grouping, and
+  `{r, number, percent}` writes a fraction as a percentage.
+- `{d, date, style}` and `{t, time, style}` write dates and times. The
+  styles are `short`, `medium`, `long` and `full`.
+- An apostrophe quotes syntax: `'{name}'` is the literal text `{name}`, and
+  `''` is an apostrophe. An apostrophe anywhere else is itself, so "It's"
+  needs no escaping.
+
+Each argument gets a Gleam type from how the messages use it: `String`
+for text and selects, `Int` for numbers and plurals, `Float` for
+percentages, `calendar.Date` for dates and `calendar.TimeOfDay` for times.
+Every translation must agree with the source.
+
+Plural counts are whole numbers.
+
+## Generating the module
+
+```sh
+gleam run -m howdy/i18n/cli -- gen
+```
+
+This reads `locales/` and writes `src/<app>/messages.gleam`, with a function
+for each message. The key `cart.items`, or `cartItems`, becomes the
+function `cart_items`:
+
+```gleam
+/// cart.items: {count, plural, =0 {Your cart is empty} one {# item} other {# items}}
+pub fn cart_items(translator: Translator, count count: Int) -> String
+```
+
+The module also exports `locales`, the catalogues there are, which is handy
+for building a negotiator:
+`locale.negotiator(messages.locales, default: messages.source)`.
+
+The translations are compiled in, so nothing is read from disk at run time.
+Run `gen` again after changing a catalogue, and commit the module with the
+catalogues.
+
+The options are:
+
+- `--locales=<dir>`: where the catalogues are.
+- `--out=<file>`: the module to write.
+- `--source=<locale>`: the source locale.
+- `--standalone`: write a module that needs nothing but the standard
+  library. Its functions take the catalogue's locale as a string instead
+  of a translator. Only text, whole numbers and cardinal plurals are
+  allowed. This is how Howdy's core ships its validation messages without
+  depending on `howdy_i18n`.
+
+### While you work
+
+With [hot reload](/docs/cli/overview), regenerate the module whenever a
+catalogue changes. Do this in your `dev/<app>_dev.gleam`:
+
+```gleam
+import gleam/erlang/process
+import howdy/dev
+import howdy/i18n/cli
+import my_app
+
+pub fn main() {
+  let assert Ok(_) =
+    dev.new(my_app.app)
+    |> dev.watch("locales")
+    |> dev.before_build(fn(_changed) { cli.execute(["gen"]) })
+    |> dev.run
+  process.sleep_forever()
+}
+```
+
+`gen` leaves the module alone when nothing in it changed. When a catalogue
+has an error, it is shown over the page, as a compiler error would be.
+
+## Checking
+
+```sh
+gleam run -m howdy/i18n/cli -- check
+```
+
+`check` reports problems without writing anything. When there are errors
+it exits with a failure, so you can run it in CI.
+
+- Errors stop `gen`. They are invalid ICU syntax, an argument the source
+  message lacks, an argument used as two different types, or two keys that
+  would become the same function.
+- Warnings fall back and do not stop it. They are a message missing from a
+  translation, a message the source lacks, or a plural form the language
+  needs but the message does not give.
+- Notes list the catalogues marked `@@x-review`.
+
+## Adding a locale
+
+```sh
+gleam run -m howdy/i18n/cli -- add pt-BR
+```
+
+This copies the source catalogue to `locales/pt-BR.json` and marks it
+`"@@x-review": "untranslated"` for a translator to work through. Remove the
+mark once it is done.

@@ -1,0 +1,217 @@
+# Responses
+
+A handler is a function from a context to a response. Everything else on
+these pages is about getting input out of the request; this one is about
+what you send back.
+
+Howdy's responses are ordinary `Response` values from `gleam/http/response`.
+The `controller` module has helpers for the common bodies, and because the
+result is a plain value you can keep piping it, to change the status, add a
+header or set a cookie.
+
+## Text, HTML and JSON
+
+There is a helper for each common kind of body. Each one answers `200` and
+sets the matching `content-type`:
+
+```gleam
+import gleam/json
+import howdy/controller.{type Context}
+
+fn plain(ctx: Context) {
+  controller.text(ctx, "Howdy!")
+}
+
+fn page(ctx: Context) {
+  controller.html(ctx, "<h1>Howdy!</h1>")
+}
+
+fn data(ctx: Context) {
+  controller.json(ctx, json.object([#("greeting", json.string("Howdy!"))]))
+}
+```
+
+- `controller.text` sends `text/plain; charset=utf-8`.
+- `controller.html` sends `text/html; charset=utf-8`.
+- `controller.json` takes a `Json` value from `gleam/json`, turns it into a
+  string for you, and sends `application/json; charset=utf-8`.
+
+`controller.html` sends the string exactly as given. Build pages with a
+library that escapes values for you, such as Lustre, and pass it the result
+of `element.to_document_string`. Never join user input into HTML by hand.
+
+If your handler gets its data from a function that can fail, look at
+`service.respond` in [Services and errors](/docs/controllers/services). It
+picks the status and body from a `Result`, so the handler does not have to.
+
+## Status codes
+
+`controller.with_status` changes the status of a response you have already
+built. Use it when the body is right but `200` is not:
+
+```gleam
+fn create_user(ctx: Context) {
+  controller.json(ctx, json.object([#("id", json.int(42))]))
+  |> controller.with_status(201)
+}
+```
+
+When there is no body to send, `controller.status` builds an empty response
+with just a status:
+
+```gleam
+fn delete_user(ctx: Context) {
+  controller.status(ctx, 204)
+}
+```
+
+That is the usual answer to a successful `DELETE`, and a quick way to answer
+`404` or `403` from a handler when a JSON error body is not wanted.
+
+## Headers
+
+Set headers with `response.set_header` from `gleam/http/response`. Header
+names are lowercase. Setting one that a helper already set replaces it,
+which is how you send a content type that has no helper of its own:
+
+```gleam
+import gleam/http/response
+
+fn export_users(ctx: Context) {
+  controller.text(ctx, "id,name\n1,Ada\n")
+  |> response.set_header("content-type", "text/csv; charset=utf-8")
+  |> response.set_header(
+    "content-disposition",
+    "attachment; filename=\"users.csv\"",
+  )
+}
+```
+
+The `content-disposition` header here asks the browser to download the body
+as a file called `users.csv`, not to show it.
+
+Headers that apply to every response, such as security headers, belong in
+middleware, not repeated in each handler.
+
+## Redirects
+
+A redirect is an empty response with a `location` header. The status says
+what kind of redirect it is:
+
+```gleam
+fn old_profile(ctx: Context) {
+  controller.status(ctx, 301)
+  |> response.set_header("location", "/account")
+}
+```
+
+- `301` is permanent. Browsers and search engines remember it, so use it for
+  pages that have moved for good.
+- `302` is temporary: go here this time, but keep asking the original URL.
+- `303` means "see other", and the browser always follows it with a `GET`.
+  Use it after a form `POST`, so that refreshing the next page does not
+  submit the form again. [Forms](/docs/controllers/forms) has an example.
+- `307` and `308` are the temporary and permanent versions that keep the
+  method and body, so a redirected `POST` stays a `POST`.
+
+If any part of the location comes from the request, such as a `?next=`
+parameter, check it before you redirect. Sending visitors to whatever URL a
+link contains lets an attacker use your site's name to reach theirs. Only
+accept paths that start with a single `/`.
+
+## Cookies
+
+`cookie.set` and `cookie.delete` are steps in the same pipeline. They add a
+`set-cookie` header and leave everything else alone:
+
+```gleam
+import howdy/cookie
+
+fn sign_out(ctx: Context) {
+  controller.status(ctx, 303)
+  |> response.set_header("location", "/")
+  |> cookie.delete("session", cookie.defaults())
+}
+```
+
+See [Cookies](/docs/controllers/cookies) for the options.
+
+## Streaming a body
+
+A body that takes a while to produce, such as a large export, can be sent
+a piece at a time with `howdy/stream`, so the client receives each piece as
+soon as it is ready and the whole body is never held in memory:
+
+```gleam
+import gleam/list
+import gleam/result
+import howdy/stream
+
+fn export_users(_ctx: Context) {
+  response.new(200)
+  |> response.set_header("content-type", "text/csv; charset=utf-8")
+  |> stream.body(fn(writer) {
+    use writer <- result.try(stream.send_text(writer, "id,name\n"))
+    list.try_fold(users.all(), writer, fn(writer, user) {
+      stream.send_text(writer, user.id <> "," <> user.name <> "\n")
+    })
+  })
+}
+```
+
+The function runs once the status and headers have been sent. Each
+`stream.send` or `stream.send_text` hands back the writer for the next one,
+and returning `Ok` ends the body. Returning `Error` stops writing and closes
+the connection without ending the body, so the client can tell it was cut
+short rather than mistaking half an export for all of it. The error is
+logged, unless it came from a send that failed because the client had gone.
+
+Because the status has been sent before the body starts, a stream cannot
+change its mind and answer `500` part way through. Check what can be
+checked first, and answer with an error before streaming if it fails.
+
+`testing.text` and `testing.bytes` read a streamed body in full, so it is
+tested like any other.
+
+To push messages to a browser as things happen, rather than send one long
+body, use [server-sent events](/docs/controllers/server-sent-events).
+
+## Responses you do not write
+
+Some responses never reach your handler, because Howdy sends them first:
+
+- `404` when no route matches the path, and `405` with an `allow` header
+  when the path matches but the method does not. Both have empty bodies.
+- `204` with an `allow` header for an `OPTIONS` request to a path that has
+  routes.
+- A `HEAD` request runs the matching `GET` handler, and the server sends its
+  status and headers without the body.
+
+[Router](/docs/controllers/router) covers all of these. The input helpers in
+`howdy/query`, `howdy/cookie`, `howdy/param` and `howdy/body` answer `400`
+or `422` for you as well, always as JSON in the shape described in
+[Services and errors](/docs/controllers/services).
+
+## Testing responses
+
+`howdy/testing` sends a request through your app and hands back the
+response, which is the same plain value your handler built. Check the status
+and headers directly, and read the body with `testing.text`:
+
+```gleam
+import gleam/http/response
+import howdy/testing
+
+pub fn export_is_a_download_test() {
+  let res = testing.get("/users/export") |> testing.send(app())
+
+  assert res.status == 200
+  assert response.get_header(res, "content-type")
+    == Ok("text/csv; charset=utf-8")
+  assert testing.text(res) == "id,name\n1,Ada\n"
+}
+```
+
+For a JSON body, `testing.json(res, decoder)` decodes it with a decoder from
+`gleam/dynamic/decode`, so the test can assert on typed values, not on the
+exact text of the JSON.

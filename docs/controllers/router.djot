@@ -1,0 +1,255 @@
+# Router
+
+The router decides which handler answers a request. You rarely call it
+yourself: you describe routes on controllers, mount the controllers on your
+app, and Howdy matches every incoming method and path against them.
+
+This page explains how to declare routes, the rules the router follows when
+more than one route could match, and what it answers when nothing does.
+
+## Declaring routes
+
+A controller groups routes under a path prefix. Each route is a method, a
+path pattern and a handler:
+
+```gleam
+import howdy/controller.{type Context}
+
+pub fn user_controller() {
+  controller.new("users")
+  |> controller.get("/", list_users)
+  |> controller.get("/:id", show_user)
+  |> controller.post("/", create_user)
+  |> controller.delete("/:id", delete_user)
+}
+
+fn list_users(ctx: Context) {
+  controller.text(ctx, "Everyone")
+}
+```
+
+There is a helper for each common method: `controller.get`, `post`, `put`,
+`patch` and `delete`. For any other method, use `controller.route` and pass
+the method yourself:
+
+```gleam
+import gleam/http
+
+controller.new("users")
+|> controller.route(http.Other("PURGE"), "/cache", purge_cache)
+```
+
+The prefix and the route path are joined to make the full pattern, so the
+user controller answers `/users` and `/users/:id`. Use `controller.new("")`
+for routes at the root of your site, and a prefix such as `"api/users"` to
+mount under more than one segment.
+
+Mount controllers on the app to make their routes live:
+
+```gleam
+import howdy
+
+pub fn app() {
+  howdy.new()
+  |> howdy.controller(user_controller())
+  |> howdy.controller(order_controller())
+}
+```
+
+### HEAD requests
+
+You do not need to declare `HEAD` routes. A `HEAD` request is answered by the
+matching `GET` route: your handler runs as usual, and the server sends its
+status and headers without the body. That keeps `curl -I`, uptime monitors
+and link checkers working on every page with no extra code.
+
+Your `GET` handler does all of its work for a `HEAD` request, even though
+the body is thrown away. If that work is expensive, declare a `HEAD` route of
+your own with `controller.route(http.Head, ...)`. An explicit `HEAD` route
+always takes priority over the `GET` one.
+
+## Path patterns
+
+A pattern is split on `/` into segments, and the request path is split the
+same way. Empty segments are dropped from both, so leading, trailing and
+doubled slashes never matter: `"users"`, `"/users"` and `"/users/"` are the
+same prefix, and a request for `/users/42/` matches `/users/:id`.
+
+There are three kinds of segment:
+
+- `users` is a literal. It matches exactly that text, as in `/users`.
+- `:name` is a parameter. It matches any one segment and captures it as
+  `name`, so `/users/:id` matches `/users/42`.
+- `*name` is a wildcard. It matches the rest of the path and captures it as
+  `name`, so `/files/*path` matches `/files/a/b.txt`. It must be the last
+  segment of the pattern.
+
+Literal segments are compared exactly, so matching is case sensitive.
+
+A `:name` segment always needs a value: `/users/:id` does not match `/users`.
+A `*name` segment matches even when nothing is left, so `/files/*path`
+matches `/files` too, with `path` set to an empty string. When it captures
+several segments they are joined with `/`, giving `a/b.txt` in the example
+above.
+
+## Reading parameters
+
+Captured values are strings. `controller.param` looks one up and returns a
+`Result`:
+
+```gleam
+fn show_file(ctx: Context) {
+  case controller.param(ctx, "path") {
+    Ok(path) -> controller.text(ctx, "You asked for " <> path)
+    Error(Nil) -> controller.status(ctx, 404)
+  }
+}
+```
+
+Most of the time the `howdy/param` module is more convenient. Its functions
+work with `use`, hand you a typed value, and answer `400` for you when the
+parameter is missing or has the wrong shape:
+
+```gleam
+import gleam/int
+import howdy/param
+
+fn show_user(ctx: Context) {
+  use id <- param.int(ctx, "id")
+  // `id` is an Int here. A request for /users/abc never gets this far.
+  controller.text(ctx, "User " <> int.to_string(id))
+}
+```
+
+Use `param.string` when any text will do. [Path parameters](/docs/controllers/path-parameters)
+has the details.
+
+## Which route wins
+
+When several routes could match a request, the router picks one by two
+rules, in this order:
+
+1. *Exact routes beat wildcard routes.* A route whose pattern ends in `*name`
+   is only considered when no other route matches the path.
+2. *Otherwise, the first one declared wins.* Controllers are checked in the
+   order they were mounted, and routes within a controller in the order they
+   were added.
+
+The second rule means a parameter can shadow a literal declared after it:
+
+```gleam
+controller.new("users")
+|> controller.get("/:id", show_user)
+|> controller.get("/all", list_users)
+```
+
+Here `/users/all` reaches `show_user` with `id` set to `"all"`, because
+`/:id` was declared first and matches any single segment. Declare the more
+specific route first:
+
+```gleam
+controller.new("users")
+|> controller.get("/all", list_users)
+|> controller.get("/:id", show_user)
+```
+
+The first rule is what makes a catch-all safe to use. A static file
+controller mounted at `/*path` will never take a request away from one of
+your own routes, wherever it is mounted. Order only matters between two
+wildcard routes, so mount your most general catch-all last.
+
+## When nothing matches
+
+The router gives one of three results, and Howdy turns each into a response:
+
+- `Found`: a route matches the path and the method. The response is
+  whatever your handler returns.
+- `MethodNotAllowed`: routes match the path, but none with this method. The
+  response is `405` with an `allow` header listing the methods that do.
+  `HEAD` is listed alongside `GET`, since every `GET` route answers both.
+- `NotFound`: no route matches the path. The response is `404` with an empty
+  body, unless the app has a [`not_found` handler](#Your-own-404).
+
+So with the user controller from the top of this page, `PUT /users/42`
+answers `405` with `allow: GET, HEAD, DELETE`, and `GET /orders` answers `404`.
+
+Exact routes take precedence here as well. If an exact route matches the
+path, the wildcards are not tried, even when the exact route has the wrong
+method. With `POST /files/upload` and `GET /files/*path` both declared,
+`GET /files/upload` answers `405`, not the wildcard.
+
+Middleware is part of the matched handler, so it does not run for `405`
+responses, nor for `404` ones unless the app has a `not_found` handler.
+
+### Your own 404
+
+`howdy.not_found` answers every request that no route matches, whatever its
+method:
+
+```gleam
+howdy.new()
+|> howdy.controller(user_controller())
+|> howdy.not_found(fn(ctx) {
+  service.error_response(ctx, service.NotFound("no such page"))
+})
+```
+
+The handler runs inside the app's middleware like any route, so request
+logging, CORS and your own middleware see these requests too. It gets the
+request with no path parameters; with a [version group](/docs/middleware/versioning),
+`ctx.version` is the version the request named, if any. A path that routes
+match with another method still answers `405`.
+
+A catch-all route matches before it: an app that mounts
+`static.serve("/", from: "priv/public")` sends every unmatched `GET` to the
+file server, whose own `404` is the controller's, and reaches `not_found` only
+with other methods.
+
+### OPTIONS requests
+
+You do not need to declare `OPTIONS` routes. When an `OPTIONS` request
+reaches a path that has routes, the router answers `204` with an `allow`
+header listing their methods. That response runs inside the controller's
+middleware, so CORS middleware sees preflight requests, but the controller's
+guard is skipped, because browsers send preflights without credentials. An
+`OPTIONS` route you declare yourself always takes priority.
+
+## How matching works
+
+Routes are compiled into a table once, when the app's handler is built, not
+on every request. App and controller middleware are wrapped around each
+handler at the same moment.
+
+Exact routes are indexed by how many segments they have and by their first
+literal segment. A request for `/users/42` is only compared against routes
+with two segments that start with `users` or with a parameter, however many
+routes your app has. Declaration order is preserved inside that index, so
+the rules above hold exactly.
+
+## Trying the router directly
+
+`router.match` runs the same matching on a list of controllers, without a
+server. It is handy in tests when you want to check your routes rather than
+your handlers:
+
+```gleam
+import gleam/dict
+import gleam/http
+import howdy/router
+
+pub fn user_routes_test() {
+  let controllers = [user_controller()]
+
+  let assert router.Found(params:, ..) =
+    router.match(controllers, http.Get, "/users/42")
+  assert dict.get(params, "id") == Ok("42")
+
+  let assert router.MethodNotAllowed(allowed: [http.Get, http.Head, http.Delete]) =
+    router.match(controllers, http.Put, "/users/42")
+
+  let assert router.NotFound = router.match(controllers, http.Get, "/orders")
+}
+```
+
+To test whole requests and responses instead, send them through your app
+with `howdy/testing`.

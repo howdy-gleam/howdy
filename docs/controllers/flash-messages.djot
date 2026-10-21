@@ -1,0 +1,103 @@
+# Flash messages
+
+A flash message is a short note that survives one redirect: "Settings
+saved" after a form post, or "That link has expired" after sending someone
+back to the start. The handler doing the work puts the message on its
+redirect, and the page the browser lands on shows it once.
+
+`howdy/flash` keeps the messages in a signed cookie, so they need no
+storage on the server and work without JavaScript.
+
+## Put a message on a redirect
+
+Make one `Flash` when the app starts, from a secret of at least 32 bytes
+that stays the same across restarts and on every server:
+
+```gleam
+import howdy/env
+import howdy/flash
+
+let assert Ok(secret) = env.get("SECRET_KEY_BASE")
+let flash = flash.new(secret:)
+```
+
+After a form post, answer `303` so that refreshing the next page does not
+post the form again, and put the message on that response:
+
+```gleam
+fn save_settings(ctx: Context, flash: flash.Flash) {
+  use fields <- form.read(ctx)
+  // ... save them ...
+  controller.status(ctx, 303)
+  |> response.set_header("location", "/settings")
+  |> flash.put(flash, flash.Success, "Settings saved")
+}
+```
+
+There are three levels, `Info`, `Success` and `Danger`. Put more than one
+message and they are shown in the order they were put.
+
+## Show it once
+
+The page reads the messages with `flash.take`, which clears them on its
+response, so a refresh does not show them again:
+
+```gleam
+fn settings_page(ctx: Context, flash: flash.Flash) {
+  use messages <- flash.take(ctx, flash)
+  let w = words.english()
+  page.new("Settings")
+  |> page.body([
+    settings_form(),
+    toast.region(w, [], toast.flashed(w, messages)),
+  ])
+  |> page.respond(ctx)
+}
+```
+
+`toast.flashed` from `howdy_ui` turns each message into a toast that fades
+on its own; the text is always shown as text, never as HTML. The region
+and the close buttons are labelled with the [words](/docs/i18n/overview#Howdy-UI)
+you give them, here English; the messages are yours, so write them in the
+visitor's language. A page that redirects again without showing anything
+should not take the messages: they stay in the cookie for the page after.
+
+A live view can show them too: read them in the handler that serves the
+page, pass them to the view, and add them to its toast queue with
+`toast.push_flashed`.
+
+## Why signed
+
+The messages are signed with a key derived from the secret, so a page only
+ever shows messages your app wrote. A cookie someone else planted, such as
+from a sibling subdomain, or one edited by hand, is ignored and cleared.
+They are not encrypted: never put anything secret in a flash message.
+
+The cookie is called `howdy_flash`, lasts ten minutes, and uses
+`cookie.defaults()`, so it is `Secure`, `HttpOnly` and `SameSite=Lax`.
+Browsers accept `Secure` cookies from `http://localhost`; for plain HTTP on
+another host, use `flash.cookie_options` with `cookie.secure(False)`.
+
+## Flash or notification?
+
+A flash message is feedback on something the user just did, shown on the
+very next page. To tell someone about something that happened elsewhere,
+such as another user's comment, use [notifications](/docs/notifications/overview),
+which are kept until read and reach pages that are already open.
+
+## Testing
+
+`testing.cookies` gives the cookie a response set, and `testing.cookie`
+sends it with the next request, as a browser would:
+
+```gleam
+pub fn saving_says_so_test() {
+  let saved = testing.post_form("/settings", []) |> testing.send(app())
+  let assert Ok(value) = testing.cookies(saved) |> list.key_find("howdy_flash")
+  let page =
+    testing.get("/settings")
+    |> testing.cookie("howdy_flash", value)
+    |> testing.send(app())
+  assert string.contains(testing.text(page), "Settings saved")
+}
+```

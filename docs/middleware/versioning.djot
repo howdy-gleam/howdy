@@ -1,0 +1,286 @@
+# API versioning
+
+Once other people's code depends on your API, you cannot change it freely. A
+renamed field or a new required value breaks every client that has not been
+updated. Versioning is the way out: leave the old behaviour in place as
+`v1`, publish the change as `v2`, and let clients move when they are ready.
+
+`howdy/version` does this with a *version group*. You give it the
+controllers for each version and say how a request names the version it
+wants. The group works out the version, then routes the request to that
+version's controllers.
+
+It sits beside [middleware](/docs/middleware/overview) because it is set up
+in the same place, on the app, and works hand in hand with it. It is not
+middleware itself: it chooses which routes a request can reach, which
+happens before any middleware runs.
+
+## A version group
+
+```gleam
+import howdy
+import howdy/version
+
+pub fn app() {
+  let api =
+    version.new(version.path())
+    |> version.default("v1")
+    |> version.add("v1", [users_v1.controller(), orders.controller()])
+    |> version.add("v2", [users_v2.controller()])
+
+  howdy.new()
+  |> howdy.controller(status.controller())
+  |> howdy.versions(api)
+}
+```
+
+`version.new` takes the strategy for reading the version, here the path.
+`version.add` declares a version and its controllers, oldest first. The
+controllers themselves are ordinary ones and know nothing about versions:
+both user controllers are just `controller.new("users")`.
+
+With that app:
+
+- `GET /v2/users` reaches the `v2` user controller.
+- `GET /v1/users` reaches the `v1` one.
+- `GET /users` names no version, so it gets the default, `v1`.
+- `GET /status` reaches the status controller, which is not versioned.
+
+## Falling back
+
+`v2` above declares only a user controller, yet `GET /v2/orders` works. A
+version falls back to the ones declared before it for any route it does not
+answer itself, newest first. So a new version only has to contain what
+changed, and everything else carries forward.
+
+Fallback is per route, not per controller. If the `v2` user controller
+declares only `GET /`, then `POST /v2/users` falls back to `v1`'s `POST /`.
+That lets you override a single route: make a `v2` controller with just the
+route that changed.
+
+When that is not what you want, `version.no_fallback` makes every version
+answer only the routes it declares:
+
+```gleam
+version.new(version.path())
+|> version.no_fallback
+|> version.add("v1", [users_v1.controller(), orders.controller()])
+|> version.add("v2", [users_v2.controller(), orders.controller()])
+```
+
+Now `v2` must list everything it supports, and `GET /v2/orders` would be a
+`404` without the orders controller there. Choose this when versions should
+be complete, separate things, and a route missing from `v2` means it was
+removed on purpose.
+
+## Choosing how clients name the version
+
+One strategy applies to the whole group:
+
+- `version.path()` reads the first segment of the path, as in `/v2/users`.
+- `version.header("x-api-version")` reads a request header.
+- `version.accept("vnd.howdy")` reads a vendor media type from the `accept`
+  header, as in `application/vnd.howdy.v2+json`.
+- `version.custom(fn)` runs your own function from the request to an
+  `Option(String)`.
+
+Use the path unless you have a reason not to. The version is visible in the
+URL, so a link can be shared, pasted into a browser, cached and tested
+without any special tooling. Headers keep URLs the same between versions,
+which some API designs prefer, at the price of being invisible.
+
+A custom resolver can read the version from anywhere, such as a query
+parameter:
+
+```gleam
+import gleam/http/request
+import gleam/list
+import gleam/option
+import gleam/result
+
+version.custom(fn(req) {
+  request.get_query(req)
+  |> result.try(list.key_find(_, "api"))
+  |> option.from_result
+})
+```
+
+Mixing strategies, such as a header that overrides the path, is left out on
+purpose, because it makes it unclear which version a request is asking for.
+If you truly need it, a custom resolver can express any rule you like.
+
+## Missing and unknown versions
+
+What happens when the version is missing or wrong depends on the strategy.
+
+With the path strategy, the first segment is only treated as a version if
+it is one you declared. Anything else is left alone, which is how `/status`
+still reaches an unversioned controller. So an unknown version such as
+`/v9/users` is simply a path nothing matches, and answers `404`. Without a
+default, so does `/users`.
+
+With the header, accept and custom strategies there is a definite answer to
+"which version?", so a bad one is the client's mistake and answers `400`:
+
+```json
+{"error":"unknown API version v9"}
+```
+
+A request with no version gets the default. If the group has no default it
+answers `400` with `{"error":"missing API version"}`. That applies to every
+path the unversioned controllers do not answer, including ones with no
+route at all, so without a default a mistyped URL reports a missing version
+rather than `404`.
+
+A default is a convenience for clients and a commitment for you: clients
+that never name a version are pinned to it forever, and you can never move
+the default without breaking them. Leaving it out forces every client to
+choose, which is stricter but keeps you free.
+
+### Caching
+
+The header and accept strategies serve different responses from the same
+URL. The group adds a `vary` header naming the header it read, `vary:
+x-api-version` or `vary: accept`, to every response, so that caches keep
+the versions apart. A custom resolver gets no `vary` header, because Howdy
+cannot know what it reads; add your own in middleware if responses may be
+cached.
+
+## Unversioned controllers
+
+Controllers mounted with `howdy.controller` are matched first and never see
+a version. The group answers whatever they do not. Use them for things that
+are not part of the API contract: health checks, the home page, static
+files, webhooks whose shape someone else decides.
+
+They are not available under a version prefix: with the app above,
+`/v2/status` is a `404`. An app can have one version group, and mounting a
+second panics.
+
+## Reading the version
+
+The resolved version is on the context as `ctx.version`, an
+`Option(String)`. It is `None` on unversioned routes. After a fallback it
+is still the version the client asked for, so an orders handler reached
+through `/v2/orders` sees `Some("v2")`.
+
+That lets one handler serve several versions where the difference is small,
+which can be simpler than a whole controller per version:
+
+```gleam
+import gleam/option.{Some}
+
+fn show_user(ctx: Context) {
+  use id <- param.int(ctx, "id")
+  let encode = case ctx.version {
+    Some("v1") -> user_to_json_v1
+    _ -> user_to_json
+  }
+  user_service.find(id) |> service.respond(ctx, encode)
+}
+```
+
+The path strategy strips the version segment before routing, which is why
+the controllers are written without it. The request itself is left alone,
+so `ctx.request.path` is still `/v2/users`.
+
+## Versions and middleware
+
+[Middleware](/docs/middleware/overview) wraps versioned routes like any
+others, and can read `ctx.version`. That makes it the place for rules about
+versions as a whole, such as warning clients that an old one is going away:
+
+```gleam
+import gleam/http/response
+import gleam/option.{Some}
+import howdy/controller.{type Context}
+import howdy/middleware.{type Next}
+
+pub fn deprecation(ctx: Context, next: Next) {
+  let res = next(ctx)
+  case ctx.version {
+    Some("v1") ->
+      res
+      |> response.set_header("deprecation", "true")
+      |> response.set_header("sunset", "Wed, 30 Jun 2027 00:00:00 GMT")
+    _ -> res
+  }
+}
+```
+
+Added with `howdy.middleware`, this marks every `v1` response, including
+ones from the default version and from routes `v1` clients reach, without
+touching a single handler. The same idea works for a stricter
+[rate limit](/docs/middleware/rate-limiting) on an old version, or for
+logging which versions are still in use before you remove one.
+
+## Naming versions
+
+A version name is any string, and Howdy gives the text no meaning. `v1` and
+`v2` are common, and dates such as `2026-09-14` work as well. What matters
+is the order you call `version.add` in, because that is the fallback order:
+oldest first.
+
+Names are matched exactly, so `v2` and `V2` are different versions. With
+the path strategy, avoid a name that is also the first segment of a real
+route.
+
+Mistakes in the group are configuration errors, and panic when the app is
+built rather than when a request arrives: an empty name, a name added
+twice, or a default that was never added.
+
+## When to make a new version
+
+A new version is a promise to keep the old one working, so make one only
+for changes that would break a client:
+
+- removing or renaming a field, a route or a parameter
+- changing the type or meaning of a value
+- making something required that was optional
+
+Additions are safe within a version, as long as clients ignore what they do
+not recognise: a new route, a new optional parameter, a new field in a
+response. Most changes to an API are additions, so new versions should be
+rare.
+
+## Testing versions
+
+Ask for each version the way a client would. With the path strategy that is
+just the URL:
+
+```gleam
+import howdy/testing
+
+pub fn v2_falls_back_to_v1_orders_test() {
+  let res = testing.get("/v2/orders") |> testing.send(app())
+  assert res.status == 200
+}
+
+pub fn unknown_version_is_not_found_test() {
+  let res = testing.get("/v9/users") |> testing.send(app())
+  assert res.status == 404
+}
+```
+
+With a header strategy, set the header, and check the rejection too:
+
+```gleam
+pub fn unknown_version_is_rejected_test() {
+  let res =
+    testing.get("/users")
+    |> testing.header("x-api-version", "v9")
+    |> testing.send(app())
+
+  assert res.status == 400
+  assert testing.error(res) == Ok("unknown API version v9")
+}
+```
+
+Keep a test for each old version for as long as you support it. They are
+what tells you a change to shared code has broken a client you promised not
+to break.
+
+## Documenting versions
+
+`howdy_openapi` builds an OpenAPI document for each version, showing how
+clients choose it. See [OpenAPI documents](/docs/openapi/overview).

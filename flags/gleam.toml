@@ -1,0 +1,24 @@
+name = "howdy_flags"
+version = "1.0.0"
+gleam = ">= 1.18.0"
+description = "Feature flags for Howdy apps: defined in code, rolled out gradually to groups and a share of users, with a kill switch and history"
+licences = ["Apache-2.0"]
+repository = { type = "github", user = "howdy-gleam", repo = "howdy", path = "flags", tag-prefix = "howdy_flags-" }
+links = [{ title = "Website", href = "https://tryhowdy.dev" }]
+internal_modules = ["howdy/flags/internal/*"]
+target = "erlang"
+
+[dependencies]
+gleam_stdlib = ">= 1.0.0 and < 2.0.0"
+gleam_erlang = ">= 1.3.0 and < 2.0.0"
+gleam_otp = ">= 1.3.0 and < 2.0.0"
+gleam_json = ">= 3.1.0 and < 4.0.0"
+gleam_crypto = ">= 1.5.0 and < 2.0.0"
+gleam_time = ">= 1.8.0 and < 2.0.0"
+logging = ">= 1.3.0 and < 2.0.0"
+gloo = ">= 1.0.2 and < 2.0.0"
+howdy = { path = ".." }
+howdy_database = { path = "../database" }
+
+[dev_dependencies]
+gleeunit = ">= 1.0.0 and < 2.0.0"

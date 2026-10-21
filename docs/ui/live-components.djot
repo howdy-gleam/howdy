@@ -1,0 +1,306 @@
+# Live components
+
+A live component is a piece of interactive UI whose state and logic run on
+the server. The browser holds a small client that sends events, such as
+clicks and key presses, up a WebSocket, and applies the changes to the page
+that come back.
+
+You write no JavaScript and no JSON API. The component can use your
+database and services directly, because it is already on the server, and
+the visitor cannot see or tamper with its logic. The cost is a connection
+held open per visitor and a round trip for every interaction, so it suits
+dashboards, forms and admin tools better than a drawing app.
+
+For a piece of a page that needs no server, such as a counter or a drawing
+surface, use an [island](/docs/ui/islands) instead: a Lustre app that runs
+in the browser.
+
+Under the hood these are [Lustre](https://hexdocs.pm/lustre) server
+components. `howdy/ui/live` connects them to Howdy's
+[WebSockets](/docs/controllers/websockets).
+
+## A counter
+
+A component is a Lustre app, made of three functions:
+
+- `init` makes the starting state, called the model.
+- `update` takes the model and a message, and returns the new model.
+- `view` turns the model into elements.
+
+```gleam
+import gleam/int
+import howdy/ui
+import howdy/ui/button.{Primary, Secondary}
+import lustre
+import lustre/element.{text}
+import lustre/event
+
+pub type Msg {
+  Increment
+  Decrement
+}
+
+pub fn app() {
+  lustre.simple(init, update, view)
+}
+
+fn init(start: Int) -> Int {
+  start
+}
+
+fn update(count: Int, msg: Msg) -> Int {
+  case msg {
+    Increment -> count + 1
+    Decrement -> count - 1
+  }
+}
+
+fn view(count: Int) {
+  ui.card([], [
+    ui.h2("Counter"),
+    ui.p([text(int.to_string(count))]),
+    ui.row([], [
+      ui.button(Secondary, [event.on_click(Decrement)], [text("-")]),
+      ui.button(Primary, [event.on_click(Increment)], [text("+")]),
+    ]),
+  ])
+}
+```
+
+Events in the view, such as `event.on_click(Increment)`, name the message
+to send. When the button is clicked, the message goes to the server,
+`update` runs, `view` runs with the new model, and Lustre sends the browser
+only what changed.
+
+`lustre.simple` is for components that just hold state. For one that also
+needs to do things, such as load data or set a timer, use
+`lustre.application`, whose `init` and `update` also return *effects*. The
+Lustre documentation covers these.
+
+## Serving and mounting
+
+A component needs a route for its socket:
+
+```gleam
+import howdy/controller
+import howdy/ui/live
+
+controller.new("counter")
+|> controller.get("/", fn(ctx) { live.serve(ctx, counter.app(), with: 0) })
+```
+
+The `with:` value is passed to `init`, here as the starting count. It is how
+a handler hands the component what it needs, such as an id from the path
+or the signed-in user.
+
+Then give it a place in a [page](/docs/ui/pages):
+
+```gleam
+import howdy/ui/page
+
+page.new("Counter")
+|> page.live
+|> page.body([ui.container([], [live.mount("/counter")])])
+|> page.respond(ctx)
+```
+
+`page.live` adds the client script to the page, and is needed once however
+many components the page has. `live.mount` takes the path of the socket
+route, and marks where the component appears.
+
+Each connection gets its own copy of the component, started when the socket
+opens and shut down when it closes. Two visitors, or two tabs, have two
+separate counts. A reload starts again from `init`, so anything that must
+survive one belongs in your database, not only in the model.
+
+## One component for everyone
+
+Sometimes every visitor should see the same thing: a dashboard, a scoreboard,
+a list of who is online. Start one component when your app starts, and
+attach every socket to it:
+
+```gleam
+pub fn main() {
+  let assert Ok(scoreboard) = live.start(scoreboard.app(), with: Nil)
+
+  howdy.new()
+  |> howdy.controller(pages(scoreboard))
+  |> howdy.start
+}
+```
+
+```gleam
+controller.get("/scoreboard", fn(ctx) { live.serve_shared(ctx, scoreboard) })
+```
+
+`live.start` returns a *runtime* that outlives any one connection. With
+`live.serve_shared`, every client sees the same model, and when one visitor
+clicks a button the view changes for all of them. Closing a socket detaches
+that client and leaves the runtime running.
+
+`live.dispatch` sends a runtime a message from anywhere in your program,
+which arrives at `update` just as a click would:
+
+```gleam
+fn record_goal(ctx: Context, scoreboard) {
+  live.dispatch(scoreboard, scoreboard.GoalScored("home"))
+  controller.status(ctx, 204)
+}
+```
+
+That is how a background job, a webhook or an ordinary handler updates what
+every visitor is looking at.
+
+## Live links
+
+Live links move between live pages without reloading the page. The page
+has one *outlet* in place of a `live.mount`, and each link says which live
+route to put in it:
+
+```gleam
+fn layout(ctx, mount mount: String) {
+  page.new("Shop")
+  |> page.live
+  |> page.body([
+    ui.row([], [
+      live.link(to: "/", mount: "/live/home", children: [text("Home")]),
+      live.link(to: "/orders", mount: "/live/orders", children: [
+        text("Orders"),
+      ]),
+    ]),
+    live.outlet(mount),
+  ])
+  |> page.respond(ctx)
+}
+
+pub fn pages() {
+  controller.new("/")
+  |> controller.get("/", fn(ctx) { layout(ctx, mount: "/live/home") })
+  |> controller.get("/orders", fn(ctx) { layout(ctx, mount: "/live/orders") })
+}
+```
+
+`/live/home` and `/live/orders` are ordinary live routes, served with
+`live.serve` as above.
+
+When a visitor clicks a link, the outlet connects to the link's `mount`
+route, and the address bar shows its `to` path. The old view stays on
+screen until the new one arrives. Everything outside the outlet is left
+alone, including other live components, which keep their connections. Back
+and forward swap the outlet too.
+
+**Every `to` path must serve the whole page**, with that view in the outlet,
+as `/orders` does above. It is what a reload, a bookmark, a new tab or a
+browser without JavaScript loads. Writing the page as one layout function
+that takes the mount, as here, keeps them in step.
+
+- A click with a modifier key, a middle click, a link with a `target`, and
+  a link to another site all behave as plain links. So does every live link
+  on a page with no outlet.
+- A page has at most one outlet.
+- Links work inside live views as well as in the page, so a view can link
+  to the next one.
+- `live.navigate(to:, mount:)` returns the attributes that make an `<a>` a
+  live link, for a link you style yourself. `live.link` is styled as a
+  Howdy UI link.
+- Put `live.title("Orders")` anywhere in a view to change the document's
+  title when that view mounts, so history entries are named after their
+  page.
+- After a click, the page scrolls to the top and focus moves to the outlet,
+  so keyboard and screen reader users start at the new content.
+- Each swap starts a fresh copy of the view, so its state does not carry
+  across: going back to a counter starts it again from `init`. Views
+  attached to a shared runtime with `live.serve_shared` show the shared
+  model as usual.
+
+`page.live` includes the script that makes links work. If you render the
+document yourself, add `live.script()` after `server_component.script()`.
+
+## Who may connect
+
+A live route is an ordinary route that ends in a WebSocket, so everything
+about [WebSockets](/docs/controllers/websockets) applies:
+
+- It passes through [middleware](/docs/middleware/overview) and
+  [guards](/docs/controllers/guards). Put it on a guarded controller to
+  require a signed-in user, and pass the user to the component with `with:`.
+- Browsers cannot set headers on a WebSocket handshake, so the guard must
+  read a cookie or a query parameter.
+- Only your own site may connect by default, including behind a proxy that
+  terminates TLS. Other origins answer `403`.
+
+Remember that messages come from the browser. A visitor can send any
+message your `Msg` type allows, at any time, whether or not the button for
+it is on their screen. Check permissions in `update`, not only in `view`.
+
+To change the origin rules or add callbacks of your own, `live.socket` and
+`live.socket_shared` return the socket before it is upgraded, as a
+`howdy/websocket` builder:
+
+```gleam
+import howdy/websocket
+
+live.socket(counter.app(), 0)
+|> websocket.allow_origins(["https://app.example.com"])
+|> websocket.upgrade(ctx)
+```
+
+## Islands in a live view
+
+A live view can render [islands](/docs/ui/islands) with `island.mount`.
+The live view draws each one once and leaves it to the browser: the
+island's clicks never reach the server, and the live view's re-renders
+leave its state alone. Rendering a different island in its place, or the
+same one with different flags, starts a fresh one.
+
+## Styling
+
+A live component renders inside a *shadow root*, which keeps the page's CSS
+out and the component's CSS in. Howdy UI handles this for you. The component
+carries the CSS for exactly the classes its view uses, so
+[components](/docs/ui/components) look the same inside it as outside,
+however the page gets its own styles.
+
+[Themes](/docs/ui/themes) do cross into the component, because they are CSS
+variables, which are inherited. A live view changes colour with the rest of
+the page when a visitor toggles the theme.
+
+One consequence: CSS you write by hand in the page's stylesheet does not
+reach inside a live component. Style its contents with
+[components and classes](/docs/ui/custom-components) instead.
+
+## Testing
+
+A component is three plain functions, so test them directly, with no socket
+and no browser:
+
+```gleam
+pub fn increment_adds_one_test() {
+  assert counter.update(1, counter.Increment) == 2
+}
+```
+
+To test what a view shows, render it to a string:
+
+```gleam
+import gleam/string
+import lustre/element
+
+pub fn view_shows_the_count_test() {
+  let html = counter.view(3) |> element.to_string
+  assert string.contains(html, ">3<")
+}
+```
+
+Both need `update` and `view` to be public. For the route, `howdy/testing`
+has no connection to upgrade, so a live route that gets as far as
+connecting answers `426`. That is enough to check the guard in front of it:
+
+```gleam
+import howdy/testing
+
+pub fn counter_needs_a_session_test() {
+  let res = testing.get("/counter") |> testing.send(app())
+  assert res.status == 401
+}
+```

@@ -1,0 +1,137 @@
+# Running jobs
+
+What a runner does with jobs while your app runs, what happens when nodes
+come and go, and how to see and change jobs.
+
+## How a runner takes jobs
+
+A runner has a producer for each of its queues. It takes due jobs from
+its queue while it has room, highest priority and earliest first, and runs
+each in a process of its own. Taking a job marks it as running on this
+node in the same statement that finds it, so two nodes never take the
+same job: PostgreSQL skips rows another node has locked, and SQLite has
+one writer.
+
+A producer looks for jobs:
+
+- when a job is queued on this node, as soon as the transaction commits
+- on PostgreSQL, when any node queues one: inserting a job sends
+  `NOTIFY howdy_jobs`, which the server delivers when the transaction
+  commits, and each runner listens on a connection of its own
+- every second otherwise, which `jobs.check_every` changes
+
+Runners on nodes connected in an Erlang cluster also wake each other
+directly. A job queued to run later is found by the poll once it is due.
+
+The listening connection is opened with the settings of the Repo's pool.
+A Repo built some other way needs them given:
+`jobs.listen_via(runner, pog_config)`. `jobs.without_listening` turns it
+off, and the producers poll.
+
+Only jobs this runner has a handler for are taken. During a rolling
+deploy, nodes still on the old code leave jobs of a new kind to the nodes
+that know it.
+
+## When nodes stop
+
+A node renews its claim on each job it runs every 20 seconds. Stopping
+a runner cleanly, as the app's supervisor does on `SIGTERM`, stops it
+taking new jobs and gives running ones `jobs.shutdown_grace` (15 seconds by
+default) to finish. Those that do not are stopped and handed back without
+counting the attempt, for another node to take the next time it looks.
+
+A node that stops without saying so, such as one whose machine is lost,
+leaves its jobs claimed. Once a claim has gone a minute without being
+renewed, any runner puts the job back as if the attempt had failed, and
+it is run again. `jobs.lease(runner, milliseconds)` changes the minute:
+shorter notices sooner, at the cost of renewing more often.
+
+This is why a job is done at least once. Write handlers so that doing a
+job a second time is harmless.
+
+## Pausing
+
+`jobs.pause(repo, queue)` stops every node taking jobs from a queue until
+`jobs.resume(repo, queue)`. Jobs keep being queued, and running ones
+finish. Use it to hold back a queue whose jobs call a service that is
+down, rather than spending their attempts.
+
+## Watching jobs
+
+### In the admin
+
+Register the runner with the [admin area](/docs/admin/overview):
+
+```gleam
+admin.new() |> admin.jobs(runner)
+```
+
+The Jobs page follows the database as it changes:
+
+- each queue, how many of its jobs this node runs at once, how many are in
+  each state, and a button to pause or resume it
+- the runner's schedules, when each last queued a job and when it is next
+  due
+- the jobs, newest first, filtered by state, queue and job, with a button
+  to run a waiting job now, retry a failed one, or cancel one
+
+Each job has a page of its own, with its arguments and every failure, to
+retry, cancel or delete it. The admin is for development; the runner need
+not be running in the same process for its jobs to show.
+
+### On a server
+
+`howdy/jobs/cli` is a command line for the same, in a task module of your
+app:
+
+```gleam
+// src/tasks/jobs.gleam
+import howdy/jobs/cli
+
+pub fn main() -> Nil {
+  cli.main(fn() { my_app.open_database() })
+}
+```
+
+```sh
+gleam run -m tasks/jobs stats
+gleam run -m tasks/jobs list --state failed --job welcome_email
+gleam run -m tasks/jobs show 1234
+gleam run -m tasks/jobs retry --failed --queue mail
+gleam run -m tasks/jobs pause mail
+```
+
+In a release built with `gleam export erlang-shipment`, run it from the
+release directory with the arguments after `-extra`:
+
+```sh
+erl -pa */ebin -noshell -eval 'tasks@jobs:main()' -extra stats
+```
+
+`help` lists every command. The same changes are functions on the Repo,
+for a console or your own pages: `jobs.list`, `jobs.get`, `jobs.counts`,
+`jobs.retry`, `jobs.cancel`, `jobs.delete`, `jobs.pause`, `jobs.resume`
+and `jobs.prune`.
+
+### In traces
+
+With [telemetry](/docs/telemetry/overview) running, queueing a job inside
+a traced request is an `enqueue <job>` span, and each attempt is a
+`job <job>` span of its own trace, linked to the request that queued it.
+The span carries the job's id, queue and attempt, and an attempt that did
+not succeed marks it failed with the reason. Queries the handler makes
+are inside it, as they are in a request.
+
+## States
+
+- `Available`: due, waiting for a free slot
+- `Scheduled`: waiting until later, including a job waiting to be tried
+  again
+- `Executing`: running on a node
+- `Completed`: done
+- `Cancelled`: cancelled by its handler or by hand
+- `Failed`: out of attempts, or given up
+
+Jobs are kept in the `howdy_jobs` table. Times are unix milliseconds, and
+arguments and failures are JSON. Finished jobs are deleted after a week,
+or `jobs.keep_finished_for`.

@@ -1,0 +1,158 @@
+# Migrations
+
+`howdy/migration` creates and upgrades tables in *packages*. Each package
+owns its own tables, and keeps its own checksummed history. It is what
+[Howdy Auth](/docs/auth/migrations) uses for its tables, and your app can
+use it for its own.
+
+## A package
+
+A package is a name and a list of ordinary `gloo/migration` values:
+
+```gleam
+import gloo/migration as gloo_migration
+import howdy/migration
+
+pub fn schema() -> migration.Package {
+  migration.Package("notes", [
+    gloo_migration.new(
+      1,
+      "create_notes",
+      "CREATE TABLE notes_notes (
+         id TEXT PRIMARY KEY,
+         user_id TEXT NOT NULL REFERENCES howdy_auth_users(id),
+         title TEXT NOT NULL
+       )",
+    ),
+  ])
+}
+```
+
+- A package owns every table, index and trigger whose name begins with its
+  name and an underscore. This one owns `notes_*`. The name is lowercase
+  letters, digits and underscores.
+- Versions are positive and increase within a package. Two packages can
+  both have a version 1.
+- A migration that has been applied is never edited. To change a schema,
+  append a migration with a higher version. There are no down migrations.
+
+## Running them
+
+Run every package in one call, from a deployment step, before the new
+version of the app starts:
+
+```gleam
+// src/migrate.gleam
+import howdy/auth
+import howdy/authorization
+import howdy/migration
+
+pub fn main() {
+  let db = database.connect()
+  let assert Ok(_) =
+    migration.run(db, [auth.schema(), authorization.schema(), notes.schema()])
+}
+```
+
+```sh
+gleam run -m migrate
+```
+
+- Only migrations that have not been applied run. Running it again is safe.
+- The whole batch is one transaction. A failure rolls all of it back.
+- The list order is the dependency order: a package that references
+  another's tables comes after it.
+- Two processes migrating at once take turns.
+
+Back up the database first, and stop old instances of the app: running two
+versions against one schema is not supported.
+
+## Checking at startup
+
+`migration.check` applies nothing. It fails when the database is behind or
+ahead of the package, or when its tables were changed by hand:
+
+```gleam
+pub fn main() {
+  let db = database.connect()
+  let assert Ok(_) = migration.check(db, notes.schema())
+  // start the app
+}
+```
+
+An app that has not been migrated then refuses to start, instead of failing
+on the first request. Howdy Auth runs this check for its own tables inside
+`auth.new`.
+
+A plain, non-unique index is allowed on a package's table, as long as its
+name is outside the package's prefix, such as `ops_notes_title`. Anything
+else added by hand makes the check fail.
+
+## SQL that differs
+
+When one database needs different SQL, append `migration.per_database` to
+the statements both share. Only the matching half runs, and the checksum
+covers both, so it is one migration wherever it runs:
+
+```gleam
+gloo_migration.new(
+  2,
+  "add_created",
+  "CREATE INDEX notes_notes_user ON notes_notes (user_id)"
+    <> migration.per_database(
+      postgres: "; ALTER TABLE notes_notes ADD COLUMN created TIMESTAMPTZ",
+      sqlite: "; ALTER TABLE notes_notes ADD COLUMN created BIGINT",
+    ),
+)
+```
+
+Migration SQL is split on semicolons, as Gloo's runner does. A semicolon
+inside a string literal or a procedural body is not supported, and the SQL
+must not begin or commit transactions.
+
+## After a database upgrade
+
+The startup check compares what the database reports about its own tables,
+and that report can change when nothing real has: after a major PostgreSQL
+upgrade, or a dump and restore. If the check says a package's tables
+changed, and you have confirmed by hand that they did not, accept their
+current shape from a deployment command:
+
+```gleam
+let assert Ok(_) = migration.rebaseline(db, notes.schema())
+```
+
+`rebaseline` refuses unless the recorded history matches the package
+exactly, so it cannot hide a missing or edited migration. Never call it as
+the app starts.
+
+## Keeping caches right
+
+A module that keeps something from the database in memory can ask to hear
+about every `migration.run` on this node:
+
+```gleam
+migration.around_runs("my_cache", fn(run) {
+  let answer = run()
+  my_cache.clear()
+  answer
+})
+```
+
+The hook must call `run` exactly once and return what it returns. Howdy
+Auth uses this to clear its permission cache.
+
+`database.around_transactions` works the same way for transactions. Its
+hook brackets the outermost `database.transaction` or
+`postgres.transaction` in a process, so it runs after the real commit or
+rollback, never after a savepoint nested inside. Auth uses it so a grant
+changed inside your own transaction clears its cache once your transaction
+ends. Transactions opened directly through `gloo/repo` or pog are not
+bracketed.
+
+## Alongside gloo/runner
+
+`howdy/migration` keeps its own ledger, `howdy_migrations`, separate from
+the one `gloo/runner` keeps, and the two sit happily in one database. A
+project made with [`howdy new`](/docs/cli/new) can keep its existing
+migrations where they are. Never run the same migrations through both.

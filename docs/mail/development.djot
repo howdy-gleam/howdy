@@ -1,0 +1,158 @@
+# Outbox and previews
+
+While you develop, you want to read the mail your app sends, not deliver
+it. The outbox keeps every message, and the admin area shows them as they
+arrive. Previews show each of your emails built from sample data, without
+running the flow that sends it.
+
+## The outbox
+
+`howdy/mail/outbox` is an adapter that keeps messages instead of sending
+them:
+
+- `outbox.start()` keeps them in memory, until the VM stops.
+- `outbox.start_in("tmp/mail")` also writes each one to the directory,
+  creating it if needed, and reads back what is already there when it
+  starts.
+
+With `start_in`, each message is an `.eml` file, which any mail client
+opens, and a `.json` file the outbox reads after a restart. Add the
+directory to `.gitignore`: it holds sign-in tokens and whatever else your
+app sent.
+
+Only the newest 500 messages are kept. Older ones, and their files, are
+removed.
+
+Both `start` functions link the outbox to the caller. In an app with a
+[supervision tree](/docs/guides/supervision), `outbox.supervised()` and
+`outbox.supervised_in(directory)` return the handle and a child to add to
+the supervisor instead, so a crashed outbox is restarted: one in memory
+starts empty again, and one with a directory reads its files back. While
+the outbox is not running, sending to it is `mail.Unavailable`, like any
+provider that is away, and `outbox.messages` and `outbox.clear` return the
+same error rather than crashing the caller.
+
+## In development
+
+Start the outbox in your `dev/` entry point, and give the app a mailer that
+uses it. Register the outbox and your previews with the [admin area](/docs/admin/overview) from
+`howdy_admin` to read them at `/_howdy`:
+
+```gleam
+// dev/my_app_dev.gleam
+import gleam/erlang/process
+import howdy/admin
+import howdy/dev
+import howdy/mail
+import howdy/mail/outbox
+import my_app
+
+pub fn main() {
+  let db = my_app.open_database()
+  let assert Ok(box) = outbox.start_in("tmp/mail")
+  let mailer =
+    mail.mailer(outbox.adapter(box)) |> mail.default_from(my_app.sender)
+
+  let assert Ok(_) =
+    dev.start(fn() {
+      my_app.app(db, mailer)
+      |> admin.mount(
+        admin.new()
+        |> admin.mail(box)
+        |> admin.mail_previews(my_app.previews(), send_with: mailer),
+      )
+    })
+  process.sleep_forever()
+}
+```
+
+Start the outbox outside the function `dev.start` rebuilds the app from,
+as here, so it survives reloads.
+
+`admin.mail(box)` lists what the outbox keeps, and shows each message's
+HTML, its plain text, its headers and its raw source. New messages appear
+on their own.
+
+The admin area is a dev dependency, so it never reaches a deployment:
+
+```sh
+gleam add --dev howdy_dev@1 howdy_admin@1
+```
+
+In production, `my_app.app` gets a mailer with a real
+[adapter](/docs/mail/adapters) instead.
+
+## Previews
+
+A preview is a name and a function that builds a message from sample data:
+
+```gleam
+import howdy/mail/preview
+
+pub fn previews() -> List(preview.Preview) {
+  [
+    preview.new("Welcome", fn() { emails.welcome(sample_user()) }),
+    preview.new("Invoice", fn() { emails.invoice(sample_invoice()) })
+      |> preview.in_group("Billing"),
+  ]
+}
+```
+
+Previews are listed under "Emails" unless `preview.in_group` gives another
+heading. The admin shows each one as it would be sent, with the mailer's
+default sender, and has a button that sends it through the mailer given as
+`send_with`. That mailer really sends, so point it at the outbox or at a
+local SMTP server such as Mailpit, never at production.
+
+A preview is built each time it is shown, so with `howdy dev` an edited
+template shows on the next refresh. A template that crashes on its sample
+data, or a message `send` would refuse, shows why instead.
+
+`admin.mail_previews` can be called more than once, and the previews are
+shown together. [Howdy Auth](/docs/auth/signing-in) has a preview for
+every email it sends:
+
+```gleam
+admin.new()
+|> admin.mail(box)
+|> admin.mail_previews(my_app.previews(), send_with: mailer)
+|> admin.mail_previews(emails.previews(auth_emails), send_with: mailer)
+```
+
+## In tests
+
+The outbox is also the adapter for tests. Start one in memory, run the flow,
+and read what it sent:
+
+```gleam
+import howdy/mail
+import howdy/mail/outbox
+
+pub fn signup_sends_a_welcome_test() {
+  let box = outbox.start()
+  let mailer =
+    mail.mailer(outbox.adapter(box))
+    |> mail.default_from(mail.address("hello@acme.test"))
+
+  let assert Ok(_) = my_app.sign_up(mailer, "ada@example.com")
+
+  let assert Ok(sent) = outbox.latest_to(box, "ada@example.com")
+  assert sent.subject == "Welcome to Acme"
+  assert sent.tags == ["onboarding.welcome"]
+}
+```
+
+- `outbox.latest_to(box, email)` is the newest message with that address
+  among its recipients.
+- `outbox.messages(box)` is every message, newest first, as
+  `Ok(messages)`.
+- `outbox.get(box, id)` finds one by its id, which is the `id` of the
+  `Receipt` that `send` returned.
+- `outbox.clear(box)` forgets every message and deletes their files.
+
+`messages` and `clear` are `Error(mail.Unavailable(_))` only when the
+outbox is not running, and `get` and `latest_to` are `Error(Nil)` then.
+
+What the outbox holds is the `mail.Outgoing` an adapter receives, so a test
+sees the message after the checks and the mailer's defaults, exactly as a
+provider would.

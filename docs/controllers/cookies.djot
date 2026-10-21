@@ -1,0 +1,212 @@
+# Cookies
+
+A cookie is a small named value the browser stores for your site and sends
+back with every later request. They are how a site remembers a theme, a
+language, or which session a visitor belongs to.
+
+The `howdy/cookie` module covers both directions. Reading works like
+`howdy/query`: a function looks up one cookie, hands your handler its value,
+and answers `400` on your behalf when it is missing or malformed. Writing is
+a step in the response pipeline.
+
+## Reading and writing
+
+Read a cookie with `use`, and set or delete one by piping the response:
+
+```gleam
+import howdy/controller.{type Context}
+import howdy/cookie
+
+pub fn preferences_controller() {
+  controller.new("preferences")
+  |> controller.get("/", show_theme)
+  |> controller.post("/dark", use_dark_theme)
+  |> controller.delete("/", clear_theme)
+}
+
+fn show_theme(ctx: Context) {
+  use theme <- cookie.string_or(ctx, "theme", default: "system")
+  controller.text(ctx, theme)
+}
+
+fn use_dark_theme(ctx: Context) {
+  let options =
+    cookie.defaults()
+    |> cookie.max_age(60 * 60 * 24 * 30)
+
+  controller.text(ctx, "Preference saved")
+  |> cookie.set("theme", "dark", options)
+}
+
+fn clear_theme(ctx: Context) {
+  controller.text(ctx, "Preference cleared")
+  |> cookie.delete("theme", cookie.defaults())
+}
+```
+
+A first visit to `/preferences` answers `system`. After a `POST` to
+`/preferences/dark` the browser holds the cookie for thirty days, and the
+same page answers `dark`.
+
+## Reading cookies
+
+Cookie values are always strings, and there are three ways to read one. They
+differ only in what happens when the cookie is absent:
+
+- `cookie.string` is required. An absent cookie answers `400`.
+- `cookie.optional_string` gives you an `Option`: `Some(value)` when the
+  cookie was sent, `None` when it was not.
+- `cookie.string_or` takes a `default:` and uses it when the cookie is absent.
+
+A bad cookie stops the handler and answers `400` with a JSON body that says
+what was wrong. With `use theme <- cookie.string(ctx, "theme")`:
+
+- No `theme` cookie answers `{"error":"missing cookie theme"}`.
+- Two `theme` cookies answer `{"error":"cookie theme must occur only once"}`.
+- A value that is not valid percent encoding, such as `theme=%zz`, answers
+  `{"error":"cookie theme has invalid encoding"}`.
+
+As with query strings, the optional and default forms are only forgiving
+about absence. A duplicated or badly encoded cookie answers `400` from all
+three. An empty value counts as present: `theme=` gives `""`, not the
+default.
+
+Remember that a cookie comes from the client, so treat its value like any
+other input. A visitor can edit, delete or invent cookies, and a required
+cookie being absent is normal on a first visit. Prefer `string_or` or
+`optional_string` unless a missing cookie really is a bad request.
+
+## Setting cookies
+
+`cookie.set` takes the response, a name, a value and the options, and
+returns the response with a `set-cookie` header added. Every other header is
+kept, including cookies set earlier in the pipeline, so you can set several:
+
+```gleam
+controller.text(ctx, "Welcome back")
+|> cookie.set("theme", "dark", cookie.defaults())
+|> cookie.set("language", "en-GB", cookie.defaults())
+```
+
+Values are percent-encoded when written and decoded when read, so spaces,
+punctuation, Unicode and literal percent signs all survive the round trip.
+Setting `"dark mode 100%"` sends `theme=dark%20mode%20100%25`, and
+`cookie.string` hands back the original text. If something other than Howdy
+writes a cookie you read, such as JavaScript in the browser, it should use
+the same encoding.
+
+Cookies are limited to about 4KB each and travel with every request, so keep
+them small: store an identifier, not the data it identifies.
+
+## Cookie options
+
+`cookie.defaults()` is a safe starting point, and the setters adjust it:
+
+```gleam
+let options =
+  cookie.defaults()
+  |> cookie.max_age(60 * 60 * 24 * 30)
+  |> cookie.same_site(cookie.Strict)
+  |> cookie.path("/preferences")
+```
+
+The defaults give a cookie with these attributes:
+
+```
+Path=/; Secure; HttpOnly; SameSite=Lax
+```
+
+- `max_age` is the lifetime in seconds. Without it the cookie lasts until
+  the browser closes. Zero or a negative number expires it at once.
+- `secure` controls `Secure`, which keeps the cookie off plain HTTP. It is
+  on by default.
+- `http_only` controls `HttpOnly`, which hides the cookie from JavaScript.
+  It is on by default; turn it off only when a script in the page needs to
+  read the value.
+- `same_site` takes `cookie.Lax`, `cookie.Strict` or `cookie.None`, and
+  decides whether the cookie is sent on requests that start on another
+  site. `Lax`, the default, sends it when a visitor follows a link to you
+  but not on cross-site form posts or embedded requests.
+- `path` limits the cookie to URLs under a path. It defaults to `/`, the
+  whole site.
+- `domain` shares the cookie with subdomains. Leave it unset to keep the
+  cookie on the current host only.
+
+Browsers refuse a `Secure` cookie on a plain `http://` page, with an
+exception for `localhost`. If you develop against another host name over
+HTTP, turn it off there and nowhere else:
+
+```gleam
+cookie.defaults() |> cookie.secure(False)
+```
+
+Options are configuration, not user input, so mistakes in them panic rather
+than answering `400`. That covers an invalid cookie name, a path that does
+not start with `/`, a domain with characters outside letters, digits, dots
+and hyphens, and `SameSite=None` without `Secure`, which browsers reject.
+Cookie values never panic, because `set` encodes them.
+
+## Deleting cookies
+
+There is no way to tell a browser to delete a cookie outright. Instead
+`cookie.delete` overwrites it with an empty value, `Max-Age=0` and an expiry
+in the past, and the browser discards it:
+
+```
+theme=; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Max-Age=0; Path=/; Secure; HttpOnly; SameSite=Lax
+```
+
+A browser only replaces a cookie with the same name, path and domain, so
+pass `delete` the same path and domain you used when setting it. A cookie
+set with `cookie.path("/preferences")` is not removed by a delete that uses
+the default path of `/`.
+
+## Sessions and signing
+
+These functions read and write cookies. They do not sign them, encrypt them
+or check that a session is real, so never trust a cookie to say who someone
+is. A value such as `user_id=42` can be changed to `user_id=1` by anyone.
+
+For authentication, store a long random session identifier in the cookie,
+keep the session itself on the server, and let a
+[guard](/docs/controllers/guards) look it up and answer
+`401` when it is missing or unknown. Keep the defaults for that cookie:
+`HttpOnly` stops scripts stealing it, `Secure` keeps it off plain HTTP, and
+`SameSite=Lax` stops other sites posting forms with it attached. Add the
+[CSRF middleware](/docs/middleware/csrf) as well, which rejects cross-site
+writes outright; the two fail in different ways.
+
+## Testing cookies
+
+`howdy/testing` has a helper for each direction. `testing.cookie` adds a
+cookie to a request, encoding the value the same way `cookie.set` does:
+
+```gleam
+import howdy/testing
+
+pub fn theme_is_read_test() {
+  let res =
+    testing.get("/preferences")
+    |> testing.cookie("theme", "dark")
+    |> testing.send(app())
+  assert testing.text(res) == "dark"
+}
+```
+
+`testing.cookies` lists every cookie a response sets, as decoded name and
+value pairs in the order they were set. A deleted cookie appears with an
+empty value:
+
+```gleam
+import gleam/http
+
+pub fn theme_is_saved_test() {
+  let res =
+    testing.request(http.Post, "/preferences/dark")
+    |> testing.send(app())
+  assert testing.cookies(res) == [#("theme", "dark")]
+}
+```
+
+Attributes such as `Path` and `Max-Age` are left out of that list. To check
+them, read the raw `set-cookie` headers from `res.headers`.

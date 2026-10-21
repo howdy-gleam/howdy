@@ -1,0 +1,209 @@
+# Services and errors
+
+A handler has two jobs that pull in different directions. One is HTTP:
+reading parameters, picking status codes, writing JSON. The other is your
+application: finding a user, checking a rule, saving a record. Mixed
+together they are hard to read and harder to test.
+
+Howdy's answer is a small convention. Application logic lives in plain
+functions, called services, that know nothing about HTTP and return a
+`Result`. The `howdy/service` module turns that result into a response. The
+handler in between stays a few lines long.
+
+## A service and its handler
+
+A service returns `service.Result(a)`, which is a `Result` whose error is a
+`service.Error`:
+
+```gleam
+import howdy/service
+
+pub fn find(id: Int) -> service.Result(User) {
+  case lookup(id) {
+    Ok(user) -> Ok(user)
+    Error(Nil) -> Error(service.NotFound("user not found"))
+  }
+}
+```
+
+The handler gathers the input, calls the service, and pipes the result into
+`service.respond` along with a function that encodes the value as JSON:
+
+```gleam
+import howdy/controller.{type Context}
+import howdy/param
+
+fn show_user(ctx: Context) {
+  use id <- param.int(ctx, "id")
+  user_service.find(id)
+  |> service.respond(ctx, user_to_json)
+}
+```
+
+`GET /users/1` answers `200` with `{"id":1,"name":"Ada"}`. `GET /users/2`
+answers `404` with `{"error":"user not found"}`. The handler never mentions
+either status.
+
+There are three ways to respond, differing only in what `Ok` becomes:
+
+- `service.respond` answers `200` with the encoded value.
+- `service.created` answers `201` with the encoded value, for a `POST` that
+  made something.
+- `service.no_content` takes a `service.Result(Nil)` and answers `204` with
+  no body, for deletes and other actions with nothing to report.
+
+```gleam
+fn delete_user(ctx: Context) {
+  use id <- param.int(ctx, "id")
+  user_service.delete(id)
+  |> service.no_content(ctx)
+}
+```
+
+## The errors
+
+Each variant of `service.Error` maps to one status. The ones that carry a
+message send it to the client:
+
+- `NotFound(message)` answers `404`. The message names what was missing.
+- `Invalid(message)` answers `400`. The input was malformed.
+- `Conflict(message)` answers `409`, as in
+  `Conflict("email already registered")`.
+- `Unauthorized` answers `401` with the message `unauthorized`.
+- `Forbidden` answers `403` with the message `forbidden`.
+- `UnsupportedMediaType(message)` answers `415`. The message names the
+  content type that was expected.
+- `Validation(errors)` answers `422` with a list of field errors.
+- `TooManyRequests(retry_after_seconds)` answers `429`, with a
+  `retry-after` header set to the number of seconds.
+- `Internal(detail)` answers `500`. The detail is written to the log and
+  never sent; the client only sees `internal server error`.
+
+`Internal` is for failures the client can do nothing about, such as a
+database being unreachable. Put enough in the detail to debug from the log,
+knowing none of it reaches the client.
+
+`UnsupportedMediaType` usually comes from
+[`howdy/form`](/docs/controllers/forms). `Validation` and `TooManyRequests`
+usually come from `howdy/validate` and `howdy/rate_limit`, but a service can
+return them too. A duplicate email is
+only discovered when saving, well after the validator has run, and it still
+belongs beside the email field:
+
+```gleam
+Error(service.Validation([
+  service.FieldError(
+    field: "email",
+    problem: problem.Custom("taken", "is already registered"),
+  ),
+]))
+```
+
+A field error holds a [`Problem`](/docs/i18n/overview#Validation-messages)
+rather than a sentence, so the words can be chosen later, in the reader's
+language. `Custom` takes a short code for clients and the message to show.
+
+## One error shape
+
+Every error response is JSON with an English `error` message and a stable
+`code`:
+
+```json
+{"error":"user not found","code":"not_found"}
+```
+
+The code is the error's kind, such as `not_found`, `invalid` or
+`too_many_requests`, unless the service gives a more specific one with
+`Coded`. A code names what went wrong for a client, which can show its own
+words for it in any language:
+
+```gleam
+Error(service.Coded("email_taken", service.Conflict("that email is taken")))
+```
+
+A coded error answers just as the error inside it does, with its code. To
+match on the kind of an error that may be coded, use
+`service.uncoded(error)`.
+
+A validation error adds a `fields` list, one entry per problem, each with
+its own `code`, an English `message`, and any details the code needs, such
+as `minimum`:
+
+```json
+{"error":"validation failed","code":"validation","fields":[{"field":"email","code":"taken","message":"is already registered"}]}
+```
+
+This shape is not only for services. The helpers in `howdy/param`,
+`howdy/query`, `howdy/cookie`, `howdy/body` and `howdy/validate`, and a
+failing [guard](/docs/controllers/guards), all build their responses the
+same way. A client of your API needs one piece of error handling: read the
+status, show `error`, and if there is a `fields` list, put each message
+beside its input.
+
+To send one of these responses from a handler without going through a
+`Result`, call `service.error_response` directly:
+
+```gleam
+fn show_report(ctx: Context) {
+  case reports_enabled() {
+    True -> controller.text(ctx, "The report")
+    False -> service.error_response(ctx, service.Forbidden)
+  }
+}
+```
+
+`service.status_code` and `service.message` give you the status and client
+message for an error, if you need to build a different response from one,
+such as an HTML error page.
+
+## Using your own error types
+
+Services deep in an app often have their own error types, and should not
+have to know about HTTP status codes. Convert at the boundary with
+`result.map_error`, in the handler or in a thin service layer:
+
+```gleam
+import gleam/result
+
+fn to_service_error(error: BillingError) -> service.Error {
+  case error {
+    CardDeclined -> service.Conflict("card was declined")
+    NoSuchInvoice -> service.NotFound("invoice not found")
+    GatewayDown(detail) -> service.Internal(detail)
+  }
+}
+
+fn pay_invoice(ctx: Context) {
+  use id <- param.int(ctx, "id")
+  billing.pay(id)
+  |> result.map_error(to_service_error)
+  |> service.respond(ctx, receipt_to_json)
+}
+```
+
+The `case` has no catch-all, so adding a variant to `BillingError` will not
+compile until you have decided which status it should have.
+
+## Testing
+
+A service is a plain function, so most tests need no request at all:
+
+```gleam
+pub fn missing_user_test() {
+  assert user_service.find(999) == Error(service.NotFound("user not found"))
+}
+```
+
+To check the response as well, send a request and read the message back
+with `testing.error`. For a `422`, `testing.field_errors` gives the list of
+field errors:
+
+```gleam
+import howdy/testing
+
+pub fn missing_user_is_a_404_test() {
+  let res = testing.get("/users/999") |> testing.send(app())
+  assert res.status == 404
+  assert testing.error(res) == Ok("user not found")
+}
+```

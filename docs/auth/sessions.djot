@@ -1,0 +1,206 @@
+# Sessions and policy
+
+Signing in creates a session. The visitor holds a random token, in the
+cookie or as a bearer token, and the app stores only a one-way digest of
+it. A copy of the database cannot be used to sign in as anybody.
+
+A session lasts 24 hours from the moment it was created. By default, using
+it does not extend it; you can [turn on renewal](#Keeping-people-signed-in).
+It can also end early: when its owner signs out, when they or an
+administrator revoke it, when they set a new password, when they are
+suspended, or, if you set an idle timeout, when it goes unused.
+
+## Managing sessions
+
+Signed-in visitors can see and end their own sessions:
+
+- `GET /sessions` lists them. Each has an `id`, the `method` that created
+  it (`email`, `password`, `passkey`, `provider:<id>`, or `mfa:<method>`
+  after a [second factor](/docs/auth/mfa)), `created_at`, `last_seen_at` and `expires_at`
+  in unix seconds, the `client` it was created from, and `current` for the
+  one making the request.
+- `POST /sessions/revoke` with `{"id":"…"}` ends one, if it is the
+  caller's.
+- `POST /logout` ends the current one and deletes the cookie.
+
+An `id` is a digest: it names a session but cannot be used as one. The
+functions behind these are `auth.sessions`, `auth.revoke_session` and
+`auth.logout`. To end every session of a user from trusted code, see
+[User administration](/docs/auth/administration).
+
+## Policy
+
+Every lifetime and limit lives in one record. Start from the defaults,
+change what you need, and apply it once at startup:
+
+```gleam
+import howdy/auth/policy
+
+let assert Ok(identity) =
+  auth.with_policy(
+    identity,
+    policy.Policy(
+      ..policy.default(),
+      session_seconds: 3600,
+      session_idle_seconds: 900,
+    ),
+  )
+```
+
+`with_policy` returns an error for values that make no sense together, such
+as a negative lifetime.
+
+Sessions:
+
+- `session_seconds`, default 86 400: how long a session lasts.
+- `session_renew_seconds`, default 0: turns on renewal; see below. When
+  set, from 60 to less than `session_seconds`.
+- `session_max_seconds`, default 0: the most a renewed session can last
+  from its creation. 0 means no ceiling; otherwise at least
+  `session_seconds`.
+- `session_idle_seconds`, default 0: end a session unused for this long. 0
+  turns the idle timeout off; otherwise at least 300, because last use is
+  only recorded once a minute.
+- `fresh_session_seconds`, default 600: how recently a session must have
+  been made from an email token for it to
+  [set a password](/docs/auth/passwords).
+
+Email tokens:
+
+- `challenge_seconds`, default 600: how long an emailed token lasts.
+- `live_challenges`, default 3: how many unexpired tokens an address can
+  hold. With 1, each request replaces the last.
+- `email_coalesce_margin_seconds`, default 300: a request sends no email
+  while a token with at least this long left is waiting. Raising it sends
+  more email and lets a visitor ask again sooner; setting it to
+  `challenge_seconds` always sends.
+- `email_cooldown_seconds`, default 60: the wait after a password
+  registration email, doubling with each further request.
+- `email_cooldown_max_seconds`, default 3600: where the doubling stops.
+- `email_quiet_seconds`, default 900: the doubling starts over after an
+  address has been left alone this long.
+
+Passwords:
+
+- `password_min_length`, default 15: the shortest new password, in code
+  points. At least 8.
+- `password_attempts`, default 5: guesses allowed for each pair of address
+  and client before the waits begin.
+- `password_window_seconds`, default 60: the first wait, and the window of
+  the limit below.
+- `password_backoff_max_seconds`, default 3600: where the doubling stops.
+- `password_quiet_seconds`, default 86 400: how long before a pair's
+  failures are forgotten.
+- `password_account_attempts`, default 100: attempts allowed on one address
+  per window, from all clients together.
+
+## Keeping people signed in
+
+To keep returning users signed in, let sessions renew while they are used:
+
+```gleam
+policy.Policy(
+  ..policy.default(),
+  session_seconds: 604_800,
+  session_renew_seconds: 86_400,
+  session_max_seconds: 7_776_000,
+)
+```
+
+Anyone who comes back within a week stays signed in, and anyone away
+longer signs in again. A session used at least a day after its expiry was
+last set gets a fresh week, but never more than 90 days from when it was
+created. Renewal happens during the once-a-minute update of last use, so it
+costs no extra writes.
+
+An expired session is never revived, and sign-out, revocation, suspension
+and the idle timeout all apply as before. Set a ceiling unless sessions
+really should be able to live forever. Lowering these values later does
+not shorten sessions already issued.
+
+## Several accounts in one browser
+
+By default, signing in replaces the browser's session. To let people stay
+signed in to several accounts and switch between them:
+
+```gleam
+let assert Ok(identity) = auth.with_multi_session(identity, max: 5)
+```
+
+Signing in while signed in then *adds* an account. The session cookie still
+says which account is active, so guards and your routes see one user at a
+time, and need no changes.
+
+- `GET /sessions/accounts` lists the accounts in this browser, as
+  `[{id, user, current}]`.
+- `POST /sessions/switch` with an `id` from that list makes it the active
+  account.
+- `POST /logout` falls back to the most recently added account still signed
+  in. `{"all": true}` signs every account out.
+
+`max` is from 2 to 10. Signing in beyond it signs out the oldest account,
+and signing in to an account already in the browser replaces its session.
+The browser keeps the list in a second `HttpOnly` cookie, which is as
+sensitive as the session cookie and gets the same attributes. The starter
+account page lists the accounts with **Switch** buttons. Bearer clients are
+not affected; an app holding several tokens already has this.
+
+## Keeping sessions elsewhere
+
+Sessions live in the auth database, and most apps should leave them there:
+they are created and ended in the same transaction as the change that
+causes it. To keep them somewhere else, such as Redis, supply a
+`SessionStore`:
+
+```gleam
+import howdy/auth/session_store
+
+let identity = auth.with_session_store(identity, redis_store(connection))
+```
+
+A store is a record of seven functions over `session_store.Entry`:
+
+```gleam
+pub fn redis_store(connection) -> session_store.SessionStore {
+  session_store.SessionStore(
+    insert: fn(entry) { todo },
+    get: fn(digest) { todo },
+    touch: fn(digest, now, expires_at) { todo },
+    list: fn(user_id) { todo },
+    delete: fn(digest, user_id) { todo },
+    delete_for_user: fn(user_id, keep) { todo },
+    prune: fn(now) { todo },
+  )
+}
+```
+
+The `howdy/auth/session_store` module documents what each must do, and
+`session_store.check(store)` runs a store through those rules and returns
+the first one it breaks. Call it from your adapter's tests.
+`session_store.memory()` is a store for tests and single-node development;
+it is lost on restart.
+
+Before choosing an external store, know what changes:
+
+- The store only ever sees digests, never tokens.
+- Users, passwords and suspension stay in the database. Each request still
+  reads the database to confirm the user is active, so a suspended user is
+  refused even if the store holds their sessions.
+- Expiry and the idle timeout are enforced by the package from the entry's
+  timestamps. A store may expire entries as well.
+- `touch` receives the expiry to store. It is unchanged normally, and later
+  when a session is being renewed. A store with a native expiry, such as a
+  Redis TTL, must reset it from that value, or renewed sessions vanish
+  early.
+- Store an entry's `method` and `version` exactly as given. Changing an
+  account's email, or unlinking a provider, raises the user's version, and
+  entries from an older version are refused even if the store failed to
+  delete them.
+- The database commits first, and the store is written second. If the store
+  fails in between, the operation returns its error with the database
+  change already made: a sign-in without a session, or a suspension whose
+  sessions are not yet removed. Ask for another token, or call the
+  operation again.
+- Changing store signs everyone out.
+- A store that fails should return `Error(service.Internal(_))`.
+  Operations then refuse instead of guessing.

@@ -1,0 +1,191 @@
+# Middleware
+
+Middleware is a function that runs around a handler. It sees the request on
+the way in and the response on the way out, so it can do three things:
+reject a request before the handler runs, change what the handler sees, or
+change what the client gets back.
+
+It is where work goes that is the same for many routes and that the handlers
+themselves should not have to think about: logging, CORS, rate limiting,
+security headers, API keys.
+
+## Writing middleware
+
+A middleware takes the context and a `next` function, and returns a
+response. Calling `next(ctx)` runs the rest of the chain, ending in the
+handler, and gives back its response:
+
+```gleam
+import gleam/http/request
+import howdy/controller.{type Context}
+import howdy/middleware.{type Next}
+import howdy/service
+
+pub fn require_api_key(ctx: Context, next: Next) {
+  case request.get_header(ctx.request, "x-api-key") {
+    Ok("secret") -> next(ctx)
+    _ -> service.error_response(ctx, service.Unauthorized)
+  }
+}
+```
+
+This one *rejects*. Without the right header it never calls `next`, so the
+handler does not run, and the client gets a `401` in the usual
+[error shape](/docs/controllers/services).
+
+To change the response, call `next` and work on what comes back:
+
+```gleam
+import gleam/http/response
+
+pub fn security_headers(ctx: Context, next: Next) {
+  next(ctx)
+  |> response.set_header("x-content-type-options", "nosniff")
+}
+```
+
+To change what the handler sees, pass `next` a different context. The
+context is a record, so copy it with the changed field:
+
+```gleam
+import howdy/context
+
+pub fn with_request_id(ctx: Context, next: Next) {
+  let request = request.set_header(ctx.request, "x-request-id", new_id())
+  next(context.Context(..ctx, request:))
+}
+```
+
+Middleware that needs settings is a function that returns a middleware.
+That is how the built-in ones work, as in `cors.middleware(policy)`:
+
+```gleam
+pub fn require_key(expected: String) {
+  fn(ctx: Context, next: Next) {
+    case request.get_header(ctx.request, "x-api-key") {
+      Ok(key) if key == expected -> next(ctx)
+      _ -> service.error_response(ctx, service.Unauthorized)
+    }
+  }
+}
+```
+
+## Three levels
+
+Middleware can be attached to the whole app, to a controller, or to a single
+route:
+
+```gleam
+import howdy
+import howdy/controller
+import howdy/middleware
+
+// Every request the app handles.
+howdy.new()
+|> howdy.middleware(security_headers)
+
+// Every route on one controller.
+controller.new("admin")
+|> controller.middleware(require_api_key)
+
+// One route.
+controller.new("users")
+|> controller.post("/", create_user |> middleware.wrap(require_api_key))
+```
+
+`controller.middleware` covers every route on the controller, wherever in
+the pipeline you add it, including routes declared before it.
+`middleware.wrap_all` wraps a route in a list of middleware at once.
+
+## The order things run
+
+The levels nest. App middleware wraps controller middleware, which wraps
+route middleware, which wraps the handler. Within a level, the first one
+added is the outermost.
+
+```gleam
+howdy.new()
+|> howdy.middleware(a)
+|> howdy.middleware(b)
+```
+
+A request passes through `a`, then `b`, then the controller's middleware,
+then the route's, and reaches the handler. The response travels back the
+other way, so `a` sees it last. Being outermost means being first to see the
+request and last to see the response.
+
+This matters most for middleware that rejects. Anything outside it still
+sees the rejected request; anything inside it does not. So:
+
+- Put [logging](/docs/middleware/logging) first, so it records the `401`s
+  and `429`s that other middleware sends.
+- Put [CORS](/docs/middleware/cors) before anything that might reject,
+  because browsers send preflight requests without credentials.
+- Put [CSRF protection](/docs/middleware/csrf) on the app, not on single
+  controllers, so that a route added later is covered too.
+
+A controller's [guard](/docs/controllers/guards) runs inside all of its
+middleware, just before the handler.
+
+## What middleware does not see
+
+Middleware is wrapped around matched routes, so it only runs when the router
+finds one:
+
+- A request that matches no route answers `404` and runs no middleware, not
+  even the app's. The same goes for a `405`, where the path matched but the
+  method did not.
+- Those responses therefore carry none of your headers, and are not logged
+  by `logger.log`.
+- The automatic `OPTIONS` response for a path with routes does run the
+  controller's middleware, which is what lets CORS answer preflights.
+
+If you need to log or decorate every response, including `404`s, do it
+outside Howdy, in front of the handler you pass to the server.
+
+## Middleware or a guard?
+
+Both run before a handler and both can reject. Use a
+[guard](/docs/controllers/guards) when the handler needs what the check
+found, such as the signed-in user, because the value arrives typed on
+`ctx.guard`. Use middleware when the handler does not care about the result,
+or when you need to touch the response, which a guard cannot do.
+
+## Built-in middleware
+
+- [Request logging](/docs/middleware/logging) writes a line for each
+  request.
+- [CORS](/docs/middleware/cors) lets pages on other sites call your API.
+- [CSRF protection](/docs/middleware/csrf) stops pages on other sites
+  making writes with a visitor's cookies.
+- [Rate limiting](/docs/middleware/rate-limiting) caps how fast a client
+  may make requests.
+
+[API versioning](/docs/middleware/versioning) is set up beside these, and
+middleware can read the version a request resolved to from `ctx.version`.
+
+## Testing middleware
+
+Middleware is part of the app, so test it by sending requests through
+`howdy/testing` and checking what comes back:
+
+```gleam
+import gleam/http/response
+import howdy/testing
+
+pub fn api_key_is_required_test() {
+  let res = testing.get("/admin") |> testing.send(app())
+  assert res.status == 401
+
+  let res =
+    testing.get("/admin")
+    |> testing.header("x-api-key", "secret")
+    |> testing.send(app())
+  assert res.status == 200
+}
+
+pub fn security_headers_are_set_test() {
+  let res = testing.get("/") |> testing.send(app())
+  assert response.get_header(res, "x-content-type-options") == Ok("nosniff")
+}
+```

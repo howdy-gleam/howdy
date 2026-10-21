@@ -1,0 +1,209 @@
+# Social sign-in
+
+`howdy_auth` can sign people in with an account they already have
+elsewhere. Five providers are built in:
+
+- Google
+- Sign in with Apple
+- GitHub
+- Facebook
+- Microsoft Entra ID
+
+A provider sign-in makes an ordinary Howdy session. The same users,
+[groups](/docs/auth/groups), suspension rules and
+[guard](/docs/auth/overview) apply, and Howdy never stores the provider's
+access or refresh tokens. For a customer's own identity provider, such as
+Okta, see [Enterprise single sign-on](/docs/auth/sso) instead.
+
+## Adding Google
+
+Register an OAuth *Web application* client in Google Cloud, and configure
+its consent screen. Then add the provider as the app starts, and mount the
+provider routes:
+
+```gleam
+import howdy/auth
+import howdy/auth/pages
+import howdy/auth/providers/google
+import howdy/auth/routes
+
+pub fn app(identity) {
+  let assert Ok(identity) =
+    auth.with_provider(
+      identity,
+      google.new(client_id: google_client_id, client_secret: google_secret),
+    )
+
+  howdy.new()
+  |> howdy.controller(routes.api(identity, at: "/api/auth"))
+  |> howdy.controller(routes.providers(
+    identity,
+    at: "/auth",
+    success_path: "/auth/account",
+    failure_path: "/auth/login",
+  ))
+  |> howdy.controller(pages.routes(identity, at: "/auth", api_at: "/api/auth"))
+}
+```
+
+Load the client id and secret from your secret configuration, never from
+source control. Register this exact callback URL with Google:
+
+```
+https://app.example.com/auth/providers/google/callback
+```
+
+It is your configured origin, the mount path, and
+`/providers/<id>/callback`. In development,
+`http://localhost:8787/auth/providers/google/callback` works too. Google
+needs Erlang/OTP 27 or newer, and asks only for `openid email`.
+
+Mount the provider routes at the same path as the
+[starter pages](/docs/auth/overview), and their sign-in buttons and
+**Link** forms appear by themselves. For pages of your own,
+`auth.providers(identity)` lists each provider's id and display name.
+
+To only let in one Google Workspace, check the signed `hd` claim:
+
+```gleam
+google.new(client_id:, client_secret:)
+|> google.require_hosted_domain("example.com")
+```
+
+## The other providers
+
+They are added the same way, with `auth.with_provider`:
+
+```gleam
+import howdy/auth/providers/entra
+import howdy/auth/providers/facebook
+import howdy/auth/providers/github
+
+github.new(client_id: github_id, client_secret: github_secret)
+facebook.new(client_id: facebook_app_id, client_secret: facebook_secret)
+entra.new(
+  client_id: entra_id,
+  client_secret: entra_secret,
+  tenant: "organizations",
+)
+```
+
+Their callbacks follow the same pattern:
+`/auth/providers/github/callback`, `/auth/providers/facebook/callback` and
+`/auth/providers/entra/callback`.
+
+Entra's `tenant` is a directory id, a domain such as
+`example.onmicrosoft.com`, or one of `common`, `organizations` and
+`consumers`. The app registration must allow the account types that tenant
+selects.
+
+### Sign in with Apple
+
+```gleam
+import howdy/auth/providers/apple
+
+let assert Ok(identity) =
+  auth.with_provider(
+    identity,
+    apple.new(
+      client_id: "com.example.web",
+      team_id: "ABCDE12345",
+      key_id: "KEY1234567",
+      private_key: apple_p8_contents,
+    ),
+  )
+```
+
+- `client_id` is the *Services ID*, not an app's bundle id.
+- `private_key` is the text of the `.p8` key you download from Apple. Keep
+  it with your other secrets. Howdy signs a short-lived token with it for
+  each sign-in, and signs one as the app starts, so a key that does not
+  work is an error there.
+- Apple requires HTTPS and rejects `localhost`, so test on a real or
+  tunnelled domain.
+
+Apple sends its answer back as a cross-site form `POST`, on which browsers
+leave out `SameSite=Lax` cookies. The callback route turns that `POST`
+into a redirect to itself as a `GET`, and decides nothing until then. If
+you put [CSRF middleware](/docs/middleware/csrf) of your own in front of
+the auth routes, exempt `POST /auth/providers/apple/callback`.
+
+Apple may hand out a private relay address that forwards to the user.
+Mail to a relay address only arrives from sender domains you have
+registered with Apple, so register yours, or sign-in emails will not
+arrive.
+
+## Which accounts a provider can reach
+
+Providers are trusted to say who somebody is, not always to say which
+mailbox they own. So:
+
+- A provider identity that is already linked signs in to its account, even
+  if its email address has since changed. It never changes the account's
+  own address.
+- **A new identity** creates an account only when
+  [registration](/docs/auth/overview) is on and the provider has verified
+  the address. Google counts Gmail and verified Workspace addresses; GitHub
+  and Apple count the addresses they report as verified. Facebook and Entra
+  never create accounts.
+- **An address that already has an account is never linked
+  automatically.** Its owner signs in the usual way first, then links the
+  provider from the account page.
+
+Each account can link one identity per provider. Linking an identity that
+belongs to another account fails; it never replaces a link.
+
+## Linking and unlinking
+
+On the starter `/auth/account` page, each provider has a **Link** button.
+It posts to `/auth/providers/<id>/link`, which only works from a session
+made within the last ten minutes (`fresh_session_seconds` in the
+[policy](/docs/auth/sessions)), and the same session must finish the link.
+
+`GET /providers` on the JSON API lists the linked providers, and
+`POST /providers/unlink` with `{"issuer":"…"}` removes one. Unlinking needs a
+recent sign-in through a *different* method, so a stolen provider session
+cannot remove the other ways in. See
+[Account changes](/docs/auth/account).
+
+## Without email at all
+
+For an app that only signs in with providers, create auth without a
+`deliver` function:
+
+```gleam
+let assert Ok(identity) = auth.new_without_email(repo: db, origin: origin)
+```
+
+Email tokens are then off, and the starter pages hide their email forms.
+`auth.with_email_tokens(identity, deliver: send_email)` turns them on later.
+
+## Rules the routes follow
+
+- The routes that start a sign-in are `POST`s and require your `origin`;
+  plain HTML forms work.
+- Each attempt uses a one-time state, a nonce, PKCE where the provider
+  supports it, and its own `HttpOnly` cookie. It expires after ten minutes,
+  and is spent before the provider is contacted.
+- `success_path` and `failure_path` are fixed paths in your app, never taken
+  from the request. A failure redirects without saying why.
+- The routes allow 30 requests a minute per client. Behind a proxy, use
+  `routes.providers_limited_by` with the header your proxy sets, as for
+  [the JSON API](/docs/auth/administration).
+- The callback's query string holds a one-time code. Keep it out of your
+  own request logs.
+
+Signing out of your app does not sign the browser out of the provider.
+
+A session made through a provider is recorded with the method
+`provider:<id>`, such as `provider:google`. It does not count as the fresh
+email sign-in needed to [set a password](/docs/auth/passwords).
+
+## Without HTTP
+
+`auth.begin_provider`, `auth.begin_provider_link` and `auth.finish_provider`
+run the same steps for a transport of your own. `finish_provider` returns
+`ProviderSession(session)`, `ProviderLinked`, or `ProviderSecondFactor(…)`
+when the user must also pass [a second factor](/docs/auth/mfa). Your
+transport is then responsible for the browser cookie, `origin` checks and
+rate limits.

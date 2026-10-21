@@ -1,0 +1,196 @@
+# Remote calls
+
+`howdy_remote` is an optional package for typed calls from one Howdy service
+to another. You define a *procedure* once, serve it from the service that
+owns the data, and call it from anywhere. The calls travel over Erlang
+distribution between your own nodes, or over HTTP across a trust boundary,
+and the call site is the same for both.
+
+```sh
+gleam add howdy_remote@1
+```
+
+## Procedures
+
+A procedure is a name, a codec for its input and a codec for its output:
+
+```gleam
+import gleam/dynamic/decode
+import gleam/json
+import howdy/codec
+import howdy/remote
+
+pub type User {
+  User(id: Int, name: String)
+}
+
+pub fn get_user() -> remote.Procedure(Int, User) {
+  remote.procedure("users.get", input: codec.int(), output: user())
+}
+
+pub fn list_users() -> remote.Procedure(Nil, List(User)) {
+  remote.procedure("users.list", input: codec.nil(), output: codec.list(user()))
+}
+
+pub fn user_to_json(user: User) -> json.Json {
+  json.object([#("id", json.int(user.id)), #("name", json.string(user.name))])
+}
+
+fn user() -> codec.Codec(User) {
+  codec.new(encode: user_to_json, decoder: {
+    use id <- decode.field("id", decode.int)
+    use name <- decode.field("name", decode.string)
+    decode.success(User(id:, name:))
+  })
+}
+```
+
+Put these in a module both services import. A small package that both
+depend on works best: the caller and the server then always agree on names
+and types.
+
+Codecs come from `howdy/codec` in the core package. `codec.int`, `float`,
+`string`, `bool` and `nil` cover the simple cases, and `codec.list(of:)` and
+`codec.optional(of:)` build on them. For your own types, `codec.new` pairs a
+JSON encoder with a decoder. The same codecs work for
+[caching](/docs/cache/overview).
+
+The name is all that crosses the wire, so it must be unique among the
+procedures a server handles. Prefix it with the service, as in
+`"users.get"`.
+
+Inputs and outputs always travel as JSON, and are decoded when they arrive,
+even between Erlang nodes. Two services deployed at different times can
+disagree about a type; decoding turns that into an error at the boundary,
+not a value of the wrong shape that crashes something later.
+
+## Serving
+
+A handler takes the input and returns a
+[`service.Result`](/docs/controllers/services), the same type controllers
+use, so one service function can back both an HTTP route and a procedure:
+
+```gleam
+import howdy/remote
+import howdy/service
+
+pub fn find(id: Int) -> service.Result(User) {
+  list.find(users, fn(user) { user.id == id })
+  |> result.replace_error(service.NotFound("user not found"))
+}
+
+pub fn server() -> remote.Server {
+  remote.server()
+  |> remote.handle(users_api.get_user(), find)
+  |> remote.handle(users_api.list_users(), fn(_) { Ok(users) })
+}
+```
+
+Then offer it to the other nodes of the cluster, over HTTP, or both:
+
+```gleam
+// To every connected node, over Erlang distribution:
+let assert Ok(_) = remote.start(server())
+
+// Over HTTP, as one POST /rpc/<name> route per procedure:
+howdy.new()
+|> howdy.controller(remote.controller(server(), at: "/rpc", token: secret))
+```
+
+`remote.start` links the server to the process that calls it;
+`remote.supervised(server)` gives a child specification for a supervisor
+instead. Each call runs in a process of its own on the serving node, so a
+slow or crashing handler only affects its own call. Several nodes can serve
+the same procedure, and share the calls between them.
+
+When a handler returns `service.Internal(detail)`, the detail is logged on
+the serving node and never sent to the caller.
+
+## Calling
+
+```gleam
+remote.call(target, users_api.get_user(), 42, timeout: 5000)
+```
+
+The target decides how the call travels. Nothing else at the call site
+changes:
+
+- `remote.cluster()`: any connected node that serves the procedure. This
+  node goes first if it serves it; otherwise each call picks a node at
+  random.
+- `remote.node("users@10.0.0.5")`: one node, connected on first use.
+- `remote.http("https://users.internal/rpc", token: secret)`: a server
+  mounted with `remote.controller`.
+
+The result is the output, or a `remote.Error` saying why there is none:
+
+```gleam
+case remote.call(users, users_api.get_user(), id, timeout: 5000) {
+  Ok(user) -> todo
+  Error(remote.Failed(service.NotFound(_))) -> todo  // the handler's own error
+  Error(remote.NoHandler(_)) -> todo                 // nothing serves it
+  Error(remote.Unavailable(_)) -> todo               // node down, HTTP failed
+  Error(remote.Timeout) -> todo                      // it may still have run
+  Error(remote.Crashed(_)) -> todo                   // the handler crashed
+  Error(remote.BadResponse(_)) -> todo               // the output did not decode
+  Error(remote.Refused) -> todo                      // HTTP token rejected
+  Error(_) -> todo
+}
+```
+
+A `Timeout` does not mean the handler did nothing. Make procedures that
+change data safe to call twice, or check before retrying.
+
+## From a controller
+
+`remote.respond` answers a request like `service.respond`. The handler's own
+errors pass through, so a `NotFound` on the users service is still a `404`
+here. Every transport failure becomes a logged `500`:
+
+```gleam
+pub fn app(users: remote.Target) -> howdy.App {
+  howdy.new()
+  |> howdy.controller(
+    controller.new("/users")
+    |> controller.get("/:id", fn(ctx) {
+      use id <- param.int(ctx, "id")
+      remote.call(users, users_api.get_user(), id, timeout: 5000)
+      |> remote.respond(ctx, users_api.user_to_json)
+    }),
+  )
+}
+```
+
+Taking the target as an argument, as here, lets the same app call over
+distribution in one deployment and over HTTP in another.
+
+## More ways to call
+
+- `remote.cast(target, procedure, input)` calls without waiting for, or
+  learning about, the outcome.
+- `remote.multicall(procedure, input, timeout:)` calls every node that
+  serves a procedure, in parallel, and returns each node's name and result.
+  Use it to clear caches everywhere, or collect statistics.
+- `remote.providers(procedure)` lists the nodes serving a procedure, for
+  health checks.
+
+To run the services as a cluster, and to choose between distribution and
+HTTP, see [Clusters and security](/docs/remote/clusters).
+
+## Testing
+
+Both halves are plain Gleam, so they can be tested in one VM. Start the
+server in the test, and call it with `remote.cluster()`, which includes the
+node the test runs on:
+
+```gleam
+pub fn get_user_test() {
+  let assert Ok(_) = remote.start(users.server())
+  let assert Ok(user) =
+    remote.call(remote.cluster(), users_api.get_user(), 1, timeout: 1000)
+  assert user.name == "Ada"
+}
+```
+
+To test a controller that calls out, pass it a target and send it requests
+with [`howdy/testing`](/docs/guides/testing).

@@ -1,0 +1,27 @@
+name = "howdy_mail"
+version = "1.0.0"
+gleam = ">= 1.18.0"
+description = "Email for Howdy apps: smail templates, SMTP and HTTP provider adapters, and a development outbox"
+licences = ["Apache-2.0"]
+repository = { type = "github", user = "howdy-gleam", repo = "howdy", path = "mail", tag-prefix = "howdy_mail-" }
+links = [{ title = "Website", href = "https://tryhowdy.dev" }]
+internal_modules = ["howdy/mail/internal/*"]
+target = "erlang"
+
+[dependencies]
+gleam_stdlib = ">= 1.0.0 and < 2.0.0"
+gleam_erlang = ">= 1.3.0 and < 2.0.0"
+gleam_otp = ">= 1.3.0 and < 2.0.0"
+gleam_http = ">= 4.4.0 and < 5.0.0"
+gleam_httpc = ">= 5.0.0 and < 6.0.0"
+gleam_json = ">= 3.1.0 and < 4.0.0"
+gleam_crypto = ">= 1.5.0 and < 2.0.0"
+gleam_time = ">= 1.8.0 and < 2.0.0"
+howdy = { path = ".." }
+smail = ">= 2.0.1 and < 3.0.0"
+gen_smtp = ">= 1.3.0 and < 2.0.0"
+simplifile = ">= 2.3.0 and < 3.0.0"
+
+[dev_dependencies]
+gleeunit = ">= 1.0.0 and < 2.0.0"
+howdy_telemetry = { path = "../telemetry" }

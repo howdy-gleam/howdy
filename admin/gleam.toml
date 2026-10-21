@@ -1,0 +1,32 @@
+name = "howdy_admin"
+version = "1.0.0"
+gleam = ">= 1.18.0"
+description = "A development admin area for Howdy apps: browse and edit the database, manage users and groups, and call the API"
+licences = ["Apache-2.0"]
+repository = { type = "github", user = "howdy-gleam", repo = "howdy", path = "admin", tag-prefix = "howdy_admin-" }
+links = [{ title = "Website", href = "https://tryhowdy.dev" }]
+internal_modules = ["howdy/admin/internal/*"]
+target = "erlang"
+
+[dependencies]
+gleam_stdlib = ">= 1.0.0 and < 2.0.0"
+gleam_erlang = ">= 1.3.0 and < 2.0.0"
+gleam_http = ">= 4.4.0 and < 5.0.0"
+gleam_json = ">= 3.1.0 and < 4.0.0"
+gleam_time = ">= 1.8.0 and < 2.0.0"
+lustre = ">= 5.7.0 and < 6.0.0"
+logging = ">= 1.3.0 and < 2.0.0"
+pog = ">= 4.0.0 and < 5.0.0"
+gloo = ">= 1.0.2 and < 2.0.0"
+howdy = { path = ".." }
+howdy_database = { path = "../database" }
+howdy_auth = { path = "../auth" }
+howdy_ui = { path = "../ui" }
+howdy_mail = { path = "../mail" }
+howdy_telemetry = { path = "../telemetry" }
+howdy_openapi = { path = "../openapi" }
+howdy_flags = { path = "../flags" }
+howdy_jobs = { path = "../jobs" }
+
+[dev_dependencies]
+gleeunit = ">= 1.0.0 and < 2.0.0"

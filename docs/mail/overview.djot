@@ -1,0 +1,242 @@
+# Howdy Mail
+
+`howdy_mail` is an optional package for sending email from a Howdy app. It
+gives you:
+
+- a builder for messages, written with [smail](https://hexdocs.pm/smail)
+  templates or plain HTML and text
+- checks that run before anything is sent, so user input cannot add
+  headers
+- [adapters](/docs/mail/adapters) for SMTP, Resend and SendGrid, and a way
+  to write your own
+- a [development outbox and previews](/docs/mail/development) that keep
+  mail instead of sending it, and show it in the admin area
+
+[Howdy Auth](/docs/auth/overview) builds its ready-made emails on it; see
+[Sending the email](/docs/auth/signing-in).
+
+## Install
+
+Add the package and smail to your project:
+
+```sh
+gleam add howdy_mail@1 smail@2
+```
+
+## Writing a message
+
+A message starts empty and is built up with a pipeline:
+
+```gleam
+import howdy/mail
+import smail/attribute
+import smail/email
+import smail/html
+
+pub fn welcome(user: User) -> mail.Message {
+  mail.message()
+  |> mail.to([mail.named(user.name, user.email)])
+  |> mail.subject("Welcome to Acme")
+  |> mail.template(
+    email.html([], [
+      email.head([], []),
+      email.body([], [
+        email.preview("Your account is ready"),
+        email.container([], [
+          email.paragraph([], [html.text("Hi " <> user.name <> ",")]),
+          email.button([attribute.href("https://acme.test/start")], [
+            html.text("Get started"),
+          ]),
+        ]),
+      ]),
+    ]),
+  )
+  |> mail.tag("onboarding.welcome")
+}
+```
+
+Keep functions like `welcome` apart from the code that sends them. The
+[previews](/docs/mail/development) in the admin area call them with sample
+data.
+
+### The body
+
+- `mail.template(message, element)` renders a smail element to HTML, and
+  to plain text for mail clients that do not show HTML.
+- `mail.text(message, text)` sets the plain text yourself, and wins over
+  the text `template` made.
+- `mail.html(message, html)` takes HTML as it is, without smail.
+
+Write the text with `mail.text` when it carries a link that matters. smail
+can run the block after an `email.button` into the button's URL, which
+breaks the link for anyone reading the text version. The admin's previews
+show the text, so you can check.
+
+### Addresses
+
+- `mail.address("ada@example.com")` is an address on its own.
+- `mail.named("Ada Lovelace", "ada@example.com")` shows the name too, as
+  `Ada Lovelace <ada@example.com>`.
+- `mail.parse_address("Ada <ada@example.com>")` reads one a person wrote,
+  and returns `Error(Nil)` when it is not an address.
+
+Addresses must be plain ASCII `local@domain` mailboxes. Addresses with other
+characters need a feature not every server offers, so they are refused for
+now.
+
+### Everything else
+
+- `mail.from(message, address)` sends from this address instead of the
+  mailer's default.
+- `mail.to`, `mail.cc` and `mail.bcc` take a list of addresses. `Bcc`
+  recipients are hidden from the others.
+- `mail.reply_to(message, address)` sets where replies go.
+- `mail.header(message, name, value)` adds a header, such as
+  `List-Unsubscribe`.
+- `mail.tag(message, tag)` labels the message. Providers that support tags
+  or categories receive them, and the outbox shows them.
+- `mail.attach(message, attachment)` adds a file.
+
+Functions that take a list add to what was there, so
+`mail.to([a]) |> mail.to([b])` sends to both.
+
+### Attachments
+
+```gleam
+let invoice =
+  mail.attachment(
+    filename: "invoice.pdf",
+    content_type: "application/pdf",
+    content: pdf,
+  )
+
+let logo =
+  mail.attachment(filename: "logo.png", content_type: "image/png", content: png)
+  |> mail.inline("logo")
+
+message
+|> mail.attach(invoice)
+|> mail.attach(logo)
+```
+
+`mail.inline` shows an image inside the HTML body instead of listing it as
+a download. The HTML refers to it as `<img src="cid:logo">`.
+
+## Sending
+
+A `Mailer` holds an adapter and the sender used by messages that do not
+name their own:
+
+```gleam
+import howdy/mail
+import howdy/mail/smtp
+
+pub fn mailer() -> mail.Mailer {
+  let assert Ok(config) = smtp.from_env()
+  mail.mailer(smtp.adapter(config))
+  |> mail.default_from(mail.named("Acme", "hello@acme.test"))
+}
+```
+
+Build the mailer once when the app starts, and pass it to the services that
+send mail. Then send:
+
+```gleam
+import logging
+
+case mail.send(mailer, welcome(user)) {
+  Ok(_receipt) -> Nil
+  Error(error) ->
+    logging.log(logging.Warning, "welcome: " <> mail.error_to_string(error))
+}
+```
+
+`send` waits for the provider to accept or refuse the message, so a refusal
+comes back as an error rather than a bounce.
+
+### Sending is synchronous
+
+`send` runs in the calling process. It opens the SMTP connection or makes
+the HTTP request, and returns when the provider answers or the adapter's
+timeout passes. A request handler that sends mail is held for that long,
+and there is no queue in the package: an `Unavailable` error is returned to
+the caller, not tried again later. That is fine for a sign-in link, where
+the person is waiting for it anyway, and for a local Mailpit.
+
+Where the wait matters, or a temporary failure must not lose the message,
+you have two choices:
+
+- The SMTP adapter can try again itself: `smtp.retries(config, 2)` retries
+  a temporary failure twice, waiting `smtp.backoff` (500 ms by default,
+  doubling each time) in between. The caller is held for every attempt,
+  so this suits a job or a background process better than a request.
+- Send it from a [background job](/docs/jobs/overview), queued in the
+  same transaction as the change the email is about, and use
+  `mail.retryable(error)` to decide what to try again. See
+  [Queued email](/docs/jobs/overview#Queued-email). The
+  [outbox](/docs/mail/development) is a sink for reading mail in
+  development and tests, not that queue.
+
+The `Receipt` holds the message's own `id`, which is also in its
+`Message-ID` header, and the `provider_id` the provider gave it, if any.
+
+### Checks
+
+Before any adapter sees a message, `send` checks that it has:
+
+- a sender, its own or the mailer's default
+- at least one recipient
+- a subject
+- a body: HTML, text or both
+- addresses that are addresses
+- no line break in the subject, a display name, a header or a tag
+
+The last check means text from a form can go into a subject or a name
+without letting anyone add headers. `header` also refuses the headers the
+package writes itself, such as `From`, `To`, `Subject`, `Date` and
+`Content-Type`: use their own functions instead.
+
+A message that fails is `Error(mail.Invalid(reason))`, and nothing is sent.
+
+`mail.prepare(mailer, message)` runs the same checks and applies the
+mailer's defaults, without sending. It returns the `mail.Outgoing` an
+adapter would receive, which is how previews show a message as it would go
+out.
+
+### Errors
+
+- `Invalid`: the message is wrong, such as a missing sender, recipient,
+  subject or body, or a bad address or header. Sending it again will not
+  help.
+- `Unavailable`: the provider could not be reached or asked to be tried
+  later, such as a timeout, an SMTP `4xx`, or an HTTP `429` or `5xx`. Worth
+  retrying.
+- `Refused`: the provider refused it for good, such as bad credentials, an
+  unverified sender, or an SMTP `5xx`. Do not retry.
+
+`mail.retryable(error)` says whether trying again might work.
+`mail.error_to_string(error)` describes the error for your logs.
+
+In a [service](/docs/controllers/services), turn the error into a service
+error with `mail.to_service_error`:
+
+```gleam
+import gleam/result
+import howdy/mail
+import howdy/service
+
+pub fn invite(mailer, email: String) -> service.Result(Nil) {
+  use address <- result.try(
+    mail.parse_address(email)
+    |> result.replace_error(service.Invalid("not an email address")),
+  )
+  invitation(address)
+  |> mail.send(mailer, _)
+  |> result.map_error(mail.to_service_error)
+  |> result.replace(Nil)
+}
+```
+
+`Invalid` becomes `service.Invalid`, a `400` that explains itself.
+`Unavailable` and `Refused` become `service.Internal`, which is logged but
+not shown, so provider details never reach the client.

@@ -1,0 +1,322 @@
+# Islands
+
+An island is a small Lustre app on a server-rendered page that runs in the
+browser. The server renders it into the page like any other element, so it
+shows at once and reads as plain HTML. Then the browser loads the same app,
+compiled to JavaScript, and it takes over the elements already there.
+
+A [live component](/docs/ui/live-components) runs on the server and sends
+every click up a WebSocket. An island runs where the click happens, with no
+connection and no round trip, so it suits things that change with every
+keystroke or frame: a counter, a star rating, a filter over a list already
+on the page, a drag handle, a timer. It cannot reach your database or your
+services, because it is in the browser. When it needs data, it fetches it
+like any other browser code, or the page hands it what it needs as it
+renders.
+
+Use a live component when the logic needs the server, and an island when
+it does not. A page can have both, and an island can sit inside a live
+view.
+
+## A counter
+
+An island is an ordinary Lustre app, in a module in a directory called
+`islands`, such as `src/my_app/islands/`. The module has a function that
+returns an `Island`:
+
+```gleam
+// src/my_app/islands/counter.gleam
+import gleam/dynamic/decode
+import gleam/int
+import gleam/json
+import howdy/ui/island.{type Island}
+import lustre/element.{type Element, text}
+import lustre/element/html
+import lustre/event
+
+pub fn island() -> Island(Int, Int, Msg) {
+  island.simple(init:, update:, view:, flags: decode.int, encode: json.int)
+}
+
+pub type Msg {
+  Increment
+  Decrement
+}
+
+fn init(start: Int) -> Int {
+  start
+}
+
+fn update(count: Int, msg: Msg) -> Int {
+  case msg {
+    Increment -> count + 1
+    Decrement -> count - 1
+  }
+}
+
+fn view(count: Int) -> Element(Msg) {
+  html.div([], [
+    html.button([event.on_click(Decrement)], [text("-")]),
+    html.output([], [text(int.to_string(count))]),
+    html.button([event.on_click(Increment)], [text("+")]),
+  ])
+}
+```
+
+`init` takes the island's *flags*: what the page hands it, here the count
+to start from. The flags travel from the server to the browser as JSON, so
+the island names how to write them, `encode`, and how to read them back,
+`flags`. They can be any type the two can carry, such as a record of a
+product's id, price and stock.
+
+`island.simple` is for an island that only holds state, like
+`lustre.simple`. `island.application` takes an `init` and `update` that
+also return effects, like `lustre.application`. Effects from `init` run in
+the browser only: the server renders the model `init` returns and ignores
+the rest.
+
+The app needs `lustre` and `gleam_json` in its own `gleam.toml`, since its
+island modules import them.
+
+## Mounting
+
+Put the island in a [page](/docs/ui/pages) with `island.mount`, passing the
+island's function itself, without calling it, and its flags:
+
+```gleam
+import howdy/ui/island
+import my_app/islands/counter
+
+page.new("Counter")
+|> page.body([
+  ui.container([], [
+    ui.h1("Counter"),
+    island.mount(counter.island, with: 5),
+  ]),
+])
+|> page.respond(ctx)
+```
+
+The server calls `init(5)` and renders the view into the page. The browser
+loads the module that `counter.island` lives in, decodes the flags and
+starts the app on the rendered elements, keeping them rather than drawing
+new ones. Nothing has to be registered: the function says which module to
+load. Mount the same island as many times as you like, with the same flags
+or different ones; each is its own app.
+
+Every app with islands must also mount `ui.islands()`, which serves their
+browser code under `/_howdy/islands`:
+
+```gleam
+howdy.new()
+|> howdy.controller(ui.islands())
+|> howdy.controller(pages())
+```
+
+A page whose islands cannot load says so in a red banner, naming what to
+check, rather than leaving dead buttons.
+
+## What an island can use
+
+Island modules, and every module of your app they import, are compiled for
+JavaScript. They can use Gleam's standard library, Lustre, `gleam_json`
+and anything else that runs in a browser, but not code that only runs on
+the server, such as `howdy/database` or a module that calls Erlang. A
+module shared by the server and an island, such as one that formats
+prices, must run on both.
+
+When an island imports something it cannot, the build fails with the
+compiler's own error, naming the module and the line. In development it
+shows on the page.
+
+Only the island modules and what they import are compiled for JavaScript.
+The rest of your app, in the same package, stays server-only and can use
+anything.
+
+## Development
+
+In development, `ui.islands()` builds the islands whenever a page loads
+them, under `gleam run` as well as `gleam dev`. Gleam skips the work when
+nothing has changed, so a page load costs a few milliseconds, and the
+browser always runs the code that is in your editor: change an island,
+reload the page, and the change is there, with no restart.
+
+A compile error in an island shows on the page, in a banner with the
+compiler's message and the path to the file. Fix it and reload.
+
+The islands are built in a hidden package, `build/howdy_islands`, which
+links only the island modules and the app modules they import, with the
+same dependency versions as the app. You never need to look at it.
+
+## Components in islands
+
+Howdy UI's [components](/docs/ui/components) work in islands too:
+
+```gleam
+fn view(model: Model) -> Element(Msg) {
+  card.card([], [
+    card.header([], [card.title([text("Tasks")])]),
+    card.content([], [
+      input.input([
+        attribute.value(model.draft),
+        event.on_input(Typed),
+      ]),
+      button.button(button.Primary, [event.on_click(Added)], [text("Add")]),
+    ]),
+  ])
+}
+```
+
+A class has the same name in the browser as on the server, so the rendered
+island keeps its styles when the browser takes over. A class the browser
+uses that the page did not, such as a badge that only appears after a
+click, has its CSS added to the page as it first appears. Components whose
+state the browser keeps, such as which tab is selected or whether a dialog
+is open, keep it as the island re-renders.
+
+Import components from their own modules, such as `howdy/ui/card`, rather
+than through `howdy/ui`. Ids passed to components must still be unique in
+the page, so an island mounted twice needs ids made from its flags.
+
+## Islands in live views
+
+An island can go in the view of a live component:
+
+```gleam
+fn view(model: Model) -> Element(Msg) {
+  html.div([], [
+    html.p([], [text("On the server: " <> int.to_string(model.count))]),
+    island.mount(counter.island, with: 3),
+  ])
+}
+```
+
+The live view renders the island once and leaves it to the browser. The
+island's events never reach the server, and the live view's re-renders
+leave the island's state alone. If the live view renders a different
+island in its place, or the same island with different flags, the old one
+stops and the new one starts afresh from its flags.
+
+## Timers and other running effects
+
+An island removed from the page, such as by a live view re-rendering
+without it, stops: its `update` and `view` no longer run. An effect waiting
+to send it a message, such as a timeout, finds no one listening.
+
+Effects that keep running, such as an interval or an event listener on the
+window, would keep going, because Lustre gives effects no way to stop.
+Start them with `island.every` or `island.subscription`, which stop them
+with the island:
+
+```gleam
+fn init(milliseconds: Int) -> #(Int, Effect(Msg)) {
+  #(0, island.every(milliseconds, Tick))
+}
+```
+
+`island.subscription` takes a function that starts something, given the
+function that sends the island a message, and returns the function that
+stops it. Here `set_interval` and `clear_interval` are the app's own
+JavaScript externals:
+
+```gleam
+island.subscription(fn(dispatch) {
+  let id = set_interval(1000, fn() { dispatch(Tick) })
+  fn() { clear_interval(id) }
+})
+```
+
+If a removed island still receives messages seconds after it stopped, the
+browser console says which island, so a forgotten interval is easy to
+find. An island put back in the page starts again from its flags.
+
+## Islands from packages
+
+A package can ship islands for apps to use. Any package that depends on
+`howdy_ui` can have a directory called `islands`, such as
+`src/library/islands/rating.gleam`, and an app mounts those islands like
+its own, with nothing to register:
+
+```gleam
+import library/islands/rating
+
+island.mount(rating.island, with: 3)
+```
+
+The rule is the same everywhere: an island module is one in a directory
+called `islands`. Mount a function from any other module and the island
+does not start: the browser console says why, and in development so does
+the page.
+
+## Releases
+
+A release has no Gleam compiler, so its islands are built and bundled as
+it is exported. Export with Howdy UI rather than with
+`gleam export erlang-shipment`:
+
+```sh
+gleam run -m howdy/ui export
+```
+
+It compiles the app, bundles every island it mounts into
+`priv/howdy_islands` with [esbuild](https://esbuild.github.io), minified and
+split into shared chunks with hashed names, then runs
+`gleam export erlang-shipment`. A release serves the bundle with
+`immutable` caching: a page of islands loads in a handful of requests.
+
+esbuild is downloaded the first time, checked against a pinned checksum,
+and kept in your user cache directory. Set `HOWDY_ESBUILD` to the path of
+an esbuild of your own to use that instead.
+
+If your build must run `gleam export erlang-shipment` itself, such as in a
+Dockerfile, bundle just before it:
+
+```sh
+gleam run -m howdy/ui islands
+gleam export erlang-shipment
+```
+
+### Stale bundles
+
+The bundle records what it was built from: for every package with code in
+it, the version and a fingerprint of each compiled module involved, Erlang
+FFI included. A release checks it as it starts. If the code it runs is not
+the code the bundle was built from, it refuses the bundle rather than
+serving islands that no longer match the pages around them: it logs what
+changed and the command to run, and the browser console says the same. The
+islands then do not start, and the server-rendered HTML stays as it is.
+
+A release holds no JavaScript sources, so it cannot see a change to a
+JavaScript FFI file alone, in your app or a path dependency, made between
+bundling and exporting. `gleam run -m howdy/ui export` does both in one
+step, so nothing can change in between. Prefer it.
+
+## Testing
+
+An island's `init`, `update` and `view` are plain functions, so test them
+directly, as you would a [live component's](/docs/ui/live-components#Testing).
+To check what a page renders, render the island on the server:
+
+```gleam
+pub fn the_counter_starts_at_its_flags_test() {
+  let html = island.mount(counter.island, with: 5) |> element.to_string
+  assert string.contains(html, ">5<")
+}
+```
+
+What happens in the browser needs a browser. `examples/islands` in the
+Howdy repository drives Chromium against both `gleam run` and an exported
+release.
+
+## Limits
+
+- Islands cannot use server-only code; see
+  [What an island can use](#What-an-island-can-use).
+- Mount the island's function, such as `counter.island`, not an anonymous
+  function: the browser imports the module the function is in.
+- Lustre cannot shut a browser app down, so an island removed from a live
+  view leaves its runtime behind until the page reloads. Its update and
+  view stop, and `every` and `subscription` stop their effects, so it does
+  no more work.
+- An island's flags are in the page's HTML. Do not put anything in them
+  the visitor may not see.

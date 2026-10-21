@@ -1,0 +1,179 @@
+# CSRF protection
+
+A page on another site can make a visitor's browser send a request to yours:
+a hidden form that submits itself is enough. The browser attaches the
+visitor's cookies, because it decides which cookies to send by where the
+request is going, not by who asked for it. If a cookie is what says the
+visitor is signed in, the request arrives looking like theirs. This is
+cross-site request forgery, or CSRF.
+
+[CORS](/docs/middleware/cors) does not stop it. An HTML form post needs no
+preflight, so the request reaches your handler whatever your CORS policy
+says. The attacker cannot read the response, so this is about writes, not
+disclosure: changing an email address, placing an order, deleting an
+account.
+
+You need this page if your app changes things on behalf of visitors it
+recognises by a cookie. You do not need it for a public read-only site, or
+for an API whose clients all sign in with a bearer token, since a hostile
+page cannot make a browser send one of those.
+
+## A policy
+
+Name the origins your own pages are served from, turn the policy into
+middleware, and add it to the app:
+
+```gleam
+import howdy
+import howdy/csrf
+
+pub fn app() {
+  howdy.new()
+  |> howdy.middleware(csrf.middleware(csrf.new(["https://example.com"])))
+  |> howdy.controller(signup_controller())
+}
+```
+
+An origin is the scheme, host and port a page was loaded from. Give each in
+full, as `scheme://host` with an optional port, with no path and no trailing
+slash. Comparison ignores case. An empty list, or anything that is not an
+origin, panics when the policy is built, so a typo shows up at startup.
+
+List every origin that serves your pages, including the ones you develop
+on:
+
+```gleam
+csrf.new(["https://example.com", "http://localhost:8000"])
+```
+
+The literal origin `null` cannot be allowed. Sandboxed frames and some
+redirects send it, so trusting it would defeat the check. There are no
+wildcards either.
+
+## What the middleware does
+
+`GET`, `HEAD` and `OPTIONS` requests pass straight through, so pages load
+and CORS preflights are answered as before.
+
+Every other method is a write, and must show where it came from. Browsers
+add an `origin` header to cross-site writes, and scripts cannot change it.
+The request must carry exactly one `origin` header, matching one of the
+policy's origins. Otherwise the client gets `403` with
+`{"error":"forbidden"}`, and the handler never runs. The match is exact: a
+different scheme, a different port, or a host that merely starts with an
+allowed one are all rejected.
+
+Some proxies and privacy tools strip `origin`. When it is missing
+altogether, a single `sec-fetch-site: same-origin` header is accepted in its
+place. Browsers set that header themselves, and scripts cannot forge it
+either. An `origin` that is present always decides, and a request with
+neither header is rejected.
+
+There are no tokens to put in your forms and nothing to keep in a session.
+The protection is header-based by design. Every current browser sends these
+headers, Go's standard library protects against CSRF the same way with
+`http.CrossOriginProtection`, and OWASP's Application Security Verification
+Standard (4.0, requirement 13.2.3) lists origin header checks among the
+accepted protections.
+
+## Clients that are not browsers
+
+Because a request with neither header is rejected, the middleware also turns
+away `curl`, native apps and other servers. Where those sign in with a
+bearer token, not a cookie, there is nothing for a hostile page to exploit,
+so exempt them:
+
+```gleam
+import gleam/http/request
+
+csrf.new(["https://example.com"])
+|> csrf.exempt(fn(ctx) {
+  case request.get_header(ctx.request, "authorization") {
+    Ok("Bearer " <> _) -> True
+    _ -> False
+  }
+})
+```
+
+The function runs on every write, and a request it accepts skips the check.
+Only exempt requests that carry their own proof of who is asking. Exempting
+by path or by user agent hands the hole straight back.
+
+## Checking one route
+
+`csrf.check(ctx, origins)` runs the same check and returns a
+`service.Result`, for use in a [guard](/docs/controllers/guards) or a single
+handler:
+
+```gleam
+fn delete_account(ctx: Context) {
+  case csrf.check(ctx, ["https://example.com"]) {
+    Ok(Nil) -> remove_account(ctx)
+    Error(error) -> service.error_response(ctx, error)
+  }
+}
+```
+
+It does not look at the method, so only call it on routes that write. Unlike
+`csrf.new` it does not panic on a malformed origin; one simply never
+matches.
+
+## Where to add it
+
+Add it to the app, so that a route added later is covered without anyone
+having to remember. Like any middleware that rejects, it goes after
+[logging](/docs/middleware/logging), so the `403`s are recorded, and after
+[CORS](/docs/middleware/cors):
+
+```gleam
+howdy.new()
+|> howdy.middleware(logger.log)
+|> howdy.middleware(cors.middleware(cors_policy))
+|> howdy.middleware(csrf.middleware(csrf_policy))
+```
+
+If a separate frontend calls your API with cookies, the origins in the CSRF
+policy are the same ones the CORS policy allows with credentials.
+
+Two habits complete the defence:
+
+- Never change anything on a `GET` route. Reads are not checked, and a
+  cross-site `GET` is as easy as an image tag.
+- Keep `SameSite=Lax` on session cookies, which
+  [`cookie.defaults`](/docs/controllers/cookies) already sets. It keeps
+  cookies off cross-site form posts in the first place, and the two
+  defences fail in different ways.
+
+The optional `howdy_auth` package applies the same origin check to its own
+routes and to every route behind its guard. An app that puts all of its
+writes behind that guard does not need this middleware as well.
+
+## Testing
+
+Requests from `howdy/testing` carry no `origin`, so once the middleware is
+on, a test that writes must say where it comes from:
+
+```gleam
+import howdy/testing
+
+pub fn same_site_posts_are_allowed_test() {
+  let res =
+    testing.post_form("/signups", [#("email", "ada@example.com")])
+    |> testing.header("origin", "https://example.com")
+    |> testing.send(app())
+
+  assert res.status == 303
+}
+
+pub fn cross_site_posts_are_rejected_test() {
+  let res =
+    testing.post_form("/signups", [#("email", "ada@example.com")])
+    |> testing.header("origin", "https://evil.example")
+    |> testing.send(app())
+
+  assert res.status == 403
+  assert testing.error(res) == Ok("forbidden")
+}
+```
+
+A helper that adds the header keeps the rest of the test suite short.

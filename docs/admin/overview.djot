@@ -1,0 +1,143 @@
+# Howdy Admin
+
+`howdy_admin` is an admin area for your app while you develop it. It is
+mounted from your `dev/` entry point, beside `howdy_dev`, so it never
+reaches a deployment. Depending on what you give it, it lets you:
+
+- [browse and edit the database](/docs/admin/database), in a grid that
+  follows the data as it changes
+- [manage users, groups and roles](/docs/admin/users), and sign in to the
+  app as any user
+- [read the mail your app sends](/docs/mail/development), and preview your
+  email templates
+- [follow each request](/docs/admin/telemetry) as a timeline of its
+  queries, calls, emails and logs
+- [watch background jobs](/docs/jobs/production) as they are queued, run
+  and fail, and retry or cancel them
+
+## Install
+
+Add the package as a dev dependency, next to `howdy_dev`:
+
+```sh
+gleam add --dev howdy_dev@1 howdy_admin@1
+```
+
+## Mounting it
+
+`admin.mount` adds the admin's routes to the app your `dev/` entry point
+serves:
+
+```gleam
+// dev/my_app_dev.gleam
+import gleam/erlang/process
+import howdy/admin
+import howdy/dev
+import my_app
+
+pub fn main() {
+  let db = my_app.open_database()
+  let identity = my_app.identity(db)
+  let permissions = my_app.permissions(db)
+  let dashboard =
+    admin.new()
+    |> admin.auth(identity)
+    |> admin.authorization(permissions)
+
+  let assert Ok(_) =
+    dev.start(fn() {
+      my_app.app(db, identity, permissions) |> admin.mount(dashboard)
+    })
+  process.sleep_forever()
+}
+```
+
+Run [`howdy dev`](/docs/cli/overview) and open
+<http://localhost:8787/_howdy>, on whichever port your app listens on.
+
+Build the database, auth and anything else the admin is given outside the
+function `dev.start` rebuilds the app from, as here, so they are made once
+and not on every reload.
+
+## What you register is what it shows
+
+Gleam cannot find out at runtime which packages an app uses, and there is
+no registry of the values it built, so the app hands the admin what it
+has:
+
+- `admin.database(repo)` shows the tables of a Gloo Repo, on PostgreSQL or
+  SQLite. See [Database browser](/docs/admin/database).
+- `admin.auth(identity)` shows users and groups from
+  [Howdy Auth](/docs/auth/overview). It registers auth's Repo as the
+  database too, unless `admin.database` was given another. See
+  [Users and roles](/docs/admin/users).
+- `admin.authorization(permissions)` shows
+  [roles and permissions](/docs/auth/roles). It needs `admin.auth` too,
+  since roles are held by users.
+- `admin.mail(box)` shows what a `howdy/mail/outbox` keeps, and
+  `admin.mail_previews(previews, send_with: mailer)` shows your email
+  templates. See [Outbox and previews](/docs/mail/development).
+- `admin.jobs(runner)` shows the jobs of a
+  [Howdy Jobs](/docs/jobs/overview) runner: each queue's jobs by state,
+  its schedules, and each job with its errors. See
+  [Watching jobs](/docs/jobs/production).
+
+The first page lists what was registered, and the sidebar links to each
+part. A part that was not registered is not mounted at all.
+
+Some things need no registering, because `admin.mount` can see them in the
+app itself. If the app serves an OpenAPI document with `howdy/openapi`, the
+admin lists its endpoints and lets you call them, as any user. See
+[Calling your API](/docs/admin/api). Mount the admin last, so it sees the
+whole app.
+
+## Options
+
+```gleam
+admin.new()
+|> admin.at("/admin")
+|> admin.named("Acme admin")
+|> admin.database(db)
+```
+
+- `admin.at(prefix)` moves the pages from `/_howdy`. The prefix cannot be
+  `/`.
+- `admin.named(name)` sets the title in the sidebar, "Howdy admin" by
+  default.
+- `admin.allow_hosts(hosts)` changes which host names the pages answer.
+  See below.
+- `admin.prefix(admin)` is where the pages are, for linking to them from
+  your own dev pages.
+
+`admin.mount(app, admin)` adds every controller to the app.
+`admin.controllers(admin)` gives you the controllers instead, to mount
+yourself.
+
+## Development only
+
+There is no login. Anyone who can reach the pages can read and change
+every row, and sign in to your app as anyone. These are the defences:
+
+- It is a dev dependency, and it is mounted from `dev/`, which
+  `gleam export erlang-shipment` leaves out.
+- `howdy_dev` listens on loopback only.
+- The pages answer `403` to any request whose `Host` is not `localhost`,
+  `127.0.0.1` or `[::1]`, so a page on another site cannot reach them
+  through DNS rebinding.
+- Writes must come from the admin's own origin. A `POST` whose
+  `Sec-Fetch-Site` or `Origin` header says another site sent it gets `403`,
+  so a page you visit while the admin runs cannot post to it. Forms carry
+  no CSRF token; the browser's headers do that job.
+
+To open the admin from another machine on a network you trust, list the
+exact host names it will be reached by:
+
+```gleam
+admin.new()
+|> admin.allow_hosts(["localhost", "devbox.local"])
+```
+
+`allow_hosts` replaces the loopback names, and takes host names without a
+port, a scheme or wildcards. `howdy_dev` has its own `dev.bind` and
+`dev.allow_hosts` for the server itself. Anyone who can reach an allowed
+host owns your data.

@@ -1,0 +1,128 @@
+# Roles and permissions
+
+Authentication tells you who is making a request. Authorization decides
+what they may do. `howdy_auth` keeps the two apart: `howdy/authorization`
+stores roles, the permissions each role grants, and which users hold which
+roles.
+
+A session does not carry roles. Every check reads the current grants, so
+taking a role away works on the very next request, without waiting for
+anybody's session to end.
+
+## Setting up
+
+Add `authorization.schema()` to your
+[migrations](/docs/auth/migrations), after `auth.schema()`, and build one
+`Authorization` at startup from the same Repo:
+
+```gleam
+import howdy/authorization as access
+
+let assert Ok(permissions) = access.new(db)
+```
+
+## Defining and assigning roles
+
+A role is a name and a list of permissions. Both are plain strings of your
+choosing:
+
+```gleam
+import howdy/auth/user
+
+let assert Ok(_) =
+  access.define_role(
+    permissions,
+    access.Global,
+    "editor",
+    ["articles.read", "articles.write"],
+    by: user.System,
+  )
+
+let assert Ok(_) =
+  access.assign(
+    permissions,
+    user_id,
+    "editor",
+    access.Global,
+    by: user.Acting(admin),
+  )
+```
+
+- `define_role` creates a role, or replaces the permissions of an existing
+  one. People who hold the role keep it.
+- `assign` gives a role to a user, and `revoke` takes it away. A role or a
+  user that does not exist is a `NotFound`. Revoking a role somebody does
+  not hold is not an error.
+
+These are trusted operations. None is exposed over HTTP, and there is no
+automatic administrator: decide in your own code who may call them, for
+instance from a startup task, or from a handler that has already checked a
+permission. `by:` records who acted, and is `user.System` for code acting
+for nobody.
+
+## Checking
+
+Inside a handler that has [authenticated](/docs/auth/overview) the request,
+add a second guard:
+
+```gleam
+use _ <- guard.require(
+  ctx,
+  access.require_permission(permissions, "articles.write", access.Global),
+)
+```
+
+A user without the permission gets `403`. `access.require_role(permissions,
+"editor", access.Global)` checks for the role by name.
+
+Prefer permissions. A handler that asks "may this user write articles?"
+keeps working when you later split `editor` into two roles; one that asks
+"is this user an editor?" does not.
+
+Outside HTTP, `access.allowed(permissions, principal, "articles.write",
+access.Global)` and `access.has_role` answer the same questions as a
+`service.Result(Bool)`. A database failure is an error, never a `True`.
+
+## The rules
+
+- Somebody with several roles has the permissions of all of them.
+- Names are literal. There is no `admin` that may do everything, no
+  wildcards, no role that inherits from another, and no deny rules.
+- Permissions that nobody has defined are simply not granted.
+
+## Scopes
+
+Every role and assignment lives in a scope. `access.Global` is the scope
+for the whole app. `access.Organization(id)` is a scope for one
+organization, and the natural id to use is a [group](/docs/auth/groups) id:
+
+```gleam
+let scope = access.Organization(principal.user.group_id)
+
+use _ <- guard.require(
+  ctx,
+  access.require_permission(permissions, "articles.write", scope),
+)
+```
+
+A grant only counts in exactly its own scope. A global role does not pass
+an organization check, so define and assign roles in each scope you check.
+
+Take the scope from something you have verified, such as the signed-in
+user's group or the organization of the record being changed, and not from
+a header the client chose. A passed check does not filter your queries
+either: you still select only that organization's rows.
+
+## Caching
+
+By default every check reads the database. To allow a short cache:
+
+```gleam
+let assert Ok(permissions) = access.with_cache(permissions, seconds: 5)
+```
+
+The lifetime is 1 to 60 seconds. Changes made through this module on the
+same node clear the cache at once, as do suspending and resuming a user.
+Changes made on another node, or straight in SQL, can go unseen until the
+lifetime runs out, so keep the default if a revocation must take effect
+everywhere immediately.

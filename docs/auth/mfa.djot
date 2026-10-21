@@ -1,0 +1,167 @@
+# Multi-factor authentication
+
+With multi-factor authentication on, users can enroll a second factor.
+Once they have, every sign-in asks for it: after an email token, a
+password, a [provider](/docs/auth/providers) or a
+[passkey](/docs/auth/passkeys). The second factor can be:
+
+- a code from an authenticator app (TOTP)
+- a code your app delivers, such as by text message
+- one of the recovery codes they were given when they enrolled
+
+## Turning it on
+
+```gleam
+import howdy/auth/mfa
+
+let assert Ok(config) = mfa.new("My app", mfa_key)
+let identity = auth.with_mfa(identity, config)
+```
+
+The name appears in the user's authenticator app. `mfa_key` encrypts the
+authenticator secrets at rest. It must be **32 random bytes, encoded as
+unpadded base64url**, for example:
+
+```sh
+openssl rand -base64 32 | tr '+/' '-_' | tr -d '=\n'
+```
+
+Keep it outside the database, give every node of the app the same one, and
+never lose it: without it, nobody's authenticator codes can be checked.
+There is no key rotation yet.
+
+Removing the MFA configuration later does not let enrolled users skip their
+second factor. Their sign-ins fail instead.
+
+MFA needs migration 11 of the package. Run
+[the migrations](/docs/auth/migrations) before starting this version.
+
+## Enrolling
+
+On the starter account page, a signed-in user can set up an authenticator.
+The page shows a key to type into the app; pages of your own can turn the
+returned `otpauth:` URI into a QR code. Enrollment only takes effect once
+the user types a code from the app.
+
+Enrolling hands out ten recovery codes, once, and signs out every session.
+Tell the user to save the codes before leaving the page. To issue a
+different number, from 4 to 32:
+
+```gleam
+let assert Ok(config) = mfa.with_recovery_codes(config, 16)
+```
+
+## Signing in
+
+When a user with a second factor signs in through a browser endpoint, the
+answer is not a session. It is `202` with `{"mfa_required": true}`, and a
+short-lived pending cookie. The page then asks for a code and sends it to
+`POST /mfa/verify`:
+
+```json
+{"method": "totp", "code": "123456", "remember": true}
+```
+
+`method` is `totp`, `otp` for a delivered code, or `recovery`. Only then is
+the session cookie set. The starter sign-in pages do this for you. A
+provider sign-in that needs a second factor redirects to `/mfa` under the
+path the provider routes are mounted at, such as `/auth/mfa`. Mount the
+starter pages at the same path, or provide that page yourself.
+
+Bearer endpoints answer with an `mfa_token` instead of a cookie. Send it as
+`challenge` to `POST /mfa/token`, with the same `method` and `code`, to get
+the access token.
+
+A pending sign-in lasts five minutes, and cannot reach any endpoint that
+needs a session. Five wrong codes within five minutes use up the account's
+attempts, across every pending sign-in.
+
+## Delivered codes
+
+To send codes by text message, or any other channel, give MFA a function
+that sends them:
+
+```gleam
+let config =
+  mfa.with_delivery(config, fn(user, code) {
+    sms.send(to: phone_number_for(user), text: secret.reveal(code))
+  })
+```
+
+Configure it before `auth.with_mfa`. Send to a contact your app has already
+verified for that user; never take the destination from the request.
+`POST /mfa/send` sends a code during sign-in.
+
+A sign-in that started with an email token cannot use a delivered code as
+its second factor, since both would go to the same person's mailbox. It can
+still use an authenticator or a recovery code.
+
+## Remembered devices
+
+Ticking **remember this device** skips the second factor on that browser
+for 30 days. To change how long, and whether each use restarts the clock:
+
+```gleam
+let assert Ok(config) =
+  mfa.with_device_trust(config, seconds: 604_800, renew: True)
+```
+
+The lifetime can be from five minutes to a year. The device is still asked
+for its first factor every time. Security changes to the account, such as
+a new password, forget every remembered device. Forgetting one stops it skipping
+the second factor, but does not sign it out: revoke its sessions too.
+
+## Managing factors
+
+All under the API mount, and all on the starter account page:
+
+- `GET /security` reports the current method and what is turned on.
+- `POST /mfa/enroll` with `{"method":"totp"}` or `{"method":"otp"}` starts
+  enrolling, and `POST /mfa/enroll/confirm` with `{challenge, code}`
+  finishes it and answers the recovery codes.
+- `POST /mfa/recovery` replaces the recovery codes.
+- `POST /mfa/disable` turns MFA off for the account.
+- `GET /mfa/devices` lists remembered devices, and
+  `POST /mfa/devices/revoke` with `{id}` forgets one.
+
+Turning MFA off and replacing recovery codes both need a recent sign-in
+that passed the second factor, and both sign out every session and forget
+every remembered device.
+
+## Without HTTP
+
+With MFA on, a sign-in can end in one of two ways. Use the `_step`
+functions, which say which:
+
+```gleam
+case auth.exchange_step(identity, token, client) {
+  Ok(auth.SignedIn(session)) -> todo
+  Ok(auth.SecondFactor(challenge)) -> todo
+  Error(error) -> todo
+}
+```
+
+`auth.login_password_step` does the same for passwords. Then:
+
+- `auth.verify_mfa(identity, challenge, auth.Totp, code, remember)` returns
+  an `auth.MfaSession`: the session, and a remembered-device token when
+  `remember` is `True`. The other methods are `auth.DeliveredCode` and
+  `auth.RecoveryCode`.
+- `auth.send_mfa_code(identity, challenge)` sends a delivered code.
+- `auth.use_trusted_device` skips the code for a remembered device.
+
+`auth.exchange` and `auth.login_password` answer `Forbidden` for a user
+with a second factor, since they cannot return a session yet. Management is
+`auth.begin_mfa`, `auth.confirm_mfa`, `auth.mfa_status`,
+`auth.disable_mfa`, `auth.regenerate_recovery_codes`,
+`auth.trusted_devices` and `auth.revoke_trusted_device`.
+
+## Details
+
+Authenticator codes are six digits, change every 30 seconds, and accept
+the code either side of the current one. A code works once. Secrets are
+encrypted with AES-256-GCM. Recovery codes are 80 bits, stored hashed, and
+each works once.
+
+A session that passed the second factor is recorded with the method
+`mfa:<first method>`, such as `mfa:password`.

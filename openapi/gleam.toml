@@ -1,0 +1,18 @@
+name = "howdy_openapi"
+version = "1.0.0"
+gleam = ">= 1.18.0"
+description = "OpenAPI documents for Howdy apps, built from schemas that also decode requests and encode responses"
+licences = ["Apache-2.0"]
+repository = { type = "github", user = "howdy-gleam", repo = "howdy", path = "openapi", tag-prefix = "howdy_openapi-" }
+links = [{ title = "Website", href = "https://tryhowdy.dev" }]
+internal_modules = ["howdy/openapi/internal/*"]
+target = "erlang"
+
+[dependencies]
+gleam_stdlib = ">= 1.0.0 and < 2.0.0"
+gleam_http = ">= 4.4.0 and < 5.0.0"
+gleam_json = ">= 3.1.0 and < 4.0.0"
+howdy = { path = ".." }
+
+[dev_dependencies]
+gleeunit = ">= 1.0.0 and < 2.0.0"

@@ -1,0 +1,453 @@
+# Components
+
+Howdy UI comes with more than fifty ready-made components: text, buttons,
+form controls, cards, tables, charts, dialogs, menus, tabs and more. Each is
+a function that returns a [Lustre](https://hexdocs.pm/lustre) element,
+already styled, that follows whatever [theme](/docs/ui/themes) the page is
+using.
+
+To see them, browse the [component gallery](/components). Every component,
+block and theme preset has a page there with its examples drawn live, the
+code that drew each one, the command that copies it into your project, and
+its full source.
+
+## Using a component
+
+Import `howdy/ui`, which re-exports every component, and call them like any
+other Lustre element:
+
+```gleam
+import howdy/ui
+import howdy/ui/button.{Outline, Primary}
+import lustre/element.{text}
+
+ui.card([], [
+  ui.card_header([], [
+    ui.card_title([text("Delete this order?")]),
+    ui.card_description([text("This cannot be undone.")]),
+  ]),
+  ui.card_footer([], [
+    ui.button(Outline, [], [text("Cancel")]),
+    ui.button(Primary, [], [text("Delete")]),
+  ]),
+])
+```
+
+Render them in a [page](/docs/ui/pages), in the view of a
+[live component](/docs/ui/live-components), or in an
+[island](/docs/ui/islands) running in the browser. Each includes the CSS
+for the components it draws, so there is nothing else to set up.
+
+## How they are called
+
+Components follow Lustre's conventions, so they mix freely with elements
+from `lustre/element/html`:
+
+- A component that holds other elements takes a list of attributes and a
+  list of children, as in `ui.card([], [...])`.
+- A component that only holds text takes a `String`, as in `ui.h1("Orders")`
+  or `ui.muted("Updated two minutes ago")`.
+- A component that comes in several looks takes the variant first, as in
+  `ui.button(Primary, [], [...])` or `ui.badge(Secondary, [], [...])`. The
+  variants live in the component's own module, such as `howdy/ui/button`.
+- Attributes come from `lustre/attribute` and events from `lustre/event`.
+  Whatever you pass is added to the element beside its styling.
+
+```gleam
+import lustre/attribute
+import lustre/event
+
+ui.card([attribute.id("summary")], [ui.h2("Summary")])
+ui.button(Primary, [event.on_click(Save)], [text("Save")])
+```
+
+Each component also has its own module under `howdy/ui`, such as
+`howdy/ui/button` or `howdy/ui/card`. Its page in the
+[gallery](/components) names the module. A few components with many
+options, `calendar`, `data_table`, `chart`, `uploader`, `rich_text` and
+`bell`, are [builders](#Builders) used from their own modules only.
+
+## What there is
+
+The [gallery](/components) groups them the same way:
+
+- *Typography*: headings `ui.h1` to `ui.h4`, paragraphs, muted text,
+  links, `prose` for rendered Markdown, and keyboard keys.
+- *Actions*: [buttons](/components/button),
+  [button groups](/components/button_group) and
+  [toggles](/components/toggle).
+- *Forms*: inputs and text areas, [fields](/components/field) with hints
+  and errors, checkboxes and radios, switches, sliders, one-time code
+  inputs, [selects](/components/select),
+  [comboboxes and command menus](/components/command),
+  [calendars and date pickers](/components/calendar), questionnaires
+  that ask one question at a time, [uploaders](/components/uploader)
+  that send files straight to storage, and a
+  [rich text editor](/docs/ui/rich-text) with mentions.
+- *Layout*: containers, stacks and rows, [cards](/components/card), an
+  application [sidebar](/components/sidebar), scroll areas, resizable
+  panels and right-to-left sections.
+- *Overlays*: [dialogs and sheets](/components/dialog), drawers, popovers,
+  tooltips, [menus](/components/menu), context menus, menubars and hover
+  cards.
+- *Navigation*: [tabs](/components/tabs), accordions, pagination,
+  breadcrumbs and navigation menus.
+- *Data display*: tables, [data tables](/components/data_table),
+  [charts](/components/chart), badges, avatars, carousels and item lists.
+- *Feedback*: progress bars, empty states, [alerts](/components/alert),
+  [toasts](/components/toast), a notification [bell](/components/bell),
+  skeletons and spinners.
+- *Chat*: a [conversation](/components/chat) that stays on the newest
+  message, and file attachments.
+
+## Buttons
+
+`ui.button` takes a variant, attributes and children. The variants are in
+`howdy/ui/button`:
+
+- `Primary` is the main action, filled with the primary colour. Aim for
+  one per view.
+- `Secondary` is a supporting action, filled with the muted colour.
+- `Outline` is a supporting action, outlined.
+- `Ghost` is a quiet action, such as one in a toolbar, filled only when
+  hovered.
+- `Link` is an action that looks like a link.
+- `Danger` is a destructive action, filled with the danger colour.
+
+`ui.sized_button` takes a size as well: `ExtraSmall`, `Small`, `Medium` or
+`Large`, or `Icon`, `IconExtraSmall`, `IconSmall` or `IconLarge` for a
+square button holding one icon. Give an icon button an `aria-label`.
+
+```gleam
+import howdy/ui/button.{Danger, Ghost, Icon, Primary}
+
+ui.button(Primary, [event.on_click(Save)], [text("Save")])
+ui.button(Danger, [attribute.disabled(True)], [text("Delete")])
+ui.sized_button(Ghost, Icon, [attribute.aria_label("Close")], [text("×")])
+```
+
+A button does nothing on its own. That is what you want in a live view,
+where `event.on_click` does the work. To submit an HTML form, use
+`ui.submit_button`:
+
+```gleam
+ui.submit_button(Primary, [], [text("Sign up")])
+```
+
+Do not pass `attribute.type_("submit")` to `ui.button` instead. The button
+would have two types, which a page and a live view resolve differently.
+
+See the [button page](/components/button) for every variant and size.
+
+## Forms
+
+`ui.field` groups a label, a control and the text that explains or
+corrects it:
+
+```gleam
+html.form([attribute.method("post"), attribute.action("/signups")], [
+  ui.stack([], [
+    ui.field([], [
+      ui.label([attribute.for("email")], [text("Email address")]),
+      ui.input([
+        attribute.id("email"),
+        attribute.name("email"),
+        attribute.type_("email"),
+        attribute.aria_describedby("email-hint"),
+      ]),
+      ui.field_description([attribute.id("email-hint")], [
+        text("We never share it."),
+      ]),
+    ]),
+    ui.submit_button(Primary, [], [text("Sign up")]),
+  ]),
+])
+```
+
+Always pair a control with a label, joined by matching `for` and `id`.
+The label is what a screen reader announces, and clicking it focuses the
+control.
+
+Controls are styled by their own state. `attribute.disabled(True)` dims
+them, and `attribute.aria_invalid("true")` gives them the danger colour,
+so the attributes that tell assistive technology about an error also show
+it:
+
+```gleam
+ui.field([], [
+  ui.label([attribute.for("email")], [text("Email address")]),
+  ui.input([
+    attribute.id("email"),
+    attribute.aria_invalid("true"),
+    attribute.aria_describedby("email-error"),
+  ]),
+  ui.field_error([attribute.id("email-error")], [
+    text("Enter an email address."),
+  ]),
+])
+```
+
+The other controls work the same way: `ui.textarea`, `ui.checkbox`,
+`ui.radio` and `ui.choice` (a control with its label), `ui.switch`,
+`ui.slider`, `ui.select` and `ui.combobox`. [Forms](/docs/controllers/forms)
+covers reading and validating what the form sends.
+
+### Uploads
+
+`howdy/ui/uploader` is a place to drop or choose files. The browser sends
+each one straight to storage, showing its progress as an attachment, and
+the form posts the files' keys instead of the files:
+
+```gleam
+import howdy/ui/attachment
+import howdy/ui/uploader
+
+html.form([attribute.method("post"), attribute.action("/listings")], [
+  ui.stack([], [
+    uploader.new(name: "photos", start: "/listings/uploads")
+      |> uploader.multiple(max_files: 8)
+      |> uploader.accept(["image/png", "image/jpeg"])
+      |> uploader.max_size(10_000_000)
+      |> uploader.layout(attachment.Tile)
+      |> uploader.view,
+    ui.submit_button(Primary, [], [text("Publish")]),
+  ]),
+])
+```
+
+`start` is an endpoint of yours. The browser posts it each file's name,
+type and size as JSON, and it answers with a key and where to send the
+file, which `howdy_storage` gives you; see
+[direct uploads](/docs/storage/overview#Direct-uploads). Files over the
+size or of other types are refused before they are sent, the form will not
+submit while one is still on its way, and `uploader.stored` shows files
+saved earlier so an edit form keeps them unless they are removed. In a
+live view, `live.on_values("photos", PhotosChanged)` hears the keys each
+time they change.
+
+### Rich text
+
+`howdy/ui/rich_text` is an editor for formatted writing, like Rails'
+Action Text, with mentions and attachments. It posts a JSON document, which
+`howdy/ui/rich_text/document` reads into Gleam values, refusing anything
+the editor could not have made, and draws through Lustre:
+
+```gleam
+rich_text.new(name: "body")
+|> rich_text.value(post.body)
+|> rich_text.mentions(trigger: "@", kind: "person", search: "/people/search")
+|> rich_text.required
+|> rich_text.view
+```
+
+Mount `ui.rich_text()` to serve its browser code.
+[Rich text](/docs/ui/rich-text) covers storing, validating, mentions,
+attachments and showing documents.
+
+## Words and other languages
+
+Everything the components say, from a pagination's "Previous" to a toast's
+close button and the rich text editor's toolbar, is in one
+`howdy/ui/words.Words` record. Components that are plain functions take it
+as their first argument, and builders take it with a `words` step,
+speaking English without one:
+
+```gleam
+import howdy/ui/words
+
+let w = words.translated(t)  // or words.english()
+
+ui.pagination(w, current: 3, total: 12, href: page_href)
+ui.toast_region(w, [], toasts)
+data_table.new(columns, rows) |> data_table.words(w)
+rich_text.new(name: "body") |> rich_text.words(w) |> rich_text.view
+```
+
+`words.translated` gives them in the language of an
+[i18n](/docs/i18n/overview) translator, with numbers and dates written
+that locale's way. Change a few with a record update:
+`words.Words(..words.english(), dismiss: "Close")`.
+
+## Layout
+
+- `ui.container` is a centred column, at most 960 pixels wide, with padding
+  at the edges. Wrap the content of a page in one.
+- `ui.stack` places its children in a column with an even gap.
+- `ui.row` places its children in a line with a gap, centred vertically,
+  wrapping when they run out of room.
+- `ui.separator` is a dividing line.
+- `ui.card` is a raised surface for related content, with
+  `card_header`, `card_title`, `card_description`, `card_action`,
+  `card_content` and `card_footer` for its parts.
+
+```gleam
+ui.container([], [
+  ui.stack([], [
+    ui.h1("Dashboard"),
+    ui.row([], [
+      ui.card([], [ui.h3("Orders"), ui.p([text("128")])]),
+      ui.card([], [ui.h3("Customers"), ui.p([text("64")])]),
+    ]),
+  ]),
+])
+```
+
+Use `stack` and `row` for spacing rather than adding margins to the things
+inside them. The gap belongs to the layout, so components stay reusable and
+spacing stays even.
+
+For a whole application, `ui.sidebar_layout` puts a collapsible
+[sidebar](/components/sidebar) beside the page.
+
+## Interactive components
+
+Dialogs, popovers, menus, tooltips, tabs, accordions and selects are built
+on what the browser already does: the `<dialog>` element, the popover API
+and `<details>`. The browser keeps focus inside a modal, closes things on
+Escape or a click outside, and puts focus back afterwards.
+
+A trigger and what it opens are tied by an id. The trigger functions return
+attributes, so any button can open one:
+
+```gleam
+import howdy/ui/button.{Outline, Primary}
+
+html.div([], [
+  ui.button(Outline, ui.dialog_trigger("rename"), [text("Rename")]),
+  ui.dialog("rename", [], [
+    ui.dialog_header([
+      ui.dialog_title("rename", [text("Rename project")]),
+    ]),
+    ui.input([attribute.aria_label("Name")]),
+    ui.dialog_footer([
+      ui.button(Outline, ui.dialog_close("rename"), [text("Cancel")]),
+      ui.button(Primary, ui.dialog_close("rename"), [text("Save")]),
+    ]),
+  ]),
+])
+```
+
+Menus work the same way, with `ui.menu_trigger` and `ui.menu`:
+
+```gleam
+html.div([], [
+  ui.button(Outline, ui.menu_trigger("account"), [text("Account")]),
+  ui.menu("account", [], [
+    ui.menu_item([event.on_click(OpenProfile)], [text("Profile")]),
+    ui.menu_separator(),
+    ui.menu_link("/sign-out", [], [text("Sign out")]),
+  ]),
+])
+```
+
+A small script, `howdy/ui/behaviour`, adds what the browser does not do:
+arrow keys and typeahead in menus and selects, arrow keys between tabs, and
+tooltips on hover and focus. Every page includes it, and it works inside
+live views too, without a round trip to the server.
+
+The browser keeps track of what is open and what is selected. A live view
+that wants to know listens for the native events: `close` on a dialog,
+`toggle` on a popover, `change` on a select, or `click` on a tab or menu
+item. Keep a trigger and what it opens in the same place: both in the page,
+or both in one live view.
+
+## Toasts and the bell
+
+`ui.toast_region` is the corner toasts appear in. Render it once on every
+page, even empty, so a screen reader is listening when a toast arrives.
+`toast.flashed` turns [flash messages](/docs/controllers/flash-messages)
+into toasts after a redirect:
+
+```gleam
+use messages <- flash.take(ctx, flash)
+let w = words.english()
+page.new("Settings")
+|> page.body([settings_form(), toast.region(w, [], toast.flashed(w, messages))])
+|> page.respond(ctx)
+```
+
+`howdy/ui/bell` is a notification bell: a button with the unread count,
+opening a panel of the newest notifications, which keeps up as they arrive
+and shows each new one as a toast. It reads the inbox
+[Howdy Notifications](/docs/notifications/overview) serves:
+
+```gleam
+bell.new(id: "inbox", source: "/notifications")
+|> bell.unread(unread_count)
+|> bell.inbox("/inbox")
+|> bell.words(w)
+|> bell.view
+```
+
+## Builders
+
+`calendar`, `data_table`, `chart`, `uploader`, `rich_text` and `bell` have
+many options, so they are built up in a pipeline and drawn with `view`.
+Use them from their own modules:
+
+```gleam
+import gleam/int
+import gleam/string
+import howdy/ui/data_table
+
+let columns = [
+  data_table.column("id", "Invoice", fn(invoice) { text(invoice.id) }),
+  data_table.column("customer", "Customer", fn(invoice) {
+    text(invoice.customer)
+  })
+    |> data_table.sortable(fn(a, b) { string.compare(a.customer, b.customer) }),
+  data_table.column("amount", "Amount", fn(invoice) {
+    text(int.to_string(invoice.amount))
+  })
+    |> data_table.sortable(fn(a, b) { int.compare(a.amount, b.amount) })
+    |> data_table.numeric,
+]
+
+data_table.new(columns, invoices)
+|> data_table.empty([text("No invoices yet.")])
+|> data_table.view
+```
+
+Sorting, selection and paging happen on the server: the table shows the
+rows it is given. The [data table](/components/data_table),
+[calendar](/components/calendar) and [chart](/components/chart) pages show
+the rest of their options.
+
+Charts are drawn on the server too, as SVG and HTML, and need no script.
+"Show data" opens the numbers as a table, so no value depends on colour or
+a mouse.
+
+## Blocks
+
+Blocks are whole screens and cards built from the components: an
+[application shell](/components/app_shell) with a sidebar and top bar, a
+[stat card](/components/stat_card), and
+[sign-in](/components/sign_in) and [sign-up](/components/sign_up) screens.
+Use them from `howdy/ui/blocks`, or copy one into your project to make it
+your own.
+
+## Styling another element
+
+Each component's module exposes the class behind it, such as
+`card.card_class()`. Use one to give the same look to a different
+element:
+
+```gleam
+import howdy/ui/card
+import lustre/element/html
+
+html.section([ui.class(card.card_class())], [ui.h2("Summary")])
+```
+
+## Making them your own
+
+Howdy UI does not have an option for every detail. When a component is not
+quite right, copy its source into your project and change it:
+
+```sh
+gleam run -m howdy/ui add button
+```
+
+Every page in the [gallery](/components) shows the command for that
+component. [Custom components](/docs/ui/custom-components) covers copying,
+keeping copies up to date, and writing components of your own.

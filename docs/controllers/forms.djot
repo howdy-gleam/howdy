@@ -1,0 +1,541 @@
+# Forms
+
+Most apps accept input in a request body: a JSON document from an API client
+or a script in the page, or the fields of an HTML form posted by the
+browser. Either way the work is the same three steps. Read the body, turn it
+into a typed value, and check that value before anything else touches it.
+
+This page covers both kinds of body, then the validation they share. The
+running example is a signup with a name, an email address and an age:
+
+```gleam
+pub type SignupInput {
+  SignupInput(name: String, email: String, age: Int)
+}
+```
+
+## JSON bodies
+
+`body.json` reads the request body and decodes it with a decoder from
+`gleam/dynamic/decode`. Like the functions in `howdy/query`, it is designed
+for `use`: the rest of the handler only runs with a decoded value.
+
+```gleam
+import gleam/dynamic/decode
+import gleam/json
+import howdy/body
+import howdy/controller.{type Context}
+
+pub fn signup_controller() {
+  controller.new("signups")
+  |> controller.post("/", create_signup)
+}
+
+fn signup_decoder() -> decode.Decoder(SignupInput) {
+  use name <- decode.field("name", decode.string)
+  use email <- decode.field("email", decode.string)
+  use age <- decode.field("age", decode.int)
+  decode.success(SignupInput(name:, email:, age:))
+}
+
+fn create_signup(ctx: Context) {
+  use input <- body.json(ctx, signup_decoder())
+  controller.json(ctx, json.object([#("name", json.string(input.name))]))
+  |> controller.with_status(201)
+}
+```
+
+When the body cannot be decoded, the handler stops and the client gets a
+`400` with a JSON body that says why:
+
+- A body that is not JSON answers
+  `{"error":"request body is not valid JSON"}`.
+- A value of the wrong type, such as `"age":"old"`, answers
+  `{"error":"invalid request body: age expected Int, found String"}`.
+- Missing fields are all reported together:
+  `{"error":"invalid request body: email expected Field, found Nothing; age expected Field, found Nothing"}`.
+
+`body.json` reads at most `body.default_limit` bytes, which is one mebibyte.
+A larger body answers `400` with `{"error":"request body too large"}`. Use
+`body.json_with_limit` to pick a different limit for one route, such as a
+bulk import:
+
+```gleam
+use input <- body.json_with_limit(ctx, 10_000_000, import_decoder())
+```
+
+The `content-type` header is not checked, so a client that forgets to send
+`application/json` is still understood.
+
+For a body too large to hold in memory, such as a file a client sends as
+the whole body of a `PUT`, `controller.body_reader(ctx, limit:)` reads it a
+piece at a time: call `context.read_chunk` until it gives `None`, writing
+each piece wherever it goes.
+
+## HTML forms
+
+A browser posting a `<form>` sends the fields as
+`application/x-www-form-urlencoded`: the same `name=Ada&age=36` format as a
+query string, but in the body. A form with `enctype="multipart/form-data"`,
+which a file input needs, sends each field as a separate part instead.
+`howdy/form` reads both. `form.read` is designed for `use` like `body.json`,
+and hands the handler a `Form`:
+
+```gleam
+import howdy/form
+
+fn create_signup(ctx: Context) {
+  use fields <- form.read(ctx)
+  controller.text(ctx, "Hello, " <> form.value(fields, "name"))
+}
+```
+
+A request body can only be read once, so `read` turns it into a value and
+every field is then taken from that. Call the value something other than
+`form`, such as `fields`: a local variable named `form` would shadow the
+module.
+
+The fields arrive already decoded, so
+`name=Ada+Lovelace&email=ada%40example.com` gives `"Ada Lovelace"` and
+`"ada@example.com"`. When the body cannot be read, the handler stops and the
+client gets an error:
+
+- Any other content type answers `415` with
+  `{"error":"content type must be application/x-www-form-urlencoded or multipart/form-data"}`.
+  Unlike `body.json`, the content type is checked.
+- A body with invalid encoding answers `400` with
+  `{"error":"request body is not a valid urlencoded form"}`, or a message
+  naming what is wrong with a multipart one.
+- Fields over `body.default_limit` answer `400` with
+  `{"error":"request body too large"}`. `form.read_with_limit(ctx, limit)`
+  picks a different limit for one route.
+- A file answers `400` with `{"error":"this form does not accept files"}`.
+  `form.read` takes no files; see [File uploads](#File-uploads).
+
+### Typed fields
+
+Every form value is a string, so a form needs one more step than JSON:
+turning the strings into a typed input. `howdy/form` has a function for each
+kind of field. Each takes the form, the field's name and a list of rules
+from `howdy/validate`, which is covered [below](#Validation), and they
+chain with `use` to build the value:
+
+```gleam
+import howdy/form.{type Form}
+import howdy/validate
+
+fn signup_input_from_form(fields: Form) -> validate.Result(SignupInput) {
+  use name <- form.string(fields, "name", [])
+  use email <- form.string(fields, "email", [])
+  use age <- form.int(fields, "age", [])
+  validate.ok(SignupInput(name:, email:, age:))
+}
+```
+
+- `string` and `int` require the field. One that is missing reports
+  `is required`, and an `int` that is not a whole number reports
+  `must be an integer`.
+- `optional_string` and `optional_int` give an `Option`, and only run their
+  rules when there is a value.
+- `checkbox` gives a `Bool`. Browsers leave an unticked checkbox out of the
+  submission entirely, so it is `True` when the field is there at all.
+- `strings` gives every value of a field that may repeat, such as a
+  multi-select or a group of checkboxes sharing a name, in the order sent.
+
+Browsers submit an empty input as `name=`, not as a missing field, and the
+helpers differ in what they make of it. `string` keeps the empty string, so
+pair it with `validate.not_empty()`. `int` treats it as missing. The
+`optional_*` helpers treat it as `None`, as `optional_string` does for a
+value its rules leave empty, such as by trimming.
+
+`string`, `int` and the `optional_*` helpers expect their field once. One
+submitted twice reports `must occur only once`, so a request cannot slip a
+second value past the one you checked.
+
+For anything the helpers do not cover there is raw access. `form.get` gives
+the first value of a field as a `Result`, `form.all` gives every value,
+`form.value` gives the first value or `""`, and `form.fields` gives every
+name and value pair in the order submitted.
+
+### File uploads
+
+A form only takes files when you say how many and how large, so a route
+that does not expect uploads cannot be made to fill your disk. Build
+limits with `form.limits()` and pass them to `form.read_with`:
+
+```html
+<form method="post" action="/avatar" enctype="multipart/form-data">
+  <input type="file" name="avatar" accept="image/png,image/jpeg">
+  <button>Upload</button>
+</form>
+```
+
+```gleam
+import simplifile
+
+fn change_avatar(ctx: Context) {
+  let limits =
+    form.limits() |> form.accept_files(max_files: 1, max_file_size: 5_000_000)
+  use fields <- form.read_with(ctx, limits)
+  let avatar = {
+    use avatar <- form.file(fields, "avatar", [
+      form.file_type(["image/png", "image/jpeg"]),
+    ])
+    validate.ok(avatar)
+  }
+  case avatar {
+    Ok(avatar) -> {
+      let assert Ok(Nil) = simplifile.copy_file(avatar.path, avatar_path(ctx))
+      controller.status(ctx, 303)
+      |> response.set_header("location", "/profile")
+    }
+    Error(errors) ->
+      controller.html(ctx, avatar_page(errors))
+      |> controller.with_status(422)
+  }
+}
+```
+
+Each file is an `UploadedFile` with its `file_name`, `content_type`, `size`
+in bytes and the `path` of a temporary file. Files are written to disk as
+they arrive, never held in memory, and deleted once the handler returns,
+even if it crashes. Copy or move a file somewhere lasting before then.
+
+- `file` requires one file, `optional_file` gives an `Option`, and `files`
+  gives every file of an input with `multiple`. Their rules run on each
+  file: `form.max_size(bytes)` and `form.file_type(types)`, which takes
+  exact types or patterns such as `"image/*"`.
+- A file input left empty is not a file, so `optional_file` gives `None`.
+- `form.get_file`, `form.all_files` and `form.uploaded_files` are the raw
+  access for files. `form.fields` holds only the text fields.
+
+The limits are a backstop, not validation. A file over `max_file_size`, one
+too many, or files over `form.max_total_file_size` stop reading and answer
+`400` straight away. For a message beside the input, give the rule a
+smaller size than the limit. `form.max_fields_size` limits everything but
+file contents, and `form.temporary_directory` picks where files go while a
+request uses them, `TMPDIR` by default.
+
+To keep files somewhere lasting, such as an S3 bucket, see
+[Howdy Storage](/docs/storage/overview).
+
+The name and content type are whatever the browser claimed. Check the
+content itself before relying on the type, and never build a path from the
+name; `file_name` has had any directories removed, but that is all.
+
+## Validation
+
+Decoding proves the input has the right shape: `age` is an `Int`. It says
+nothing about whether the values make sense: an `age` of `-4` decodes
+perfectly well. Checking that is the job of `howdy/validate`.
+
+A validator is a function from the decoded input to a `validate.Result`.
+Each field is passed through a list of rules, and the last line builds the
+validated value:
+
+```gleam
+import howdy/validate
+
+pub type Signup {
+  Signup(name: String, email: String, age: Int)
+}
+
+fn validate_signup(input: SignupInput) -> validate.Result(Signup) {
+  use name <- validate.field("name", input.name, [
+    validate.trim(),
+    validate.not_empty(),
+    validate.max_length(50),
+  ])
+  use email <- validate.field("email", input.email, [
+    validate.trim(),
+    validate.email(),
+  ])
+  use age <- validate.field("age", input.age, [validate.min(13)])
+  validate.ok(Signup(name:, email:, age:))
+}
+```
+
+Returning a second type is the point. A `SignupInput` is whatever the client
+sent; a `Signup` can only be made by the validator. Write the rest of your
+app to take a `Signup` and the compiler makes sure nothing unchecked gets
+through.
+
+Two things are worth knowing about how fields are checked:
+
+- Rules run in order and the first failure is that field's error, so a field
+  reports one problem at a time. Rules can also tidy a value: `trim` never
+  fails, it hands the trimmed text to the rules after it, and the trimmed
+  text is what you get back. Put it first.
+- Every field is checked even when an earlier one has failed, so the client
+  hears about all the problems at once, not one per attempt.
+
+### The rules
+
+- `trim()` removes leading and trailing whitespace. It never fails.
+- `not_empty()` rejects `""`.
+- `min_length(n)` and `max_length(n)` bound the length of a string, counted
+  in characters.
+- `email()` is a light check: something before a single `@`, and a dot in
+  the part after it. Only sending a message proves an address is real.
+- `min(n)` and `max(n)` bound an `Int`.
+- `one_of(allowed, show)` requires one of a list of values. `show` turns a
+  value into text for the error message, so for strings pass a function that
+  returns its argument.
+- `custom(check, message)` builds a rule from your own test.
+
+A custom rule is a function that returns `True` for a good value, plus the
+problem to report otherwise. Rules report a
+[`Problem`](/docs/i18n/overview#Validation-messages), not a sentence, so the
+words can be chosen in the reader's language; for a rule of your own, use
+`Custom` with a short code for clients and the message:
+
+```gleam
+import gleam/string
+import howdy/problem
+
+fn no_spaces() -> validate.Rule(String) {
+  validate.custom(
+    fn(value) { !string.contains(value, " ") },
+    problem.Custom("spaces", "must not contain spaces"),
+  )
+}
+```
+
+Messages read best when they finish the sentence "this field...", as the
+built-in ones do: "must not be empty", "must be at least 13".
+
+### Validating JSON
+
+`body.validated` is `body.json` with a validator attached. It decodes, then
+validates, and the handler only runs with the validated value:
+
+```gleam
+fn create_signup(ctx: Context) {
+  use signup <- body.validated(ctx, signup_decoder(), validate_signup)
+  controller.json(ctx, json.object([#("name", json.string(signup.name))]))
+  |> controller.with_status(201)
+}
+```
+
+Decode failures still answer `400`. Validation failures answer `422` with
+every field error:
+
+```json
+{"error":"validation failed","code":"validation","fields":[{"field":"name","code":"blank","message":"must not be empty"},{"field":"email","code":"email","message":"must be a valid email address"},{"field":"age","code":"too_small","message":"must be at least 13","minimum":13}]}
+```
+
+The two statuses mean different things to a client. A `400` says the request
+was malformed, which is a bug in the client. A `422` says the request was
+understood but the values were not acceptable, which is something to show
+the person filling in the form. The `fields` list is made for that: match
+each `field` to an input and show its `message` beside it, or the words for
+its `code` in the reader's language.
+
+If you have a value from somewhere other than a JSON body,
+`validate.check(ctx, result, next)` does the same job for any
+`validate.Result`.
+
+### Validating HTML forms
+
+The field helpers take the same rules as `validate.field`, so a form does
+not need a separate input type and validator. Give each field its rules and
+build the validated value directly:
+
+```gleam
+fn signup_from_form(fields: Form) -> validate.Result(Signup) {
+  use name <- form.string(fields, "name", [
+    validate.trim(),
+    validate.not_empty(),
+    validate.max_length(50),
+  ])
+  use email <- form.string(fields, "email", [
+    validate.trim(),
+    validate.email(),
+  ])
+  use age <- form.int(fields, "age", [validate.min(13)])
+  validate.ok(Signup(name:, email:, age:))
+}
+```
+
+As with `validate.field`, every field is checked even when an earlier one
+has failed, so all the errors come back together.
+
+Field problems are returned as errors, not sent as responses, because a
+browser form wants a page back, not JSON. Call the validator yourself and
+decide what to render:
+
+```gleam
+fn create_signup(ctx: Context) {
+  use fields <- form.read(ctx)
+  case signup_from_form(fields) {
+    Ok(signup) -> {
+      save(signup)
+      controller.status(ctx, 303)
+      |> response.set_header("location", "/welcome")
+    }
+    Error(errors) ->
+      controller.html(ctx, signup_page(fields, errors))
+      |> controller.with_status(422)
+  }
+}
+```
+
+On success, redirect with `303`. The browser follows it with a `GET`, so
+refreshing the next page does not post the form a second time.
+
+On failure, render the form again with status `422`, passing in what the
+visitor typed and the errors. Two functions do the lookups for one input:
+`form.value(fields, "email")` is what was submitted, or `""`, and
+`form.error(errors, "email")` is that field's problem, if it has one.
+`problem.message` puts a problem into words: `problem.english()` gives
+English, and `problem.translated(locale)` the words for the request's
+[locale](/docs/i18n/overview).
+
+```gleam
+import gleam/option.{None, Some}
+import howdy/problem
+import lustre/attribute
+import lustre/element/html
+
+fn email_input(fields: Form, errors: List(validate.FieldError)) {
+  html.label([], [
+    html.text("Email"),
+    html.input([
+      attribute.type_("email"),
+      attribute.name("email"),
+      attribute.value(form.value(fields, "email")),
+    ]),
+    case form.error(errors, "email") {
+      Some(found) ->
+        html.p([attribute.class("error")], [
+          html.text(problem.message(found, problem.english())),
+        ])
+      None -> html.text("")
+    },
+  ])
+}
+```
+
+Putting the typed values back into the form saves the visitor from starting
+again. They are untrusted text, so build the page with something that
+escapes them, such as Lustre's `attribute.value`, not by joining strings.
+
+For a form endpoint that is not a page, such as one posted by a script,
+`form.validated(ctx, signup_from_form)` is the form's `body.validated`: a
+validation failure answers the same JSON `422`, and the handler only runs
+with the validated value.
+
+If an API route and a browser form accept the same thing, keep the rules in
+one place. Build a `SignupInput` from the form with no rules, then pass it
+through the validator the JSON route uses:
+
+```gleam
+signup_input_from_form(fields) |> result.try(validate_signup)
+```
+
+### Cross-site requests
+
+A form post is the one kind of write a page on another site can make a
+visitor's browser send to you, with their cookies attached and no CORS
+preflight in the way. If your forms act for a signed-in visitor, protect
+them with the [CSRF middleware](/docs/middleware/csrf).
+
+## Testing forms
+
+`testing.post` sends a JSON body, and `testing.field_errors` decodes a `422`
+response back into a list of field errors:
+
+```gleam
+import gleam/json
+import howdy/problem
+import howdy/service.{FieldError}
+import howdy/testing
+
+pub fn signup_rejects_children_test() {
+  let res =
+    testing.post(
+      "/signups",
+      json.object([
+        #("name", json.string("Ada")),
+        #("email", json.string("ada@example.com")),
+        #("age", json.int(9)),
+      ]),
+    )
+    |> testing.send(app())
+
+  assert res.status == 422
+  assert testing.field_errors(res)
+    == Ok([FieldError("age", problem.TooSmall(13))])
+}
+```
+
+For a `400`, `testing.error(res)` gives you the message.
+
+`testing.post_form` posts an HTML form as a browser would. It takes the
+fields as name and value pairs, encodes them, and sets the content type:
+
+```gleam
+pub fn signup_form_redirects_test() {
+  let res =
+    testing.post_form("/signups", [
+      #("name", "Ada Lovelace"),
+      #("email", "ada@example.com"),
+      #("age", "36"),
+    ])
+    |> testing.send(app())
+
+  assert res.status == 303
+}
+```
+
+Repeat a name to send a field more than once, and leave a checkbox out to
+send it unticked. `testing.form_body(pairs)` sets the same body on a request
+built another way, such as a `PUT`. If the app uses the
+[CSRF middleware](/docs/middleware/csrf), add an `origin` header as well, or
+the post answers `403`.
+
+A validator is a plain function, so its rules can also be tested directly,
+with no request at all:
+
+```gleam
+pub fn name_is_trimmed_test() {
+  let input = SignupInput(name: "  Ada ", email: "ada@example.com", age: 36)
+  let assert Ok(signup) = validate_signup(input)
+  assert signup.name == "Ada"
+}
+```
+
+`testing.post_multipart` posts a form with files. It takes the fields and a
+list of `testing.FormFile`s, and the handler reads real temporary files:
+
+```gleam
+pub fn avatar_upload_test() {
+  let res =
+    testing.post_multipart("/avatar", [], [
+      testing.FormFile("avatar", "me.png", "image/png", <<137, 80, 78, 71>>),
+    ])
+    |> testing.send(app())
+
+  assert res.status == 303
+}
+```
+
+The same goes for one that takes a `Form`. `form.from_fields` makes a form
+from name and value pairs:
+
+```gleam
+pub fn age_must_be_a_number_test() {
+  let fields =
+    form.from_fields([
+      #("name", "Ada"),
+      #("email", "ada@example.com"),
+      #("age", "old"),
+    ])
+
+  assert signup_from_form(fields)
+    == Error([FieldError("age", problem.NotInteger)])
+}
+```
+
+`form.with_files` adds files to such a form, each an `UploadedFile` you
+build yourself, so a validator's file rules need no request either.

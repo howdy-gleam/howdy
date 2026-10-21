@@ -1,0 +1,17 @@
+name = "howdy_live_example"
+version = "0.1.0"
+gleam = ">= 1.18.0"
+description = "Themed pages and live server components with howdy_ui"
+
+[dependencies]
+gleam_stdlib = ">= 1.0.0 and < 2.0.0"
+gleam_erlang = ">= 1.3.0 and < 2.0.0"
+gleam_otp = ">= 1.3.0 and < 2.0.0"
+lustre = ">= 5.7.0 and < 6.0.0"
+sketch = ">= 4.2.0 and < 5.0.0"
+howdy = { path = "../.." }
+howdy_ui = { path = "../../ui" }
+
+[dev_dependencies]
+howdy_dev = { path = "../../howdy_dev" }
+gleeunit = ">= 1.0.0 and < 2.0.0"

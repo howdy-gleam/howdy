@@ -1,0 +1,74 @@
+# Database browser
+
+Register a Gloo Repo, and the admin shows its tables:
+
+```gleam
+admin.new()
+|> admin.database(db)
+```
+
+It works on PostgreSQL and SQLite. Registering
+[auth](/docs/admin/users) registers its Repo too, so an app with auth can
+leave this out unless its own tables live in another database.
+
+The first page names the database and lists the packages
+[`howdy/migration`](/docs/database/migrations) has applied. The data pages,
+under `/_howdy/data`, list every table.
+
+## The grid
+
+Each table has a grid of its rows. It:
+
+- searches every column at once
+- filters by column with equals, not equals, contains, greater than, less
+  than, is null and is not null
+- sorts by any column
+- pages at a size you choose
+
+All of that runs in the database, so a large table is fine.
+
+The grid follows the database. A row your app, another tab or any other
+client writes appears on its own, marked `changed` for a few seconds. There
+is nothing to refresh.
+
+## Editing rows
+
+Rows can be inserted, edited and deleted. A row is found by its primary
+key, or by `rowid` on SQLite and `ctid` on PostgreSQL when the table has
+none.
+
+Every value is shown and edited as text, and the database converts it:
+PostgreSQL through a `CAST` to the column's type, SQLite by the column's
+affinity. In an insert form, a column left empty takes its default, and the
+`NULL` box stores a null. In an edit form, every column is written.
+
+A write the database refuses, such as one that breaks a constraint, shows
+the database's own message. That is useful here, but it is exactly what a
+real app should never show; see
+[Transactions and queries](/docs/database/transactions).
+
+## How it follows changes
+
+Each open grid is a [live component](/docs/ui/live-components) on the
+server. It runs its query again when the table may have changed, compares
+the result with the page it showed, and marks what differs.
+
+On **PostgreSQL**, the grid installs a trigger named `howdy_admin_notify`
+on the table it shows. After any insert, update, delete or truncate, the
+trigger sends the table's name on the `howdy_admin` channel with
+`pg_notify`, and the grid, listening on one extra connection with
+[`postgres.listen`](/docs/database/overview#Listening-for-changes), reloads
+at once. It also checks every 15 seconds, in case a notification was missed
+while that connection reconnected.
+
+The trigger only notifies, and never touches a row. `howdy/migration`
+ignores triggers with this name when it checks a package's schema, so your
+app starts as before. To put the database back exactly as it was, call
+`admin.remove_notify_triggers(repo)`, or run:
+
+```sql
+DROP FUNCTION howdy_admin_notify() CASCADE;
+```
+
+On **SQLite** there is no way to hear about changes, so the grid checks
+once a second. That is fine for a development tool with a few tabs open.

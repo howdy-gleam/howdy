@@ -1,0 +1,207 @@
+# OpenAPI documents
+
+`howdy_openapi` is an optional package that documents a JSON API as an
+[OpenAPI 3.1](https://spec.openapis.org/oas/v3.1.0) document, and serves an
+interactive reference for it.
+
+```sh
+gleam add howdy_openapi@1
+```
+
+Gleam cannot look inside a decoder or a handler, so there is nothing to read
+a document from after the fact. Instead you describe each value once, as a
+[schema](/docs/openapi/schemas), and that one description is the decoder a
+handler reads with, the encoder a response writes with, and what the
+document shows. The document cannot drift from what the server really
+accepts, because the server uses it.
+
+## Endpoints
+
+An endpoint is a handler that declares its inputs with schemas. Mount it on
+an ordinary controller with `endpoint.get`, `endpoint.post`, `endpoint.put`,
+`endpoint.patch` or `endpoint.delete`:
+
+```gleam
+import howdy/controller
+import howdy/openapi/endpoint.{type Endpoint}
+import howdy/openapi/schema
+import howdy/service
+
+pub fn controller() -> controller.Controller {
+  controller.new("user")
+  |> endpoint.get("/:id", by_id())
+  |> endpoint.post("/", create())
+}
+
+fn by_id() -> Endpoint(Nil) {
+  use <- endpoint.describe([
+    endpoint.summary("Find a user"),
+    endpoint.response(200, "The user", user.user()),
+    endpoint.error(404, "No user has this id"),
+  ])
+  use id <- endpoint.path("id", schema.int())
+  use ctx <- endpoint.handle
+  user_service.find(id)
+  |> service.respond(ctx, schema.to_json(_, user.user()))
+}
+
+fn create() -> Endpoint(Nil) {
+  use <- endpoint.describe([
+    endpoint.summary("Create a user"),
+    endpoint.response(201, "The new user", user.user()),
+  ])
+  use input <- endpoint.body(user.new_user())
+  use ctx <- endpoint.handle
+  user_service.create(input)
+  |> service.created(ctx, schema.to_json(_, user.user()))
+}
+```
+
+The inputs are:
+
+- `endpoint.path(name, schema)`: a `:name` or `*name` path segment.
+- `endpoint.query(name, schema)` and `endpoint.optional_query`: a query
+  parameter. With `schema.list`, every occurrence of the key, as in
+  `?tag=a&tag=b`.
+- `endpoint.header(name, schema)` and `endpoint.optional_header`.
+- `endpoint.body(schema)`: a JSON body, up to one mebibyte;
+  `endpoint.body_with_limit` takes another limit.
+
+Each runs in order before `endpoint.handle`, and stops the request if it
+fails:
+
+- A missing or malformed parameter answers `400` with a message such as
+  `{"error":"parameter id must be an integer"}`, as `howdy/param` and
+  `howdy/query` do.
+- A body that cannot be read or is not JSON answers `400`.
+- A body that does not match its schema answers `422` with every field
+  error, as `howdy/validate` does:
+  `{"error":"validation failed","code":"validation","fields":[{"field":"age","code":"too_small","message":"must be at least 13","minimum":13}]}`.
+  Nested fields are named by path, such as `address.city` or `tags.0`.
+
+An endpoint is documented by running its inputs with placeholder values,
+such as `0` for an integer. So do the work inside `endpoint.handle`, never
+between the inputs, and documenting an endpoint will never run it.
+
+Controller guards and middleware work as they do for any route. An endpoint
+on a guarded controller is an `Endpoint(guard)`, and its handler sees
+`ctx.guard`. Gleam cannot tell the guard's type inside the handler, so name
+it when you use `ctx.guard`:
+
+```gleam
+fn mine() -> Endpoint(Principal) {
+  use <- endpoint.describe([endpoint.security("session")])
+  use ctx: GuardedContext(Principal) <- endpoint.handle
+  controller.text(ctx, ctx.guard.user.email)
+}
+```
+
+`endpoint.wrap` runs middleware around one endpoint.
+
+## Describing an endpoint
+
+`endpoint.describe` takes a list of docs:
+
+- `summary` and `description`.
+- `response(status, description, schema)` for a JSON response. Encode the
+  response with the same schema, through `schema.to_json`.
+- `empty_response(status, description)` for one without a body, such as
+  `204`.
+- `error(status, description)` for Howdy's error body, the one
+  `service.error_response` sends.
+- `tag(name)`, to group endpoints. Without one, an endpoint is tagged with
+  the first fixed segment of its path, such as `user`.
+- `operation_id(id)`, which client generators use as a function name.
+  Without one it is made from the method and path: `get_user_by_id` for
+  `GET /user/:id`.
+- `security(scheme)`, naming a scheme declared on the document.
+- `deprecated()`.
+
+Endpoints with inputs document their `400` response, and endpoints with a
+body their `422`, without being told. An endpoint that declares no response
+is documented as answering `200`.
+
+## Serving the document
+
+```gleam
+import howdy/openapi
+
+let spec =
+  openapi.new(title: "Users API", version: "1.0.0")
+  |> openapi.description("A small user directory.")
+  |> openapi.bearer_auth("bearer")
+
+howdy.new()
+|> howdy.controller(user.controller())
+|> openapi.serve(spec, at: "/openapi.json")
+|> openapi.reference(at: "/docs", document: "/openapi.json")
+|> howdy.start
+```
+
+`openapi.serve` builds the document once, from the controllers mounted
+before it, so call it after them. Only routes added as endpoints appear:
+ordinary controller routes stay out, so you choose what you publish.
+
+`openapi.reference` serves an interactive API reference, drawn by
+[Scalar](https://scalar.com). The page loads Scalar from the jsDelivr CDN,
+so a browser viewing it needs to reach `cdn.jsdelivr.net`.
+
+With [Howdy Admin](/docs/admin/api) mounted, the admin finds the document
+too, and lets you call each endpoint, signed in as any user.
+
+`openapi.document(spec, app)` gives the document as JSON, to write to a file
+for a client generator or check in a test.
+
+Security schemes are declared on the spec with `openapi.bearer_auth`,
+`openapi.api_key_header` and `openapi.api_key_cookie`. `openapi.require`
+makes one apply to every endpoint. These only document authentication: a
+guard or middleware still has to enforce it.
+
+Building a document panics, when the app starts, if an endpoint reads a
+path parameter its route does not capture, two different schemas share a
+name, or two endpoints share an operation id.
+
+## Versions
+
+An app with a [version group](/docs/middleware/versioning) gets one
+document per version. Each holds the app's unversioned endpoints, which
+answer whatever the version, and the version's own, including those it falls
+back to. Where a version overrides a route, its own endpoint is the one
+documented, as it is the one that answers. The document's `info.version` is
+the spec's version followed by the group's name in parentheses, such as
+`1.0.0 (v2)`, so both the API version and the group it describes are visible.
+
+```gleam
+let api =
+  version.new(version.path())
+  |> version.default("v1")
+  |> version.add("v1", [user_v1.controller()])
+  |> version.add("v2", [user_v2.controller()])
+
+howdy.new()
+|> howdy.versions(api)
+|> openapi.serve(spec, at: "/openapi.json")
+|> openapi.reference(at: "/docs", document: "/openapi.json")
+```
+
+`serve` puts each version's document beside the path it is given:
+`/openapi/v1.json` and `/openapi/v2.json`. The path itself serves the
+default version's document, or the newest version's when there is no
+default. The reference page offers every version, opening on that one.
+
+How a client asks for a version is documented the way OpenAPI expects:
+
+- `version.path()`: paths start with the version, as in `/v2/users`.
+- `version.header(name)`: each versioned operation takes the header,
+  restricted to that version's name. It is required unless the version is
+  the default.
+- `version.accept(vendor)`: JSON responses have the vendor media type, such
+  as `application/vnd.howdy.v2+json`, so clients send it in `accept`.
+- `version.custom(fn)`: the function cannot be described, so paths are
+  shown as they are. Say how to choose a version in `openapi.description`.
+
+`openapi.version_document(spec, app, "v2")` gives one version's document as
+JSON, and `openapi.versions(app)` lists the versions.
+
+See [`examples/openapi`](https://github.com/howdy-gleam/howdy/tree/v1.0.0/examples/openapi)
+for a complete API.

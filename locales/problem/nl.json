@@ -1,0 +1,18 @@
+{
+  "@@locale": "nl",
+  "@@x-review": "machine translation, not yet reviewed by a native speaker",
+  "blank": "mag niet leeg zijn",
+  "email": "moet een geldig e-mailadres zijn",
+  "file_too_large": "mag niet groter zijn dan {maximum}",
+  "file_type": "moet van een van de volgende typen zijn: {allowed}",
+  "integer": "moet een geheel getal zijn",
+  "one_of": "moet een van de volgende waarden zijn: {allowed}",
+  "repeated": "mag maar één keer voorkomen",
+  "required": "is verplicht",
+  "too_few_items": "moet minstens {minimum, plural, one {# item} other {# items}} bevatten",
+  "too_large": "mag hoogstens {maximum, number} zijn",
+  "too_long": "mag hoogstens {maximum, plural, one {# teken} other {# tekens}} bevatten",
+  "too_many_items": "mag hoogstens {maximum, plural, one {# item} other {# items}} bevatten",
+  "too_short": "moet minstens {minimum, plural, one {# teken} other {# tekens}} bevatten",
+  "too_small": "moet minstens {minimum, number} zijn"
+}

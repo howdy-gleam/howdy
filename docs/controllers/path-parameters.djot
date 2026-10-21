@@ -1,0 +1,143 @@
+# Path parameters
+
+A path parameter is a piece of the URL that varies: the `42` in `/users/42`.
+You name it in the route's pattern, the [router](/docs/controllers/router)
+captures whatever the request has in that position, and the handler reads it
+by name.
+
+The `howdy/param` module does the reading. Like `howdy/query`, each function
+hands your handler a typed value and answers `400` on your behalf when the
+value has the wrong shape.
+
+## Declaring parameters
+
+A segment that starts with `:` captures one segment of the path. A final
+segment that starts with `*` captures everything that is left:
+
+```gleam
+import howdy/controller
+
+pub fn user_controller() {
+  controller.new("users")
+  |> controller.get("/:id", show_user)
+  |> controller.get("/:id/orders/:order_id", show_order)
+  |> controller.get("/:id/files/*path", show_file)
+}
+```
+
+A pattern can have as many `:name` segments as it needs, each with its own
+name. It can have one `*name`, and only at the end.
+
+## Reading parameters
+
+There is a function for each type, and both are designed for `use`:
+
+```gleam
+import howdy/controller.{type Context}
+import howdy/param
+
+fn show_order(ctx: Context) {
+  use id <- param.int(ctx, "id")
+  use order_id <- param.int(ctx, "order_id")
+  // Both are Ints here.
+  order_service.find(id, order_id)
+  |> service.respond(ctx, order_to_json)
+}
+```
+
+- `param.string` gives the captured text as it is.
+- `param.int` parses it as a whole number.
+
+When the value does not parse, the handler stops and the client gets a `400`
+with a JSON body. A request for `/users/abc` answers:
+
+```json
+{"error":"parameter id must be an integer"}
+```
+
+Unlike a query string, a path parameter cannot be absent or repeated: if the
+segment were missing, the route would not have matched. So there are no
+optional or default forms. The one way to see
+`{"error":"missing parameter id"}` is to ask for a name that is not in the
+route's pattern, which means the handler and the pattern disagree. Treat it
+as a bug, not as bad input.
+
+## Wildcards
+
+A `*name` parameter is read the same way. It holds the rest of the path,
+joined with `/`:
+
+```gleam
+fn show_file(ctx: Context) {
+  use path <- param.string(ctx, "path")
+  controller.text(ctx, "You asked for " <> path)
+}
+```
+
+A request for `/users/7/files/reports/june.pdf` gives `reports/june.pdf`. A
+wildcard also matches when nothing is left, so `/users/7/files` reaches the
+same handler with `path` set to `""`.
+
+Be careful with a wildcard that names a file. Never join it to a directory
+and read the result: a path such as `../../etc/passwd` would walk out of the
+directory. To serve files, use `howdy/static`, which checks for this.
+
+## What a value contains
+
+A parameter is the segment exactly as it appeared in the URL. It is not
+percent-decoded, so a request for `/users/ada%20lovelace` gives
+`"ada%20lovelace"`, not `"ada lovelace"`. When a parameter may hold more
+than letters, digits and hyphens, decode it yourself:
+
+```gleam
+import gleam/uri
+
+fn show_tag(ctx: Context) {
+  use raw <- param.string(ctx, "tag")
+  case uri.percent_decode(raw) {
+    Ok(tag) -> controller.text(ctx, tag)
+    Error(Nil) -> controller.status(ctx, 400)
+  }
+}
+```
+
+A parameter never contains a `/`, because the path is split on `/` before
+matching. Only a wildcard can span several segments.
+
+## Without a continuation
+
+`param.string` and `param.int` answer the request themselves, so they only
+work where a response can be returned. Anywhere else, such as inside a
+[guard](/docs/controllers/guards), use `controller.param`. It returns a
+plain `Result`:
+
+```gleam
+fn owns_account(ctx: GuardedContext(User)) -> service.Result(Nil) {
+  case controller.param(ctx, "id") {
+    Ok(id) if id == ctx.guard.account_id -> Ok(Nil)
+    _ -> Error(service.Forbidden)
+  }
+}
+```
+
+## Parameter or query string?
+
+Use a path parameter for what the URL identifies: which user, which order.
+Use the [query string](/docs/controllers/query-strings) for how to show it:
+the page number, the sort order, a filter. A good test is whether the value
+can be left out. If `/users` still makes sense without it, it belongs in the
+query string.
+
+## Testing parameters
+
+Put the value in the path, as a client would:
+
+```gleam
+import howdy/testing
+
+pub fn user_id_must_be_a_number_test() {
+  let res = testing.get("/users/abc") |> testing.send(app())
+  assert res.status == 400
+  assert testing.error(res) == Ok("parameter id must be an integer")
+}
+```

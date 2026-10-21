@@ -1,0 +1,193 @@
+# Rate limiting
+
+A rate limit caps how many requests one client may make in a period of
+time. It protects your app from a script gone wrong, from someone guessing
+passwords, and from one heavy user slowing things down for the rest.
+
+`howdy/rate_limit` is [middleware](/docs/middleware/overview). You create a
+limiter, which holds the counts, and attach it with a choice of how to tell
+clients apart.
+
+## A first limit
+
+```gleam
+import howdy
+import howdy/rate_limit
+
+pub fn main() {
+  let limiter = rate_limit.fixed_window(limit: 100, per_seconds: 60)
+
+  howdy.new()
+  |> howdy.middleware(rate_limit.by_ip(limiter))
+  |> howdy.controller(user_controller())
+  |> howdy.start
+}
+```
+
+Each IP address may now make 100 requests a minute. Responses to allowed
+requests say how the client is doing:
+
+```
+x-ratelimit-limit: 100
+x-ratelimit-remaining: 99
+x-ratelimit-reset: 42
+```
+
+`x-ratelimit-reset` is the number of seconds until the count goes back up.
+Request 101 is refused with `429`, a `retry-after` header giving the seconds
+to wait, and the usual [error body](/docs/controllers/services):
+
+```json
+{"error":"too many requests","code":"too_many_requests"}
+```
+
+## Create limiters at startup
+
+A limiter's counts live in a table owned by the process that created it,
+with a small cleanup process beside it. Create each limiter once, in `main`
+or whatever builds your app, and share it. Never create one inside a
+handler or a middleware function: that would make a fresh, empty limiter for
+every request, and nothing would ever be limited.
+
+## Two kinds of limiter
+
+`fixed_window(limit:, per_seconds:)` counts requests in fixed blocks of
+time, and starts again from zero at the end of each. It is simple to explain
+to the people using your API. Its weakness is the boundary: a client can use
+a whole allowance at the end of one window and another at the start of the
+next, so briefly up to twice the limit.
+
+`token_bucket(capacity:, refill_per_second:)` gives each client a bucket of
+tokens. A request takes one; tokens come back at a steady rate, up to the
+capacity. That allows a short burst while holding the long-run rate, which
+suits real traffic, where a page load makes several requests at once:
+
+```gleam
+let writes = rate_limit.token_bucket(capacity: 10, refill_per_second: 1)
+```
+
+A client here may make 10 requests at once, then one a second after that.
+
+## Telling clients apart
+
+- `by_ip` uses the address the connection came from.
+- `by_header` uses the value of a request header, such as an API key.
+- `by` takes your own function from the context to an `Option(String)`.
+
+Behind a proxy or load balancer, every connection comes from the proxy, so
+`by_ip` would put all your visitors in one bucket. Use `by_header` with the
+header your proxy sets for the client's address instead. Only trust that
+header if the proxy always overwrites it; otherwise clients can set it
+themselves and dodge the limit.
+
+A request with no key is *not limited*. That means a missing header for
+`by_header`, or `None` from your function. So limit by API key behind
+middleware that requires the key, not instead of it.
+
+`by` lets you limit on anything in the request:
+
+```gleam
+import gleam/http/request
+import gleam/option
+
+let by_key_and_path =
+  rate_limit.by(limiter, fn(ctx) {
+    request.get_header(ctx.request, "x-api-key")
+    |> option.from_result
+    |> option.map(fn(key) { key <> " " <> ctx.request.path })
+  })
+```
+
+## Different limits for different routes
+
+A limiter can go at any of the three middleware levels, and you can use
+several. A common setup is a generous limit on everything and a strict one
+on the routes that are expensive or sensitive:
+
+```gleam
+import howdy/middleware
+
+let api = rate_limit.fixed_window(limit: 100, per_seconds: 60)
+let sign_in = rate_limit.token_bucket(capacity: 5, refill_per_second: 1)
+
+let sessions =
+  controller.new("sessions")
+  |> controller.post(
+    "/",
+    create_session |> middleware.wrap(rate_limit.by_ip(sign_in)),
+  )
+
+howdy.new()
+|> howdy.middleware(rate_limit.by_ip(api))
+|> howdy.controller(sessions)
+```
+
+A sign-in request counts against both. When limiters nest like this, the
+`x-ratelimit-*` headers on the response describe the innermost one, as the
+most specific limit for that route.
+
+Each limiter keeps its own counts, so use a separate limiter for each rule.
+Two routes sharing one limiter share one allowance.
+
+## Memory and the identity cap
+
+Every distinct key takes a row in the limiter's table. To stop an attacker
+filling memory by inventing keys, each limiter tracks at most 100,000 of
+them. `max_identities` changes that:
+
+```gleam
+rate_limit.fixed_window(limit: 100, per_seconds: 60)
+|> rate_limit.max_identities(1_000_000)
+```
+
+When the table is full, clients already in it are limited as normal, but a
+*new* key is refused with `429` and an `x-ratelimit-saturated: true` header,
+until old rows expire. That is a deliberate trade: the limiter cannot be
+switched off by flooding it, at the price of turning away new clients while
+it is full. Size the cap for the number of clients you really expect. Rows
+are swept at least once a minute.
+
+Counts are held in memory on one node. They are lost on restart, and if you
+run several servers each keeps its own counts, so the effective limit is
+multiplied by the number of servers.
+
+## Limiting things that are not requests
+
+`rate_limit.check(limiter, key)` records a hit and returns the decision,
+with no middleware involved. Use it to limit by something only your handler
+knows, such as the email address in a password reset:
+
+```gleam
+case rate_limit.check(reset_limiter, email) {
+  rate_limit.Allowed(..) -> send_reset_email(email)
+  rate_limit.Denied(retry_after_seconds:, ..) ->
+    Error(service.TooManyRequests(retry_after_seconds))
+  rate_limit.Saturated(retry_after_seconds:) ->
+    Error(service.TooManyRequests(retry_after_seconds))
+}
+```
+
+## Testing rate limits
+
+Requests built by `howdy/testing` have no client address, and `by_ip` does
+not limit a request without one. Give them one with `testing.from_ip`:
+
+```gleam
+import howdy/testing
+
+pub fn third_request_is_refused_test() {
+  let app = app_with_limit(2)
+  let hit = fn() {
+    testing.get("/") |> testing.from_ip("10.0.0.1") |> testing.send(app)
+  }
+
+  assert hit().status == 200
+  assert hit().status == 200
+  assert hit().status == 429
+}
+```
+
+Build a fresh app, and so a fresh limiter, in each test. A limiter shared
+between tests carries its counts from one to the next. To test time passing
+without sleeping, `rate_limit.check_at` takes the current time in
+milliseconds as an argument.

@@ -1,0 +1,28 @@
+name = "howdy_telemetry"
+version = "1.0.0"
+gleam = ">= 1.18.0"
+description = "OpenTelemetry for Howdy apps: traces over OTLP, structured logs, and a recorder the dev admin shows"
+licences = ["Apache-2.0"]
+repository = { type = "github", user = "howdy-gleam", repo = "howdy", path = "telemetry", tag-prefix = "howdy_telemetry-" }
+links = [{ title = "Website", href = "https://tryhowdy.dev" }]
+target = "erlang"
+
+[dependencies]
+gleam_stdlib = ">= 1.0.0 and < 2.0.0"
+gleam_erlang = ">= 1.3.0 and < 2.0.0"
+howdy = { path = ".." }
+opentelemetry_api = ">= 1.5.0 and < 2.0.0"
+opentelemetry = ">= 1.7.0 and < 2.0.0"
+opentelemetry_exporter = ">= 1.10.0 and < 2.0.0"
+
+[dev_dependencies]
+ewe = ">= 8.0.0 and < 9.0.0"
+gleeunit = ">= 1.0.0 and < 2.0.0"
+gleam_http = ">= 4.4.0 and < 5.0.0"
+logging = ">= 1.5.0 and < 2.0.0"
+
+[erlang]
+# The OTLP exporter needs inets and ssl running before the SDK starts, or it
+# warns at boot. Listing them here starts them first.
+extra_applications = ["inets", "ssl"]
+application_start_module = "howdy_telemetry_app"

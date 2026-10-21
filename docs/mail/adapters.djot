@@ -1,0 +1,222 @@
+# Adapters
+
+An adapter is what delivers a message. `howdy_mail` comes with four:
+
+- `howdy/mail/smtp` delivers over SMTP, to your provider's relay or a
+  local Mailpit. Configure it with `smtp.from_env()`, which reads
+  `SMTP_URL`, or `smtp.from_url(url)`.
+- `howdy/mail/resend` delivers with [Resend](https://resend.com)'s HTTP
+  API. Configure it with `resend.from_env()`, which reads
+  `RESEND_API_KEY`, or `resend.new(key)`.
+- `howdy/mail/sendgrid` delivers with [SendGrid](https://sendgrid.com)'s
+  v3 Mail Send API. Configure it with `sendgrid.from_env()`, which reads
+  `SENDGRID_API_KEY`, or `sendgrid.new(key)`.
+- `howdy/mail/outbox` delivers nowhere: it keeps the message. See
+  [Outbox and previews](/docs/mail/development).
+
+Each one gives you an adapter to put in a mailer:
+
+```gleam
+import howdy/mail
+import howdy/mail/resend
+
+pub fn mailer() -> mail.Mailer {
+  let assert Ok(config) = resend.from_env()
+  mail.mailer(resend.adapter(config))
+  |> mail.default_from(mail.named("Acme", "hello@acme.test"))
+}
+```
+
+The rest of your app only sees the `Mailer`, so changing provider changes
+one function.
+
+## SMTP
+
+```gleam
+import howdy/mail/smtp
+
+let assert Ok(config) = smtp.from_env()
+let adapter = smtp.adapter(config)
+```
+
+`SMTP_URL` looks like `smtp://user:password@smtp.example.com:587`.
+Percent-encode an `@` in the user name as `%40`. `from_env` returns
+`Error(smtp.MissingUrl(variable: "SMTP_URL"))` when it is unset, and
+`Error(smtp.InvalidUrl)` when it cannot be read. The URL is not repeated in
+the error, because it may hold a password.
+
+The scheme chooses the encryption:
+
+- `smtps://` is TLS from the first byte, on port 465 unless the URL gives
+  another.
+- `smtp://` connects in plain text and requires an upgrade with
+  `STARTTLS`, on port 587 unless the URL gives another. A server that does
+  not offer the upgrade is refused rather than used unencrypted.
+- `smtp://` to a loopback address, such as `localhost`, or to a name
+  without a dot, such as a Compose service called `mailpit`, has TLS off.
+
+Certificates are checked against the system's CAs and the host name. Add
+`?tls=none`, `?tls=starttls` or `?tls=implicit` to the URL to choose
+yourself.
+
+The configuration can also be built in code:
+
+```gleam
+smtp.new("smtp.example.com")
+|> smtp.port(2525)
+|> smtp.credentials(username: "apikey", password: password)
+|> smtp.tls(smtp.StartTls(verify: True))
+|> smtp.timeout(5000)
+```
+
+`smtp.tls` takes `smtp.NoTls`, `smtp.StartTls(verify:)` or
+`smtp.ImplicitTls(verify:)`. Only turn `verify` off for a server you
+control. Without `credentials`, no authentication is tried. `timeout` is
+how long to wait for the connection to open, 10 seconds by default (once
+connected, each reply is waited for up to gen_smtp's own limit of twenty
+minutes), and `helo` sets the name this host gives in `EHLO`.
+
+Each send opens a connection, delivers one message and closes it, in the
+process that called `mail.send`. An SMTP `4xx` reply is `Unavailable`, and
+a `5xx` is `Refused`.
+
+A temporary failure, which is an `Unavailable` one, can be tried again
+before it is returned:
+
+```gleam
+smtp.from_env()
+|> result.map(smtp.retries(_, 2))
+|> result.map(smtp.backoff(_, 1000))
+```
+
+`retries` is how many more attempts to make, 0 by default, and `backoff`
+is how long to wait before the first retry in milliseconds, 500 by default;
+each retry after it waits twice as long. A `Refused` message is never tried
+again. Every attempt happens in the calling process, so a send can take up
+to `retries + 1` times `timeout`, plus the waits in between: see
+"Sending is synchronous" in the [overview](/docs/mail/overview).
+
+## Resend
+
+```gleam
+import howdy/mail/resend
+
+let assert Ok(config) = resend.from_env()
+let adapter = resend.adapter(config)
+```
+
+The sender's domain must be verified with Resend. Each message's id is sent
+as the `Idempotency-Key`, so retrying the same message after a timeout does
+not send it twice.
+
+Resend only allows letters, digits, `_` and `-` in tags, so other
+characters in a `mail.tag` become `_`: `auth.sign_in` arrives as
+`auth_sign_in`.
+
+## SendGrid
+
+```gleam
+import howdy/mail/sendgrid
+
+let assert Ok(config) = sendgrid.from_env()
+let adapter = sendgrid.adapter(config)
+```
+
+SendGrid needs at least one `To` recipient, and refuses an address that
+appears twice, so an address already in `To` is dropped from `Cc` and
+`Bcc`. Tags are sent as categories, of which SendGrid keeps the first ten.
+The message's id is sent as the custom argument `howdy_id`.
+
+For the EU region, change the base URL:
+
+```gleam
+sendgrid.new(api_key)
+|> sendgrid.base_url("https://api.eu.sendgrid.com")
+```
+
+Both HTTP adapters wait 15 seconds by default; change it with
+`resend.timeout` or `sendgrid.timeout`, in milliseconds. A `408`, `429` or `5xx`
+response is `Unavailable`, and any other failure is `Refused`.
+
+## Staging and fallbacks
+
+Adapters wrap other adapters.
+
+`mail.redirect_all` sends everything to one inbox, for a staging server
+that must not mail real people:
+
+```gleam
+smtp.adapter(config)
+|> mail.redirect_all(to: mail.address("staging@acme.test"))
+```
+
+`Cc` and `Bcc` are dropped, and the intended recipients are kept in an
+`X-Original-To` header.
+
+`mail.fallback` tries a second adapter when the first is `Unavailable`:
+
+```gleam
+mail.fallback(resend.adapter(resend_config), smtp.adapter(smtp_config))
+```
+
+A message the first adapter `Refused` is not tried again, since the second
+would most likely refuse it too.
+
+## Writing your own
+
+An adapter is a name and a function from a checked `mail.Outgoing` to a
+`mail.Receipt`:
+
+```gleam
+import gleam/option.{Some}
+import howdy/mail
+import howdy/mail/mime
+
+pub fn adapter(config: Config) -> mail.Adapter {
+  mail.adapter(named: "Postmark", send: fn(outgoing: mail.Outgoing) {
+    // outgoing.from, .to, .cc, .bcc, .reply_to, .subject, .html, .text,
+    // .headers, .attachments, .tags, .id and .date are all there.
+    // mime.encode(outgoing) is the raw message, for APIs that take one.
+    case post(config, outgoing) {
+      Ok(provider_id) -> Ok(mail.Receipt(outgoing.id, Some(provider_id)))
+      Error(Timeout) -> Error(mail.Unavailable("Postmark timed out"))
+      Error(Rejected(reason)) -> Error(mail.Refused(reason))
+    }
+  })
+}
+```
+
+The `Outgoing` has already passed every check, and has the mailer's
+default sender. Return `Unavailable` for anything worth retrying, and
+`Refused` for the rest, so `mail.retryable` and `mail.fallback` work.
+
+`howdy/mail/mime` writes the message as the text an SMTP server receives:
+`mime.encode(outgoing)` gives the whole of it, headers and body, which is
+also what providers such as Amazon SES take as a raw message. `Bcc`
+recipients are left out of it, since they belong only in the envelope;
+`mail.recipients(outgoing)` lists every recipient for that.
+
+`mail.deliver(adapter, outgoing)` hands an `Outgoing` to another adapter,
+for adapters that wrap one.
+
+## Testing a provider
+
+`resend.request` and `sendgrid.request` build the HTTP request the adapter
+would send, and `resend.receipt` and `sendgrid.receipt` read a response, so
+you can test what your messages look like to a provider without the
+network:
+
+```gleam
+import gleam/http/request
+import howdy/mail
+import howdy/mail/resend
+
+pub fn welcome_request_test() {
+  let assert Ok(outgoing) = mail.prepare(mailer(), welcome(user()))
+  let assert Ok(req) = resend.request(resend.new("re_test"), outgoing)
+  assert request.get_header(req, "idempotency-key") == Ok(outgoing.id)
+}
+```
+
+To test the flows that send mail, use the
+[outbox](/docs/mail/development) instead.

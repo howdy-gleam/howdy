@@ -1,0 +1,79 @@
+# Users and roles
+
+Register your [Howdy Auth](/docs/auth/overview) configuration, and the
+admin shows its users and groups. Register
+[authorization](/docs/auth/roles) as well, and it shows roles:
+
+```gleam
+import howdy/admin
+import howdy/authorization as access
+
+let assert Ok(permissions) = access.new(db)
+
+admin.new()
+|> admin.auth(identity)
+|> admin.authorization(permissions)
+```
+
+`admin.auth` also registers auth's Repo with the
+[database browser](/docs/admin/database), unless `admin.database` was given
+another. `admin.authorization` needs `admin.auth`, since roles are held by
+users.
+
+## Users
+
+The users page lists every account. From there you can:
+
+- create a user. It is provisioned without a credential, as with
+  [`auth.provision`](/docs/auth/administration), so they sign in with an
+  emailed token.
+- suspend a user, and resume them
+- see their live [sessions](/docs/auth/sessions), with the sign-in method,
+  when it started, when it was last seen, when it expires and the client,
+  and revoke any one of them or all at once
+- move them to another [group](/docs/auth/groups)
+- see and change the roles they hold, when authorization is registered
+- delete the account
+
+Deleting asks you to type the user's email address back. It is only
+offered when your app has configured `auth.with_account_deletion`, whose
+function removes your app's own rows in the same transaction; see
+[Account changes](/docs/auth/account).
+
+## Groups
+
+The groups page lists your groups. Create them, rename them, delete them,
+and see who is in each.
+
+## Roles
+
+With authorization registered, the roles page lists every role in every
+scope, with its permissions and who holds it. You can:
+
+- define a role, global or in an organization, with its permissions one
+  per line
+- replace a role's permissions later
+- assign it to a user and revoke it, from the role's page or from the
+  user's
+- delete it, which drops its assignments
+
+## Signing in as a user
+
+Each user's page has **Sign in as this user**, for seeing the app as they
+do. It:
+
+1. issues a session for them with `auth.impersonate`, with the method
+   `Impersonation`
+2. records `session.impersonated` in the audit trail, with the actor
+   `howdy_admin`
+3. sets the app's own session cookie, and sends you to `/`
+
+The admin shares the app's origin, so the cookie is the real one: your next
+request to the app is signed in as that user. Sign out as usual to end it.
+
+Suspended users cannot be signed in as. The session skips second factors
+and single sign-on, which is why an impersonation session is never
+something a user can start themselves.
+
+The `Impersonation` method needs auth's migration 18. Run auth's
+[migrations](/docs/auth/migrations) before using this version.

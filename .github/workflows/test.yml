@@ -5,17 +5,660 @@ on:
     branches:
       - master
       - main
+      - v1
   pull_request:
 
 jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2.0.0
-      - uses: erlef/setup-beam@v1.9.0
+      - uses: actions/checkout@v7
+      - uses: actions/cache@v6
         with:
-          otp-version: "23.2"
-          gleam-version: "0.21.0"
-      - run: gleam format --check src test
-      - run: gleam deps download
+          path: |
+            ~/.cache/gleam
+            build/packages
+          key: gleam-test-${{ hashFiles('**/gleam.toml', '**/manifest.toml') }}
+          restore-keys: gleam-test-
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "29"
+          gleam-version: "1.18.1"
+          rebar3-version: "3"
+          # elixir-version: "1"
+      - run: scripts/check-auth-namespace.sh
+      - run: $GITHUB_WORKSPACE/scripts/ci-deps.sh
       - run: gleam test
+      - run: gleam run -m rate_limit_benchmark
+      - run: gleam run -m routing_benchmark
+      - run: gleam format --check src test
+
+  ui:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ui
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cache/gleam
+            ui/build/packages
+            ui/parity_test/build/packages
+            examples/gallery/build/packages
+          key: gleam-ui-${{ hashFiles('**/gleam.toml', '**/manifest.toml') }}
+          restore-keys: gleam-ui-
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "29"
+          gleam-version: "1.18.1"
+          rebar3-version: "3"
+      - run: $GITHUB_WORKSPACE/scripts/ci-deps.sh
+      - run: gleam test
+      - run: gleam format --check src test
+      # The browser behaviour in priv/behaviour.js is exercised over CDP
+      # against the gallery, which serves every component.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      # The rich text editor's bundle is committed; rebuild it from its
+      # pinned sources and check it, and the hash naming it, are unchanged.
+      - name: Rich text bundle matches its source
+        working-directory: ui/rich_text_js
+        run: |
+          npm ci
+          node build.mjs
+          git diff --exit-code -- ../priv/rich_text.js ../src/howdy/ui/internal/rich_text_script.gleam
+      - name: Build and start the gallery
+        working-directory: examples/gallery
+        run: |
+          $GITHUB_WORKSPACE/scripts/ci-deps.sh
+          gleam build
+          nohup gleam run > /tmp/gallery.log 2>&1 &
+          for i in $(seq 1 60); do
+            curl -sf -o /dev/null http://127.0.0.1:8791/ui && exit 0
+            sleep 1
+          done
+          echo "gallery did not start"; cat /tmp/gallery.log; exit 1
+      - name: Browser tests (CDP)
+        env:
+          CHROMIUM: google-chrome
+        run: node browser_test/run.mjs
+      - name: Gallery log
+        if: failure()
+        run: cat /tmp/gallery.log
+      # Islands render a view on the server and again in the browser, so
+      # every component must render the same HTML and CSS on both targets.
+      - name: Erlang and JavaScript parity
+        run: |
+          (cd parity_test && $GITHUB_WORKSPACE/scripts/ci-deps.sh)
+          parity_test/run.sh
+
+  # Islands end to end: browser tests under `gleam run`, then a clean build
+  # bundled and exported as a release, the same tests against it, and a
+  # release whose code changed after bundling, which must refuse its bundle.
+  islands:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: examples/islands
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/cache@v6
+        with:
+          # ~/.cache/howdy holds the esbuild that bundles islands.
+          path: |
+            ~/.cache/gleam
+            ~/.cache/howdy
+            examples/islands/build/packages
+          key: gleam-islands-${{ hashFiles('**/gleam.toml', '**/manifest.toml') }}
+          restore-keys: gleam-islands-
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "29"
+          gleam-version: "1.18.1"
+          rebar3-version: "3"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: $GITHUB_WORKSPACE/scripts/ci-deps.sh
+      - run: gleam format --check src library/src
+      - name: Islands end to end
+        env:
+          CHROMIUM: google-chrome
+        run: browser_test/smoke.sh
+
+  howdy_dev:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: howdy_dev
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cache/gleam
+            howdy_dev/build/packages
+          key: gleam-howdy_dev-${{ hashFiles('**/gleam.toml', '**/manifest.toml') }}
+          restore-keys: gleam-howdy_dev-
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "29"
+          gleam-version: "1.18.1"
+          rebar3-version: "3"
+      - run: $GITHUB_WORKSPACE/scripts/ci-deps.sh
+      - run: gleam test
+      - run: gleam format --check src test
+
+  database:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: howdy_database_test
+          POSTGRES_DB: postgres
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U howdy_database_test -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      HOWDY_DATABASE_TEST_POSTGRES_URL: postgres://howdy_database_test@localhost/postgres
+    defaults:
+      run:
+        working-directory: database
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cache/gleam
+            database/build/packages
+          key: gleam-database-${{ hashFiles('**/gleam.toml', '**/manifest.toml') }}
+          restore-keys: gleam-database-
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "29"
+          gleam-version: "1.18.1"
+          rebar3-version: "3"
+      - run: $GITHUB_WORKSPACE/scripts/ci-deps.sh
+      - run: gleam test
+      - run: gleam format --check src test
+
+  remote:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: remote
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cache/gleam
+            remote/build/packages
+          key: gleam-remote-${{ hashFiles('**/gleam.toml', '**/manifest.toml') }}
+          restore-keys: gleam-remote-
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "29"
+          gleam-version: "1.18.1"
+          rebar3-version: "3"
+      - run: $GITHUB_WORKSPACE/scripts/ci-deps.sh
+      - run: gleam test
+      - run: gleam format --check src test
+
+  mail:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mail
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cache/gleam
+            mail/build/packages
+          key: gleam-mail-${{ hashFiles('**/gleam.toml', '**/manifest.toml') }}
+          restore-keys: gleam-mail-
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "29"
+          gleam-version: "1.18.1"
+          rebar3-version: "3"
+      - run: $GITHUB_WORKSPACE/scripts/ci-deps.sh
+      - run: gleam test
+      - run: gleam format --check src test
+
+  storage:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: storage
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cache/gleam
+            storage/build/packages
+          key: gleam-storage-${{ hashFiles('**/gleam.toml', '**/manifest.toml') }}
+          restore-keys: gleam-storage-
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "29"
+          gleam-version: "1.18.1"
+          rebar3-version: "3"
+      # An S3-compatible server for the S3 adapter's tests. Service
+      # containers cannot be given a command, so it is started here.
+      - name: Start SeaweedFS
+        run: |
+          echo '{"identities":[{"name":"howdy","credentials":[{"accessKey":"howdytest","secretKey":"howdytestsecret"}],"actions":["Admin","Read","Write","List","Tagging"]}]}' > /tmp/s3.json
+          docker run -d --name seaweedfs -p 9100:8333 -v /tmp/s3.json:/etc/s3.json:ro \
+            chrislusf/seaweedfs:latest server -dir=/data -s3 -s3.port=8333 -s3.config=/etc/s3.json
+          for i in $(seq 1 60); do
+            [ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:9100/)" != "000" ] && exit 0
+            sleep 2
+          done
+          docker logs seaweedfs
+          exit 1
+      - run: $GITHUB_WORKSPACE/scripts/ci-deps.sh
+      - run: gleam test
+        env:
+          HOWDY_STORAGE_TEST_S3_URL: http://howdytest:howdytestsecret@127.0.0.1:9100/howdy-test
+      - run: gleam format --check src test
+
+  openapi:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: openapi
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cache/gleam
+            openapi/build/packages
+          key: gleam-openapi-${{ hashFiles('**/gleam.toml', '**/manifest.toml') }}
+          restore-keys: gleam-openapi-
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "29"
+          gleam-version: "1.18.1"
+          rebar3-version: "3"
+      - run: $GITHUB_WORKSPACE/scripts/ci-deps.sh
+      - run: gleam test
+      - run: gleam format --check src test
+
+  telemetry:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: telemetry
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cache/gleam
+            telemetry/build/packages
+          key: gleam-telemetry-${{ hashFiles('**/gleam.toml', '**/manifest.toml') }}
+          restore-keys: gleam-telemetry-
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "29"
+          gleam-version: "1.18.1"
+          rebar3-version: "3"
+      - run: $GITHUB_WORKSPACE/scripts/ci-deps.sh
+      - run: gleam test
+      - run: gleam format --check src test
+
+  i18n:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: i18n
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cache/gleam
+            i18n/build/packages
+          key: gleam-i18n-${{ hashFiles('**/gleam.toml', '**/manifest.toml') }}
+          restore-keys: gleam-i18n-
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "29"
+          gleam-version: "1.18.1"
+          rebar3-version: "3"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: $GITHUB_WORKSPACE/scripts/ci-deps.sh
+      - run: gleam test
+      # The package has no Erlang-only code, so it is tested on JavaScript
+      # too.
+      - run: gleam test --target javascript
+      - run: gleam format --check src test
+      # Generated translations must match their catalogues.
+      - name: Translations are up to date
+        run: |
+          gleam run -m howdy/i18n/cli -- check --locales=test/fixtures/locales
+          gleam run -m howdy/i18n/cli -- check --locales=../ui/locales
+          gleam run -m howdy/i18n/cli -- check --locales=../auth/locales/pages
+          gleam run -m howdy/i18n/cli -- check --locales=../auth/locales/emails
+          gleam run -m howdy/i18n/cli -- check --locales=../locales/problem
+          gleam run -m howdy/i18n/cli -- gen --locales=../locales/problem --out=../src/howdy/problem/translations.gleam --standalone
+          gleam run -m howdy/i18n/cli -- gen --locales=test/fixtures/locales --out=test/howdy/i18n/fixture_messages.gleam
+          gleam run -m howdy/i18n/cli -- gen --locales=../ui/locales --out=../ui/src/howdy/ui/internal/messages.gleam
+          gleam run -m howdy/i18n/cli -- gen --locales=../auth/locales/pages --out=../auth/src/howdy/auth/internal/pages_messages.gleam
+          gleam run -m howdy/i18n/cli -- gen --locales=../auth/locales/emails --out=../auth/src/howdy/auth/internal/emails_messages.gleam
+          git diff --exit-code -- ../src/howdy/problem/translations.gleam test/howdy/i18n/fixture_messages.gleam ../ui/src/howdy/ui/internal/messages.gleam ../auth/src/howdy/auth/internal/pages_messages.gleam ../auth/src/howdy/auth/internal/emails_messages.gleam
+
+  flags:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: howdy_flags_test
+          POSTGRES_DB: postgres
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U howdy_flags_test -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    defaults:
+      run:
+        working-directory: flags
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cache/gleam
+            flags/build/packages
+          key: gleam-flags-${{ hashFiles('**/gleam.toml', '**/manifest.toml') }}
+          restore-keys: gleam-flags-
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "29"
+          gleam-version: "1.18.1"
+          rebar3-version: "3"
+      - run: $GITHUB_WORKSPACE/scripts/ci-deps.sh
+      - run: gleam test
+      - run: gleam test
+        env:
+          HOWDY_FLAGS_TEST_POSTGRES_URL: postgres://howdy_flags_test@localhost/postgres
+      - run: gleam format --check src test
+
+  jobs:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: howdy_jobs_test
+          POSTGRES_DB: postgres
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U howdy_jobs_test -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    defaults:
+      run:
+        working-directory: jobs
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cache/gleam
+            jobs/build/packages
+          key: gleam-jobs-${{ hashFiles('**/gleam.toml', '**/manifest.toml') }}
+          restore-keys: gleam-jobs-
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "29"
+          gleam-version: "1.18.1"
+          rebar3-version: "3"
+      - run: $GITHUB_WORKSPACE/scripts/ci-deps.sh
+      - run: gleam test
+      - run: gleam test
+        env:
+          HOWDY_JOBS_TEST_POSTGRES_URL: postgres://howdy_jobs_test@localhost/postgres
+      - run: gleam format --check src test
+
+  notifications:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: howdy_notifications_test
+          POSTGRES_DB: postgres
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U howdy_notifications_test -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    defaults:
+      run:
+        working-directory: notifications
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cache/gleam
+            notifications/build/packages
+          key: gleam-notifications-${{ hashFiles('**/gleam.toml', '**/manifest.toml') }}
+          restore-keys: gleam-notifications-
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "29"
+          gleam-version: "1.18.1"
+          rebar3-version: "3"
+      - run: $GITHUB_WORKSPACE/scripts/ci-deps.sh
+      - run: gleam test
+      - run: gleam test
+        env:
+          HOWDY_NOTIFICATIONS_TEST_POSTGRES_URL: postgres://howdy_notifications_test@localhost/postgres
+      - run: gleam format --check src test
+
+  cache:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: howdy_cache_test
+          POSTGRES_DB: postgres
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U howdy_cache_test -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    defaults:
+      run:
+        working-directory: cache
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cache/gleam
+            cache/build/packages
+          key: gleam-cache-${{ hashFiles('**/gleam.toml', '**/manifest.toml') }}
+          restore-keys: gleam-cache-
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "29"
+          gleam-version: "1.18.1"
+          rebar3-version: "3"
+      - run: $GITHUB_WORKSPACE/scripts/ci-deps.sh
+      - run: gleam test
+      - run: gleam test
+        env:
+          HOWDY_CACHE_TEST_POSTGRES_URL: postgres://howdy_cache_test@localhost/postgres
+      - run: gleam format --check src test
+
+  admin:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: howdy_admin_test
+          POSTGRES_DB: howdy_admin_test
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U howdy_admin_test -d howdy_admin_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    defaults:
+      run:
+        working-directory: admin
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cache/gleam
+            admin/build/packages
+          key: gleam-admin-${{ hashFiles('**/gleam.toml', '**/manifest.toml') }}
+          restore-keys: gleam-admin-
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "29"
+          gleam-version: "1.18.1"
+          rebar3-version: "3"
+      - run: $GITHUB_WORKSPACE/scripts/ci-deps.sh
+      - run: gleam test
+      - run: gleam test
+        env:
+          HOWDY_ADMIN_TEST_POSTGRES_URL: postgres://howdy_admin_test@localhost/howdy_admin_test
+      - run: gleam format --check src test
+
+  example:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        example: [simple, guards, chat, live, remote, admin, openapi, gallery, notifications, i18n]
+    defaults:
+      run:
+        working-directory: examples/${{ matrix.example }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cache/gleam
+            examples/${{ matrix.example }}/build/packages
+          key: gleam-example-${{ matrix.example }}-${{ hashFiles('**/gleam.toml', '**/manifest.toml') }}
+          restore-keys: gleam-example-${{ matrix.example }}-
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "29"
+          gleam-version: "1.18.1"
+          rebar3-version: "3"
+      - run: $GITHUB_WORKSPACE/scripts/ci-deps.sh
+      - run: gleam test
+      - if: matrix.example == 'live'
+        run: gleam run -m howdy/ui diff button
+      - if: matrix.example == 'live'
+        run: gleam run -m tasks/css
+      - run: gleam format --check src test
+      # Two users in headless Chrome: a notification sent by one reaches the
+      # other's open page, inbox and email.
+      - if: matrix.example == 'notifications'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - if: matrix.example == 'notifications'
+        name: Browser test (CDP)
+        env:
+          CHROMIUM: google-chrome
+        run: |
+          nohup gleam run > /tmp/notifications.log 2>&1 &
+          for i in $(seq 1 60); do
+            curl -sf -o /dev/null http://127.0.0.1:8792/ && break
+            sleep 1
+          done
+          node browser_test/run.mjs || { cat /tmp/notifications.log; exit 1; }
+
+  auth:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        backend: [sqlite, postgres]
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: howdy_auth_test
+          POSTGRES_DB: postgres
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U howdy_auth_test -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      HOWDY_AUTH_TEST_BACKEND: ${{ matrix.backend }}
+    defaults:
+      run:
+        working-directory: auth
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cache/gleam
+            auth/build/packages
+            examples/auth/build/packages
+          key: gleam-auth-${{ hashFiles('**/gleam.toml', '**/manifest.toml') }}
+          restore-keys: gleam-auth-
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "29"
+          gleam-version: "1.18.1"
+          rebar3-version: "3"
+      - run: node --test test/pages_client_test.mjs
+      - run: $GITHUB_WORKSPACE/scripts/ci-deps.sh
+      - run: gleam test
+      - run: gleam format --check src test
+      - run: $GITHUB_WORKSPACE/scripts/ci-deps.sh
+        working-directory: examples/auth
+      - run: gleam test
+        working-directory: examples/auth
+      - run: gleam format --check src test
+        working-directory: examples/auth

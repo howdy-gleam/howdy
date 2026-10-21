@@ -1,0 +1,167 @@
+# Themes
+
+A theme is the set of colours, fonts and corner sizes a site uses. In Howdy
+UI it is a plain Gleam record, and every [component](/docs/ui/components)
+reads its values from it. Change the theme and every button, card and link
+follows, with no component touched.
+
+Two themes are built in, `theme.light()` and `theme.dark()`, and a
+[page](/docs/ui/pages) offers both unless told otherwise. Five presets,
+`zinc`, `stone`, `rose`, `green` and `violet`, are in `howdy/ui/themes`;
+see them on the [components pages](/components/zinc).
+
+To make your own without writing it by hand, use the
+[theme maker](/theme-maker). Start from a preset, pick your colours, and
+watch real components redraw in them while every colour pair is checked
+for contrast. It gives you a light and a dark theme as a Gleam module to
+download, with the code that adds it to your app.
+
+## Making a theme
+
+Start from a built-in theme and change what you need. Each part of a theme
+has a function that takes an update, so you can change one value and keep
+the rest:
+
+```gleam
+import howdy/ui/theme.{Colors, Font, Radius}
+
+pub fn brand() -> theme.Theme {
+  theme.light()
+  |> theme.named("brand")
+  |> theme.colors(fn(c) { Colors(..c, primary: "#0f766e", on_primary: "#fff") })
+  |> theme.font(fn(f) { Font(..f, heading: "Georgia, serif") })
+  |> theme.radius(fn(r) { Radius(..r, medium: "0") })
+}
+```
+
+`theme.named` gives the theme its name. Names must be unique among the
+themes a page offers, so rename a theme you derive from a built-in one if
+you offer the original as well.
+
+## What a theme holds
+
+Colours are any CSS colour, as a string:
+
+- `background` is the page itself.
+- `surface` is cards, panels and inputs, which sit on the background.
+- `border` is the line around surfaces and inputs.
+- `text` is body text, and `text_muted` is captions and placeholders.
+- `primary` is buttons and links, and `primary_hover` the same when hovered.
+- `on_primary` is text placed on top of `primary`.
+- `danger` is destructive actions and errors, with `on_danger` for text on
+  top of it.
+- `focus` is the ring around the focused element.
+
+The `on_` colours exist so that text stays readable. When you change
+`primary`, check `on_primary` against it: white text on a pale primary
+cannot be read. Aim for a contrast ratio of at least 4.5 to 1.
+
+Fonts are CSS font stacks: `body`, `heading` and `mono`. Radii are CSS
+lengths: `small`, `medium` and `large`.
+
+A theme also has a `scheme`, `Light` or `Dark`. It tells the browser which
+kind of theme this is, so that scrollbars and built-in form controls match,
+and it decides which theme a visitor's system setting selects.
+
+## Offering themes to a page
+
+A page offers a default theme and any number of alternatives:
+
+```gleam
+import howdy/ui/page
+import howdy/ui/theme
+
+page.new("Orders")
+|> page.themes(theme.themes(default: brand(), alternatives: [theme.dark()]))
+```
+
+`theme.default_themes()` is the built-in pair, light by default with dark as
+the alternative, and is what a page uses when you do not call `page.themes`.
+Define your themes once, in a function, and use it for every page.
+
+Which theme a visitor sees is decided in this order:
+
+- If the page names one with `page.theme`, and it is one the page offers,
+  that theme is used.
+- Otherwise, the visitor's system setting decides. If it asks for the
+  opposite scheme to the default's, the first alternative with that scheme
+  is used. With the themes above, a visitor whose system is set to dark
+  gets `dark`.
+- Otherwise the default is used.
+
+## Letting visitors choose
+
+`ui.theme_toggle` is a button that switches between two named themes:
+
+```gleam
+import howdy/ui
+import lustre/element.{text}
+
+ui.theme_toggle([text("Toggle theme")], from: "brand", to: "dark")
+```
+
+Clicking it changes the theme in place, with no reload, and stores the
+choice in a cookie called `theme` that lasts a year. Read the cookie when
+rendering a page so the choice sticks:
+
+```gleam
+import howdy/cookie
+
+fn orders(ctx: Context) {
+  use theme <- cookie.string_or(ctx, "theme", default: "system")
+
+  page.new("Orders")
+  |> page.themes(my_themes())
+  |> page.theme(theme)
+  |> page.body([ui.h1("Orders")])
+  |> page.respond(ctx)
+}
+```
+
+`page.theme` ignores a name the page does not offer, so the `"system"`
+default, and any nonsense someone puts in the cookie, leaves the choice to
+the system setting.
+
+The toggle sets the cookie from the browser, so it is not `HttpOnly`. That
+is fine: it holds a colour preference, not a secret. It works the same in a
+plain page and inside a [live component](/docs/ui/live-components).
+
+## How it works
+
+Each theme becomes a block of CSS custom properties, all starting
+`--howdy-`:
+
+```css
+:root { color-scheme: light; --howdy-primary: #0f766e; ... }
+[data-theme="brand"] { color-scheme: light; --howdy-primary: #0f766e; ... }
+[data-theme="dark"] { color-scheme: dark; --howdy-primary: #60a5fa; ... }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) { color-scheme: dark; --howdy-primary: #60a5fa; ... }
+}
+```
+
+The default goes on `:root`. Every theme is also written under a
+`data-theme` selector, which is what `page.theme` and the toggle set. The
+media query applies the alternative for visitors who have not chosen.
+
+Components never name a colour. They use *tokens* from
+`howdy/ui/theme/tokens`, each of which is a reference to one of those
+properties, such as `var(--howdy-primary)`. That is why switching theme is
+instant and needs no new CSS: the rules stay the same and only the values
+of the variables change.
+
+You can use the same properties in your own CSS, and they will follow the
+theme too:
+
+```css
+.banner { background: var(--howdy-surface); color: var(--howdy-text); }
+```
+
+## Keeping themes complete
+
+Because a theme is a record, a theme cannot be half finished. If a new
+colour is added to `Colors`, every theme that builds the record in full
+fails to compile until it supplies the value. A theme made by updating a
+built-in one, as `brand` is above, picks up the built-in value instead.
+Either way, no component is ever left reading a colour that a theme forgot
+to define.

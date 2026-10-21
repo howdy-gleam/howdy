@@ -1,0 +1,147 @@
+# Publishing
+
+While you build a site, a [page](/docs/ui/pages) embeds the CSS it needs in
+its own `<head>`. That needs no setup, but the same few kilobytes travel
+with every page and the browser cannot cache them. Before putting a site in
+front of visitors, move the CSS into one file that is downloaded once.
+
+There are two ways to get that file: a route that makes it on the fly, for
+development, and a file written ahead of time, for publishing.
+
+## A stylesheet route for development
+
+`ui.stylesheet` is a controller that serves the CSS at a path of your
+choosing:
+
+```gleam
+import howdy
+import howdy/ui
+import howdy/ui/theme
+
+howdy.new()
+|> howdy.controller(pages())
+|> howdy.controller(
+  ui.stylesheet(at: "/assets/ui.css", themes: theme.default_themes()),
+)
+```
+
+Link it from your pages, and they stop embedding their styles:
+
+```gleam
+page.new("Orders")
+|> page.stylesheet(at: "/assets/ui.css")
+```
+
+The route sends the theme variables, the base styles, and the CSS for every
+class that has been used since the server started. It is sent with an
+`etag` and `cache-control: no-cache`, so the browser checks on every page
+load, gets a quick `304` when nothing has changed, and sees new styles as
+soon as they exist.
+
+Do not publish with this route. It only knows the classes that have been
+rendered so far, on that one server. After a restart the file is nearly
+empty until pages have been visited, and two servers behind a load balancer
+can give different answers. Its use is to let you develop with a linked
+stylesheet, so that what you build matches what you will publish.
+
+## Writing the file
+
+For publishing, `howdy/ui/export` writes the CSS to a file from a known
+list of classes. Put a small script in your project:
+
+```gleam
+// src/tasks/css.gleam
+import gleam/io
+import howdy/ui/export
+import howdy/ui/theme
+import my_app/ui/all
+
+pub fn main() -> Nil {
+  let assert Ok(Nil) =
+    export.new(theme.default_themes())
+    |> export.classes(all.classes())
+    |> export.write(to: "priv/public/assets/ui.css")
+  io.println("wrote priv/public/assets/ui.css")
+}
+```
+
+```sh
+gleam run -m tasks/css
+```
+
+`export.new` takes the [themes](/docs/ui/themes) your pages offer, and
+always includes the built-in [components](/docs/ui/components).
+`export.classes` adds your own. The `all.classes()` list is generated for
+you, as described in [Custom components](/docs/ui/custom-components). If
+you have no components of your own, leave that line out.
+
+Pass the same themes your pages use. The file holds the theme variables, so
+a page offering a theme that is not in the file would have no colours.
+
+The output is minified, and deterministic: the same classes give the same
+bytes on any machine, whatever pages were rendered beforehand. That makes
+it safe to commit to your repository, and to check in CI that it is up to
+date. Run the script whenever you change a theme or a component.
+
+Classes appear in the file in the order given: the built-in ones first,
+then yours in the order of the list. When two rules are equally specific,
+the later one wins, so the order matters if your classes override built-in
+ones on the same element.
+
+## Serving the file
+
+Serve it like any other asset, with
+`howdy/static`, and give it a long cache lifetime:
+
+```gleam
+import howdy/static
+
+howdy.controller(
+  static.new(from: "priv/public")
+  |> static.max_age(seconds: 31_536_000)
+  |> static.build,
+)
+```
+
+A long lifetime means browsers will not notice when the file changes, so
+change its URL whenever it does. A version in the query string is enough:
+
+```gleam
+page.new("Orders")
+|> page.stylesheet(at: "/assets/ui.css?v=" <> my_app.version)
+```
+
+`page.stylesheet` uses the path exactly as given, so any cache-busting
+scheme you already use for other assets works here too.
+
+## Live components
+
+[Live components](/docs/ui/live-components) carry their own CSS, for
+exactly the classes their view uses. They are styled the same whichever of
+the three approaches a page takes, and need nothing from the exported file.
+
+## Islands
+
+[Islands](/docs/ui/islands) use the same class names in the browser as on
+the server, so the file styles what the server renders. A class an island
+only uses after it starts in the browser has its CSS added to the page by
+the island, so islands need nothing more from the file either. Their
+browser code is published separately: export the app with
+`gleam run -m howdy/ui export`, which bundles the islands first.
+
+## A checklist
+
+- Every component module has a `classes` function that lists all its
+  classes, including every variant.
+- `all.gleam` is up to date. Run `gleam run -m howdy/ui add <name>` again,
+  for a component you have already copied, after adding a module of your
+  own.
+- The export uses the same themes as your pages.
+- `gleam run -m tasks/css` has been run since the last change, and the
+  result is committed.
+- Pages link the file with `page.stylesheet`, with a version in the URL.
+- An app with islands is exported with `gleam run -m howdy/ui export`.
+
+The sign of a missed step is a component that looks right in development
+and unstyled once published. Its class is missing from the file, usually
+because it is not in a `classes` list.

@@ -1,0 +1,203 @@
+# Guards
+
+A guard is a check that runs before a handler. It either rejects the
+request, and the handler never runs, or it succeeds and hands the handler a
+typed value. The usual example is signing in: the guard works out who is
+making the request, answers `401` if it cannot, and otherwise gives every
+handler behind it a `User`.
+
+That second half is what makes a guard more than a filter. The handler does
+not look the user up again, or deal with the case where there is not one. It
+cannot be reached without a user, and the compiler knows it.
+
+## Writing a guard
+
+A guard is a function from the context to a `service.Result`. Return
+`Ok(value)` to let the request through, or an error from `howdy/service` to
+reject it:
+
+```gleam
+import gleam/http/request
+import gleam/list
+import howdy/context.{type Context}
+import howdy/service
+
+pub type User {
+  User(id: Int, name: String, admin: Bool)
+}
+
+pub fn authenticated(ctx: Context(a)) -> service.Result(User) {
+  let cookies = request.get_cookies(ctx.request)
+  case list.key_find(cookies, "session") {
+    Ok(session_id) -> find_session_user(session_id)
+    Error(Nil) -> Error(service.Unauthorized)
+  }
+}
+```
+
+Here `find_session_user` stands for your own lookup, returning `Ok(user)`
+for a live session and `Error(service.Unauthorized)` otherwise. If you would
+rather not write sign-in yourself, [Howdy Auth](/docs/auth/overview) comes
+with this guard ready made, as `auth.required`.
+
+A guard returns a `Result`, not a response, so it cannot use the `use`
+helpers from `howdy/cookie` and `howdy/query`, which answer the request
+themselves. Read the request directly, as above, with `request.get_cookies`,
+`request.get_header` or `request.get_query`.
+
+The error decides the response. `service.Unauthorized` answers `401` with
+`{"error":"unauthorized","code":"unauthorized"}`, and `service.Forbidden` answers `403`. Any error
+in [Services and errors](/docs/controllers/services) will do.
+
+A check with nothing useful to hand on returns `Ok(Nil)`.
+
+## Guarding a controller
+
+`controller.guarded` takes a guard along with the prefix. The guard runs
+before every route on the controller, and its value is on the context as
+`ctx.guard`:
+
+```gleam
+import howdy/controller
+
+pub fn account_controller() {
+  controller.guarded("account", authenticated)
+  |> controller.get("/", fn(ctx) {
+    controller.text(ctx, "Hello, " <> ctx.guard.name)
+  })
+  |> controller.post("/email", change_email)
+  |> controller.build
+}
+```
+
+With no session cookie, `GET /account` answers `401` and the handler never
+runs. With one, it answers `Hello, Ada`.
+
+Handlers on a guarded controller take a `GuardedContext` carrying the
+guard's type, where an ordinary handler takes a `Context`:
+
+```gleam
+import howdy/controller.{type GuardedContext}
+
+fn change_email(ctx: GuardedContext(User)) {
+  // ctx.guard is a User here.
+  controller.text(ctx, "Changing email for " <> ctx.guard.name)
+}
+```
+
+Everything that reads a request, such as `query.int`, `cookie.string` and
+`body.json`, accepts either kind of context.
+
+### Finishing with build
+
+`controller.guarded` returns a builder whose type includes the guard's
+value, so a controller guarded by a `User` and one guarded by an `ApiKey`
+are different types. `controller.build` finishes the builder and gives back
+a plain `Controller`, so they can all be mounted on the same app:
+
+```gleam
+howdy.new()
+|> howdy.controller(home_controller())
+|> howdy.controller(account_controller())
+```
+
+`build` goes last, after the routes. Each route already carries its guard,
+and no guard runs when the controller is built.
+
+## Guarding one route
+
+To protect a single route on an ordinary controller, run the guard inside
+the handler with `guard.require`. It works with `use`, like the input
+helpers:
+
+```gleam
+import howdy/controller.{type Context}
+import howdy/guard
+
+fn show_profile(ctx: Context) {
+  use user <- guard.require(ctx, authenticated)
+  controller.text(ctx, user.name)
+}
+```
+
+This is why `authenticated` takes a `Context(a)` rather than a plain
+`Context`: written that way, one guard serves both `controller.guarded` and
+`guard.require`, on any controller.
+
+## Checks that build on a guard
+
+`guard.require` also works inside a guarded controller, where the second
+check can use the first one's value. An admin check has no need to read the
+session again, because the user is already on the context:
+
+```gleam
+fn admin(ctx: GuardedContext(User)) -> service.Result(Nil) {
+  case ctx.guard.admin {
+    True -> Ok(Nil)
+    False -> Error(service.Forbidden)
+  }
+}
+
+fn delete_account(ctx: GuardedContext(User)) {
+  use _ <- guard.require(ctx, admin)
+  controller.status(ctx, 204)
+}
+```
+
+Because `admin` asks for a `GuardedContext(User)`, it cannot be used on a
+route where nobody has signed in. A signed-in visitor who is not an admin
+gets `403`; one with no session never reaches the check and gets `401`.
+
+Those two statuses are easy to mix up. `401` means "I do not know who you
+are", and the fix is to sign in. `403` means "I know who you are, and you
+may not do this", and signing in again will not help.
+
+## When guards run
+
+A guard belongs to its routes, so it only runs once a route has matched:
+
+- A request that matches no route gets `404`, and one with the wrong method
+  gets `405`, without the guard running. A guard does not hide which paths
+  exist.
+- Middleware runs first, outside the guard. Logging and rate limiting see a
+  request even when the guard then rejects it.
+- Path parameters are already captured, so a guard can read them with
+  `controller.param`, to check that a visitor owns the thing they are
+  asking for.
+- The automatic `OPTIONS` response skips the guard. Browsers send CORS
+  preflight requests without credentials, so a guard could only reject
+  them.
+- A WebSocket starts as a `GET` route and is guarded like one. Browsers
+  cannot set headers on the handshake, so a socket guard usually reads a
+  cookie or a query parameter.
+
+## Guards or middleware?
+
+Both run before a handler and both can reject a request. Use a guard when
+the handler needs what the check found, such as the user, the API key or the
+tenant, because the value arrives typed on `ctx.guard`. Use middleware when
+the work is the same for every request and the handler does not care about
+the result, such as logging, CORS or rate limiting.
+
+## Testing guards
+
+Test a guarded route from the outside, once without credentials and once
+with them. `testing.cookie` adds a cookie to the request:
+
+```gleam
+import howdy/testing
+
+pub fn account_needs_a_session_test() {
+  let res = testing.get("/account") |> testing.send(app())
+  assert res.status == 401
+  assert testing.error(res) == Ok("unauthorized")
+}
+
+pub fn account_greets_the_user_test() {
+  let res =
+    testing.get("/account")
+    |> testing.cookie("session", "abc")
+    |> testing.send(app())
+  assert testing.text(res) == "Hello, Ada"
+}
+```

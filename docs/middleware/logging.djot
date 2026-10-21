@@ -1,0 +1,87 @@
+# Request logging
+
+`logger.log` is middleware that writes one line for each request: the
+method, the path and the status that was returned.
+
+```
+GET /users/2 -> 200
+POST /users -> 422
+```
+
+## Setting it up
+
+Howdy logs through the `logging` package. Configure it once when your
+program starts, then add the middleware to the app:
+
+```gleam
+import howdy
+import howdy/logger
+import logging
+
+pub fn main() {
+  logging.configure()
+
+  howdy.new()
+  |> howdy.middleware(logger.log)
+  |> howdy.controller(user_controller())
+  |> howdy.start
+}
+```
+
+`logger.log` never calls `logging.configure` for you. Logging settings are
+global to the program, so they are left to your startup code. Entries are
+written at the `Info` level.
+
+## Add it first
+
+[Middleware](/docs/middleware/overview) added first is outermost, and only
+outer middleware sees a response that inner middleware sent. Add the logger
+before anything that can answer a request itself, such as authentication,
+rate limiting or CORS, so that their `401`, `429` and preflight responses
+are logged too:
+
+```gleam
+howdy.new()
+|> howdy.middleware(logger.log)
+|> howdy.middleware(cors.middleware(policy))
+|> howdy.middleware(rate_limit.by_ip(limiter))
+```
+
+It can also go on a single controller with `controller.middleware`, to log
+only the API and not the static files, for example.
+
+## What is and is not logged
+
+- The line holds the method, path and status, and nothing else. Query
+  strings, headers and bodies are left out, which keeps tokens, passwords
+  and personal data out of your logs.
+- Requests that match no route are not logged. A `404` or `405` from the
+  router runs no middleware at all.
+- If a handler crashes, no line is written for that request. Howdy logs the
+  crash itself separately.
+
+## Writing your own
+
+The logger is a few lines, and a good starting point when you want
+something different, such as timings. Call `next`, then log what came back:
+
+```gleam
+import gleam/http
+import gleam/int
+import howdy/controller.{type Context}
+import howdy/middleware.{type Next}
+import logging
+
+pub fn log(ctx: Context, next: Next) {
+  let response = next(ctx)
+  logging.log(
+    logging.Info,
+    http.method_to_string(ctx.request.method)
+      <> " "
+      <> ctx.request.path
+      <> " -> "
+      <> int.to_string(response.status),
+  )
+  response
+}
+```

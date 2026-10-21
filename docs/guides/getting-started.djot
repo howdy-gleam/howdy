@@ -1,0 +1,142 @@
+# Getting started
+
+This guide takes you from an empty terminal to a running Howdy app. You will
+install the tools Howdy builds on, install the `howdy` command line, and
+create your first project.
+
+## Before you begin
+
+Howdy apps are written in [Gleam](https://gleam.run/) and run on the Erlang
+virtual machine, so a Howdy project will not build or run without these three
+tools installed:
+
+- *Gleam*, the language and its build tool
+- *Erlang/OTP*, the runtime Gleam compiles to
+- *rebar3*, the Erlang build tool Gleam uses to compile some of Howdy's
+  dependencies
+
+The Gleam website has up to date instructions for installing all three on
+every platform: [Installing Gleam](https://gleam.run/getting-started/installing/).
+
+The default SQLite
+database needs a C compiler to build, and a PostgreSQL project needs a
+PostgreSQL server, which the generated project can run for you with Docker.
+
+Check everything is ready:
+
+```sh
+gleam --version
+erl -version
+rebar3 --version
+```
+
+## Install the Howdy CLI
+
+The `howdy` command creates new projects for you. It is a single program
+written in Go, and there are two ways to install it.
+
+### With the install script
+
+The quickest way is the install script, which downloads the latest build for
+your machine from the
+[CLI's releases](https://github.com/howdy-gleam/howdy-cli/releases) and
+puts `howdy` on your `PATH`:
+
+```sh
+curl -fsSL https://tryhowdy.dev/install.sh | bash
+```
+
+### With Go
+
+If you have [Go](https://go.dev/doc/install) 1.25 or newer, you can build
+and install the CLI from source instead:
+
+```sh
+git clone https://github.com/howdy-gleam/howdy-cli.git
+cd howdy-cli
+go install .
+```
+
+Go installs programs to `$HOME/go/bin`, so make sure that directory is on
+your `PATH`.
+
+Either way, check the install worked:
+
+```sh
+howdy --help
+```
+
+## Create your project
+
+Run `howdy new` with a name for your app:
+
+```sh
+howdy new my_app
+```
+
+Project names follow Gleam's rules: lowercase letters, digits and
+underscores, starting with a letter. You can also give a path such as
+`apps/my_app`, and the last segment becomes the project name.
+
+The CLI checks that Gleam is installed, writes the project files, formats
+them and downloads the dependencies. The new project comes with:
+
+- a themed home page built with Howdy UI
+- hot reload for development
+- a database with an example todo list, including a JSON API and a live
+  component on the home page
+- a test suite
+
+### Choose a database
+
+By default the project uses *SQLite*, which needs no setup: the database is a
+file created and migrated the first time the app starts.
+
+Pass `--database postgres` to build the same project on *PostgreSQL* instead:
+
+```sh
+howdy new my_app --database postgres
+```
+
+The app connects using the `DATABASE_URL` setting, and the project includes a
+`docker-compose.yml` that runs PostgreSQL on port 5432 with a development
+database and a test database, so you will want
+[Docker](https://docs.docker.com/get-started/get-docker/) installed. Copy
+`.env.example` to `.env` to point `DATABASE_URL` at a different server.
+
+Don't need a database? Create a page-only project instead:
+
+```sh
+howdy new my_app --no-database
+```
+
+`--database` and `--no-database` cannot be used together.
+
+## Run it
+
+Move into your new project and start the development server:
+
+```sh
+cd my_app
+gleam dev
+```
+
+If you chose PostgreSQL, start the database first. The app and the tests
+both need it running:
+
+```sh
+cd my_app
+docker compose up -d
+gleam dev
+```
+
+Open <http://127.0.0.1:8789> and say howdy to your new app. Changes to your
+code rebuild and refresh the page automatically, and compile errors show up
+in the browser while the last working version keeps serving.
+
+When you want to run the app without the reload watcher, use `gleam run`,
+and run the tests with `gleam test`.
+
+The `howdy` command does more than create projects. It can add controllers,
+records and migrations to your app too: see
+[The howdy command](/docs/cli/overview).

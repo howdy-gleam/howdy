@@ -1,0 +1,142 @@
+# Migrations
+
+`howdy_auth` creates and upgrades its own tables. You decide when: nothing
+is migrated behind your back as the app starts.
+
+The runner, `howdy/migration`, comes from
+[Howdy Database](/docs/database/migrations), so add `howdy_database` to
+`gleam.toml` alongside `howdy_auth`. Your app can use the same runner for
+its own tables.
+
+```gleam
+import howdy/auth
+import howdy/authorization
+import howdy/migration
+
+pub fn migrate(db) {
+  migration.run(db, [auth.schema(), authorization.schema()])
+}
+```
+
+The order of the list is the order of dependency, so `auth.schema()` comes
+first. Leave out `authorization.schema()` if you do not use
+[roles](/docs/auth/roles).
+
+Running it again is safe: only migrations that have not been applied run.
+The whole batch happens in one transaction, and a failure rolls all of it
+back. Two processes migrating at once take turns.
+
+In a project made with `howdy new`, call it next to your own migrations. In
+production, run it as a step of the deployment, before the new version of
+the app starts, and back up the database first. There are no down
+migrations. Stop old instances before migrating; running two versions of
+the app against one schema is not supported.
+
+## Upgrading
+
+New versions of `howdy_auth` add migrations; they never edit old ones. Run
+`migration.run` again as part of deploying each new version, before it
+starts. `auth.new` refuses to start against tables that are behind.
+
+Recent features that need new migrations include
+[provider sign-in](/docs/auth/providers) (migration 9),
+[account changes](/docs/auth/account) (migration 10),
+[passkeys and second factors](/docs/auth/mfa) (migration 11), and
+[registering with a passkey](/docs/auth/passkeys) (migration 15). Existing
+users and sessions survive each of them.
+
+If you keep [sessions in a store of your own](/docs/auth/sessions), check
+that it saves each entry's `method` and `version` unchanged.
+
+## Packages
+
+The runner keeps a ledger, `howdy_migrations`, of what each *package* has
+applied, with a checksum of every migration. A package is a name and a list
+of ordinary `gloo/migration` values:
+
+- A package owns the tables whose names begin with its name and an
+  underscore. Auth owns `howdy_auth_*`, and authorization owns
+  `howdy_authz_*`.
+- Versions are positive and increase within a package. Two packages can
+  both have a version 1.
+- A migration that has been applied is never edited. To change a schema,
+  append a migration with a higher version.
+
+This ledger is separate from the one `gloo/runner` keeps for your app's own
+migrations, and the two sit happily in one database. Do not run the auth
+migrations through `gloo/runner` as well.
+
+## Tables of your own
+
+Your app can join the same transaction with a package of its own, which is
+the tidy way to create tables that reference users:
+
+```gleam
+import gloo/migration as gloo_migration
+
+migration.run(db, [
+  auth.schema(),
+  migration.Package("app", [
+    gloo_migration.new(
+      1,
+      "create_profiles",
+      "CREATE TABLE app_profiles (
+         user_id TEXT PRIMARY KEY REFERENCES howdy_auth_users(id),
+         display_name TEXT NOT NULL
+       )",
+    ),
+  ]),
+])
+```
+
+Statements are separated by semicolons, so a semicolon inside a string
+literal is not supported, and the SQL must not begin or commit
+transactions.
+
+When the SQL differs between databases, append
+`migration.per_database(postgres:, sqlite:)` to the statements they share.
+Only the matching half runs:
+
+```gleam
+gloo_migration.new(
+  2,
+  "add_seen",
+  "CREATE TABLE app_notes (id TEXT);"
+    <> migration.per_database(
+      postgres: "ALTER TABLE app_notes ADD COLUMN seen TIMESTAMPTZ",
+      sqlite: "ALTER TABLE app_notes ADD COLUMN seen BIGINT",
+    ),
+)
+```
+
+For a small value per user, a [field](/docs/auth/fields) needs no table at
+all.
+
+## Checked at startup
+
+`auth.new` and `authorization.new` check that the recorded history matches
+the installed package, and that the tables still have the shape the
+migrations gave them. An app that has not been migrated, or whose auth
+tables were altered by hand, does not start.
+
+You may:
+
+- reference `howdy_auth_users(id)` from your own tables
+- add a plain, non-unique index to an auth table, with a name outside the
+  package's prefix, such as `ops_events_action`
+
+You may not add columns, unique indexes or triggers to the auth tables.
+
+The check compares what the database reports about its own schema, and
+that report can change when nothing real has: after a major PostgreSQL
+upgrade, or a dump and restore. If startup says the schema changed, and you
+have confirmed by hand that it did not, accept the current shape from a
+deployment command:
+
+```gleam
+let assert Ok(_) = migration.rebaseline(db, auth.schema())
+```
+
+`rebaseline` refuses unless the recorded history matches the package
+exactly, so it cannot hide a missing or edited migration. Never call it as
+the app starts.

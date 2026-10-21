@@ -1,0 +1,103 @@
+# Formatting
+
+`howdy/i18n/format` writes numbers, money, dates, relative times and lists
+the way a translator's locale writes them. The patterns, names and plural
+rules come from the Unicode [CLDR](https://cldr.unicode.org/), the data
+browsers use for `Intl`.
+
+```gleam
+import howdy/i18n
+import howdy/i18n/format
+
+let t = i18n.new("de")
+```
+
+## Numbers
+
+```gleam
+format.integer(t, 1_234_567)   // "1.234.567"
+format.decimal(t, 3.14159)     // "3,142", up to three decimal places
+format.fixed(t, 2.5, 2)        // "2,50", exactly two
+format.percent(t, 0.25)        // "25 %"
+```
+
+Each locale has its own grouping. Indian English writes `12,34,567`, and
+Spanish leaves four-digit numbers ungrouped. Persian writes its own digits,
+as `۱٬۲۳۴`.
+
+## Money
+
+Amounts are given in the currency's smallest unit, such as cents, so no
+amount is ever a float:
+
+```gleam
+format.currency(t, minor: 123_456, code: "EUR")             // "1.234,56 €"
+format.currency(i18n.new("en"), minor: 1999, code: "USD")   // "$19.99"
+format.currency(i18n.new("en"), minor: 1234, code: "JPY")   // "¥1,234"
+```
+
+Each currency has its own number of decimal places: yen have none, and the
+Kuwaiti dinar has three. A currency without a symbol in the locale's data
+shows its code.
+
+## Dates and times
+
+Dates and times use `gleam/time/calendar`:
+
+```gleam
+let date = calendar.Date(2026, calendar.October, 19)
+let time = calendar.TimeOfDay(15, 4, 0, 0)
+
+format.date(t, date, format.Short)       // "19.10.26"
+format.date(t, date, format.Long)        // "19. Oktober 2026"
+format.date(t, date, format.Full)        // "Montag, 19. Oktober 2026"
+format.time(t, time, format.Short)       // "15:04"
+format.date_time(t, date, time, format.Medium)
+format.month_year(t, 2026, calendar.October)   // "Oktober 2026"
+```
+
+There is no time zone support yet, so convert to the reader's zone before
+formatting. The zone names some locales put in their longer time formats
+are left out.
+
+For a calendar of your own, `format.months`, `format.weekdays` (Monday
+first) and `format.first_day_of_week` give the names and the day weeks
+start on where the locale is used.
+
+## Relative times
+
+```gleam
+format.relative(i18n.new("en"), -1, format.Day)    // "yesterday"
+format.relative(i18n.new("en"), -3, format.Day)    // "3 days ago"
+format.relative(i18n.new("en"), 2, format.Hour)    // "in 2 hours"
+```
+
+Where the locale has a word for the offset, it is used, such as
+"yesterday", "today" and "tomorrow".
+
+## Lists
+
+```gleam
+format.list(i18n.new("en"), ["Ann", "Ben", "Cem"])      // "Ann, Ben, and Cem"
+format.or_list(i18n.new("en"), ["tea", "coffee"])       // "tea or coffee"
+format.list(i18n.new("de"), ["Ann", "Ben", "Cem"])      // "Ann, Ben und Cem"
+```
+
+## Which locales have data
+
+Formatting data is included for 46 locales:
+
+- Arabic, Bengali, Bulgarian, Chinese (simplified and traditional),
+  Croatian, Czech, Danish and Dutch
+- English, for the US, UK, Australia, Canada and India
+- Finnish, French (and for Canada and Switzerland), German (and for Austria
+  and Switzerland), Greek and Hebrew
+- Hindi, Hungarian, Indonesian, Italian, Japanese, Korean, Malay and
+  Norwegian
+- Persian, Polish, Portuguese (Brazil and Portugal) and Romanian
+- Russian, Slovak, Spanish (and for Latin America and Mexico), Swedish,
+  Thai, Turkish, Ukrainian and Vietnamese
+
+`i18n.data_locales()` lists them. Any other locale uses the nearest one
+that has data, and English in the end. Plural rules cover every language
+CLDR knows.

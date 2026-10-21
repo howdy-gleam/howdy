@@ -1,0 +1,120 @@
+# Telemetry
+
+Howdy traces your app with [OpenTelemetry](https://opentelemetry.io/): every
+request, database query, remote call, email and sign-in becomes a span, and
+spans that belong together form a trace you can follow from the request
+down to the SQL it ran.
+
+Nothing is recorded or sent until you ask for it. Without `howdy_telemetry`
+the spans cost next to nothing and go nowhere; with it, you choose where
+they go:
+
+- to an OpenTelemetry collector or any backend that takes OTLP, such as
+  Grafana Tempo, Honeycomb or Jaeger, in production
+- into memory, for the [admin area](/docs/admin/telemetry) to show while
+  you develop
+
+## Install
+
+```sh
+gleam add howdy_telemetry@1
+```
+
+## Sending traces to a collector
+
+Start telemetry once, early in `main`:
+
+```gleam
+import howdy/telemetry
+
+pub fn main() {
+  let assert Ok(Nil) =
+    telemetry.new("acme-web")
+    |> telemetry.otlp
+    |> telemetry.start
+  // open the database, start the app...
+}
+```
+
+`otlp` sends spans over OTLP/HTTP in batches, configured by the standard
+environment variables, so endpoints and keys stay out of the code:
+
+- `OTEL_EXPORTER_OTLP_ENDPOINT`: where to send, such as
+  `https://api.honeycomb.io`. Defaults to `http://localhost:4318`.
+- `OTEL_EXPORTER_OTLP_HEADERS`: headers for every export, such as
+  `x-honeycomb-team=KEY`.
+- `OTEL_SERVICE_NAME`: overrides the service name given to `new`.
+- `OTEL_RESOURCE_ATTRIBUTES`: more resource attributes, such as
+  `deployment.environment.name=staging`.
+- `OTEL_SDK_DISABLED`: `true` turns everything off again, even after
+  `start`.
+
+To send only where a collector is configured, and stay silent everywhere
+else, use `from_env`. It gives a configuration only when
+`OTEL_EXPORTER_OTLP_ENDPOINT` or `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` is set:
+
+```gleam
+case telemetry.from_env("acme-web") {
+  Ok(config) -> {
+    let assert Ok(Nil) = telemetry.start(config)
+    Nil
+  }
+  Error(Nil) -> Nil
+}
+```
+
+`otlp_to(endpoint:, headers:)` names the collector in code instead.
+`resource("service.version", "1.4.2")` describes the service further. A
+short-lived program, such as a task run from the command line, should call
+`telemetry.flush()` before it exits, so the last batch is not lost.
+
+### Trying it locally
+
+Jaeger's all-in-one image takes OTLP on port 4318 and has a UI on 16686:
+
+```sh
+docker run --rm -p 4318:4318 -p 16686:16686 jaegertracing/jaeger:2.10.0
+```
+
+Grafana's `grafana/otel-lgtm` image does the same with Tempo, Loki and
+Grafana.
+
+## Sampling
+
+Every trace is recorded by default. On a busy site, keep a share of them:
+
+```gleam
+telemetry.new("acme-web")
+|> telemetry.otlp
+|> telemetry.sample(0.1)
+```
+
+A request that arrives from another traced service keeps that service's
+decision, so a trace is recorded throughout or not at all. The
+`OTEL_TRACES_SAMPLER` variables override this.
+
+## Recording in development
+
+In development, record into memory and give the recorder to the admin:
+
+```gleam
+// dev/my_app_dev.gleam
+import howdy/telemetry
+import howdy/telemetry/recorder
+
+let recorder = recorder.new(keep: 200)
+let assert Ok(Nil) =
+  telemetry.new("acme-web")
+  |> telemetry.record(recorder)
+  |> telemetry.start
+let dashboard = admin.new() |> admin.telemetry(recorder)
+```
+
+`record` and `otlp` can be combined, to see traces in the admin and a
+collector at once. See [the admin's telemetry pages](/docs/admin/telemetry).
+
+## What gets traced
+
+See [tracing](/docs/telemetry/tracing) for the spans Howdy opens and how to
+add your own, and [logs](/docs/telemetry/logs) for how log lines join the
+trace they were written in.

@@ -1,0 +1,30 @@
+name = "howdy_ui"
+version = "1.0.0"
+gleam = ">= 1.18.0"
+description = "Pages, themes and live server components for howdy, built on Lustre and Sketch"
+licences = ["Apache-2.0"]
+repository = { type = "github", user = "howdy-gleam", repo = "howdy", path = "ui", tag-prefix = "howdy_ui-" }
+links = [{ title = "Website", href = "https://tryhowdy.dev" }]
+internal_modules = ["howdy/ui/internal/*", "howdy/ui/gallery", "howdy/ui/gallery/*"]
+target = "erlang"
+
+[erlang]
+application_start_module = "howdy_ui_app"
+
+[dependencies]
+gleam_stdlib = ">= 1.0.0 and < 2.0.0"
+gleam_erlang = ">= 1.3.0 and < 2.0.0"
+gleam_http = ">= 4.4.0 and < 5.0.0"
+gleam_json = ">= 3.1.0 and < 4.0.0"
+argv = ">= 1.0.0 and < 2.0.0"
+filepath = ">= 1.1.2 and < 2.0.0"
+howdy = { path = ".." }
+howdy_i18n = { path = "../i18n" }
+gleam_time = ">= 1.8.0 and < 2.0.0"
+lustre = ">= 5.7.0 and < 6.0.0"
+murmur3a = ">= 1.0.0 and < 2.0.0"
+simplifile = ">= 2.7.0 and < 3.0.0"
+sketch = ">= 4.2.0 and < 5.0.0"
+
+[dev_dependencies]
+gleeunit = ">= 1.0.0 and < 2.0.0"

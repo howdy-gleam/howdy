@@ -1,0 +1,217 @@
+# Custom components
+
+The built-in [components](/docs/ui/components) are a starting point. Sooner
+or later you will want a button with different padding, or a component the
+set does not have at all. Howdy UI gives you two ways to get there, and
+both end with ordinary Gleam files in your own project that you are free
+to change.
+
+## Copying a built-in component
+
+Howdy UI does not have options for every detail of every component. When
+one is not quite right, copy its source into your project and edit it. The
+package comes with a command line for this:
+
+```sh
+gleam run -m howdy/ui list
+```
+
+```
+button        Buttons, and the theme toggle built on them.
+heading       Headings.
+typography    Paragraphs, secondary text and links.
+input         Form fields.
+layout        Containers, cards, stacks and rows.
+```
+
+Copy one or more by name:
+
+```sh
+gleam run -m howdy/ui add button layout
+```
+
+That writes `src/<your app>/ui/button.gleam` and `layout.gleam`. They are
+the same source the package ships, with a header noting the version they
+came from. The files are yours. Import your copy where you would have used
+the built-in:
+
+```gleam
+import my_app/ui/button.{Primary}
+
+button.button(Primary, [], [text("Save")])
+```
+
+The copies import `lustre` and `sketch` themselves, so both must be direct
+dependencies of your project. `add` tells you if one is missing:
+
+```sh
+gleam add sketch
+```
+
+Two options change what `add` does:
+
+- `--to=<dir>` writes the copies somewhere other than `src/<app>/ui`.
+- `--force` overwrites a copy you have edited. Without it, `add` leaves an
+  edited copy alone and shows you how it differs.
+
+### Keeping up with the package
+
+A copy does not change when you upgrade Howdy UI, which is the point: an
+upgrade cannot alter how your site looks. To see what you are missing, or
+just what you have changed, compare a copy with the version the package
+ships:
+
+```sh
+gleam run -m howdy/ui diff button
+```
+
+The output is a diff in the usual style. Lines starting `-` are only in
+your copy, and lines starting `+` are only in the package's version. Bring
+across by hand whatever you want from it.
+
+## Writing a component from scratch
+
+A component is a function that returns an element with a class on it. The
+class is written with [Sketch](https://hexdocs.pm/sketch), which is CSS as
+Gleam functions:
+
+```gleam
+// src/my_app/ui/badge.gleam
+import howdy/ui/style.{class}
+import howdy/ui/theme/tokens
+import lustre/element.{type Element, text}
+import lustre/element/html
+import sketch/css.{type Class}
+
+pub fn badge(content: String) -> Element(msg) {
+  html.span([class(badge_class())], [text(content)])
+}
+
+pub fn classes() -> List(Class) {
+  [badge_class()]
+}
+
+pub fn badge_class() -> Class {
+  css.class([
+    css.background(tokens.primary),
+    css.color(tokens.on_primary),
+    css.padding_(tokens.space_1 <> " " <> tokens.space_2),
+    css.property("border-radius", tokens.radius_small),
+    css.font_size_("0.75rem"),
+    css.font_weight("600"),
+  ])
+}
+```
+
+There are three parts, and the built-in components are made the same way:
+
+- `badge_class` describes the styles. `css.class` takes a list of
+  declarations. Most CSS properties have a function, and `css.property`
+  covers any that do not.
+- `badge` builds the element. `class` from `howdy/ui/style` attaches the
+  class and registers its CSS, so that pages and live views include it.
+  `ui.class` is the same function, if you already import `howdy/ui`.
+- `classes` lists every class the module uses. It is what lets the styles
+  be written to a file for [publishing](/docs/ui/publishing).
+
+Use it like any other component:
+
+```gleam
+ui.row([], [ui.h2("Orders"), badge.badge("New")])
+```
+
+### Use tokens, never colours
+
+The badge never says what colour it is. It uses *tokens* from
+`howdy/ui/theme/tokens`, which stand for whatever the current
+[theme](/docs/ui/themes) says:
+
+- Colours: `background`, `surface`, `border`, `text`, `text_muted`,
+  `primary`, `primary_hover`, `on_primary`, `danger`, `on_danger`, `focus`.
+- Fonts: `font_body`, `font_heading`, `font_mono`.
+- Radii: `radius_small`, `radius_medium`, `radius_large`.
+- Spacing: `space_1`, `space_2`, `space_3`, `space_4`, `space_6`,
+  `space_8`, running from `0.25rem` to `2rem`.
+
+A component built from tokens looks right under every theme, including ones
+written after it. Write `css.color("#2563eb")` and the component is stuck
+with that blue, in dark mode and in every theme a visitor picks.
+
+Spacing tokens are a fixed scale, not part of the theme, so layouts stay
+the same size when the theme changes. Using the scale, not arbitrary
+numbers, is what keeps spacing looking even across a site.
+
+### States and variants
+
+Sketch has functions for the states of an element, each taking the
+declarations that apply in that state:
+
+```gleam
+css.class([
+  css.color(tokens.text_muted),
+  css.hover([css.color(tokens.text)]),
+  css.focus_visible([css.outline("2px solid " <> tokens.focus)]),
+  css.disabled([css.property("opacity", "0.5")]),
+])
+```
+
+For a component with variants, take a custom type and build the class from
+it, as the built-in button does:
+
+```gleam
+pub type Tone {
+  Neutral
+  Alert
+}
+
+pub fn badge_class(tone: Tone) -> Class {
+  let #(background, color) = case tone {
+    Neutral -> #(tokens.surface, tokens.text)
+    Alert -> #(tokens.danger, tokens.on_danger)
+  }
+  css.class([css.background(background), css.color(color)])
+}
+
+pub fn classes() -> List(Class) {
+  [badge_class(Neutral), badge_class(Alert)]
+}
+```
+
+List every variant in `classes`. A variant left out still works while you
+develop, because its CSS is made when it is first used, but it would be
+missing from the published file.
+
+## The all.gleam module
+
+Whenever `add` runs, it also writes `all.gleam` in the same directory. It
+gathers the classes of every module there that has a `classes` function:
+
+```gleam
+pub fn classes() -> List(Class) {
+  list.flatten([
+    badge.classes(),
+    button.classes(),
+  ])
+}
+```
+
+Your own components are included, as long as they live in that directory
+and have a `classes` function. Do not edit the file, since the next `add`
+replaces it. [Publishing](/docs/ui/publishing) uses this list.
+
+`add` needs the name of at least one component, so to bring `all.gleam` up
+to date after writing a component of your own, run it again for one you
+have already copied. An edited copy is left as it is:
+
+```sh
+gleam run -m howdy/ui add button
+```
+
+## How class names work
+
+Sketch names each class after a hash of its contents, such as
+`css-7B0E1023`. Two classes with the same declarations share a name, and
+changing a declaration changes the name. You never write these names, and
+should not rely on them in tests or in hand-written CSS. To style something
+from your own stylesheet, add a class of your own with `attribute.class`
+alongside the generated one.

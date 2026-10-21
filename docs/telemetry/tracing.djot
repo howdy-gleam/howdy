@@ -1,0 +1,122 @@
+# Tracing
+
+## What Howdy traces
+
+Once telemetry is started, these become spans without any code of yours:
+
+- *Every request*, as a server span named after the route, not the path,
+  such as `GET /users/:id`. It has the method, path, status and client
+  address. `5xx` answers fail the span, and a `traceparent` header from the
+  caller is continued.
+- *`howdy/database`*: one client span per query, such as
+  `SELECT app_notes`, with the SQL but never its parameter values, and the
+  rows returned. Only inside a span that is being recorded, so background
+  polling does not fill your traces.
+- *`database.transaction`*: a `transaction` span with its queries inside,
+  and `db.transaction.rolled_back` when it rolls back.
+- *`howdy/remote`*: a client span named after the procedure around each
+  call, a server span for it on the other node, and the trace carried
+  across, over HTTP and over Erlang distribution.
+- *`howdy/mail`*: a `mail.send` span with the adapter, the message id,
+  tags and number of recipients. Never addresses or the subject.
+- *`howdy_auth`*: one span per sign-in step, such as
+  `auth.login_password`, with `auth.refused` holding the status of a
+  refusal. The request's span gets `enduser.id`, and audit events, such as
+  `sessions.revoked`, become span events. Never emails, passwords or
+  tokens.
+- *Websockets*: a `websocket text` span per frame from the client, as a
+  trace of its own linked to the request that opened the socket.
+
+Query strings, headers other than the user agent, and request bodies are
+never recorded, since they can hold secrets.
+
+PostgreSQL Repos opened with `howdy/database/postgres` are traced already.
+Trace a SQLite Repo, or one you built yourself, with `database.traced`:
+
+```gleam
+let assert Ok(db) = sqlite.start(sqlite.file("app.sqlite"))
+let db = database.traced(db)
+```
+
+Live components run their `update` in a runtime process of their own, which
+Howdy cannot see into, so their frames are not traced. Wrap work in
+`update` in a span of your own if you want it traced.
+
+## Your own spans
+
+`howdy/trace` opens spans in your code. A span ends when its function
+returns, and one opened inside another becomes its child:
+
+```gleam
+import howdy/trace
+
+pub fn checkout(cart: Cart) {
+  use <- trace.span("checkout", [trace.int("cart.items", cart.count)])
+  // ...
+}
+```
+
+Add to the current span as you learn more, or mark it failed:
+
+```gleam
+trace.set_attributes([trace.string("payment.provider", "stripe")])
+trace.event("payment.authorised", [])
+trace.set_error("card declined")
+```
+
+A span whose function panics is marked failed, with the panic recorded, and
+the panic carries on. For a span kind, links or a parent from headers, build
+the span with `trace.new`:
+
+```gleam
+trace.new("charge")
+|> trace.kind(trace.Client)
+|> trace.attributes([trace.string("server.address", "api.stripe.com")])
+|> trace.run(fn() { stripe.charge(amount) })
+```
+
+Use OpenTelemetry's [semantic convention](https://opentelemetry.io/docs/specs/semconv/)
+names for attributes where one fits, so backends know what they mean.
+
+### Other processes
+
+Spans nest by process. Work handed to another process starts a new trace
+unless you carry the context over:
+
+```gleam
+let context = trace.context()
+process.spawn(fn() {
+  use <- trace.within(context)
+  resize_images(upload)
+})
+```
+
+For work picked up much later, such as a job in a queue, store
+`trace.traceparent()` with the job and link to it when it runs, rather than
+making the job part of a request that finished long ago:
+
+```gleam
+let assert Ok(link) = trace.link_to(job.traceparent)
+trace.new("job.resize")
+|> trace.link(link)
+|> trace.run(fn() { resize_images(job) })
+```
+
+### Calling other services
+
+`trace.inject(headers)` adds the current trace's `traceparent` header to
+a request you are about to make, so a service that is traced too continues
+the trace. `howdy/remote` does this for you.
+
+### Other libraries
+
+`howdy/trace` is built on the `opentelemetry_api` package, as is every
+OpenTelemetry library on the BEAM. Spans from those libraries, such as
+[opengleametry](https://hexdocs.pm/opengleametry/), nest under Howdy's and
+the other way round.
+
+### Showing the trace id
+
+`trace.trace_id()` is the current trace's id when it is being recorded.
+Show it on an error page, or return it in a header, so a report of a
+problem leads straight to its trace.

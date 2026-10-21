@@ -1,0 +1,42 @@
+# Telemetry
+
+Give the admin a [telemetry recorder](/docs/telemetry/overview#Recording-in-development)
+and it shows what your app is doing as it does it.
+
+```gleam
+// dev/my_app_dev.gleam
+let recorder = recorder.new(keep: 200)
+let assert Ok(Nil) =
+  telemetry.new("my-app") |> telemetry.record(recorder) |> telemetry.start
+let dashboard = admin.new() |> admin.database(db) |> admin.telemetry(recorder)
+```
+
+## Traces
+
+**Telemetry → Traces** lists requests and other traces, newest first, as
+they finish: the route, the status, how long it took, and how many spans and
+queries it had. Search by route or path, or show only traces with failures
+or slow ones. The admin's own requests are hidden unless you ask for them.
+
+Open a trace for its timeline: every span in order, indented under its
+parent, with a bar showing when it ran. Queries are drawn in their own
+colour and failures in red. Open a span for its attributes, such as the
+SQL of a query, and its events, such as exceptions and log lines.
+
+Above the timeline the admin points out:
+
+- spans that failed, and why
+- a statement that ran five or more times in one trace, which is usually
+  a query inside a loop, one per row, that a join would replace
+- statements slower than 100 ms
+
+The log lines written while the trace ran are listed below it.
+
+## Logs
+
+**Telemetry → Logs** shows the newest log lines as they are written, with
+their level, and a link to the trace each was written in. Filter it to
+warnings or errors.
+
+The recorder keeps the newest traces, as many as `keep` says, and the last
+2,000 log lines. **Clear all** empties it.

@@ -1,0 +1,126 @@
+# Fields
+
+A field is a small fact your app keeps about a user or a
+[group](/docs/auth/groups): a username, a display name, a plan, a billing
+id. Fields save you a table and a migration for the things nearly every app
+wants.
+
+## Declaring a field
+
+Declare a field once, as a function, and use that declaration to write and
+to read. The two can then never disagree about the name or the type:
+
+```gleam
+import gleam/string
+import howdy/auth/field
+
+pub fn username() -> field.Field(String) {
+  field.text("username")
+  |> field.unique
+  |> field.check(fn(name) {
+    case string.length(name) >= 3 {
+      True -> Ok(Nil)
+      False -> Error("must be at least 3 characters")
+    }
+  })
+}
+
+pub fn seats() -> field.Field(Int) {
+  field.int("seats")
+}
+```
+
+The kinds of field:
+
+- `field.text`, `field.int` and `field.bool`
+- `field.time` holds a `gleam/time` `Timestamp`
+- `field.custom(name, encode:, decode:)` holds a type of your own, stored
+  as text
+
+And what can be added to one:
+
+- `field.unique`: only one holder of each value in the whole installation.
+- `field.unique_in_group`: only one holder of each value within a group.
+  For user fields only.
+- `field.check(with:)`: refuse some values. The message comes back as a
+  `400`, after the field's name: `username: must be at least 3 characters`.
+
+A name is 1 to 64 lowercase letters, digits and underscores. User fields
+and group fields are named separately, so both can have a `plan`. A value
+is at most 1024 bytes once encoded.
+
+## Writing and reading
+
+```gleam
+import howdy/auth/user
+import howdy/auth/users
+
+// Write. All of the changes apply, or none.
+let assert Ok(_) =
+  users.update(
+    identity,
+    principal.user.id,
+    [field.set(username(), "ada")],
+    by: user.Acting(principal),
+  )
+
+// Read.
+use data <- result.try(users.fields(identity, principal.user.id))
+let name = field.get(data, username()) |> result.unwrap(principal.user.email)
+
+// Find the users holding a value.
+let assert Ok([ada]) = users.find(identity, where: username(), is: "ada")
+```
+
+`field.clear(username())` is the change that removes a value.
+`groups.update`, `groups.fields` and `groups.find` do the same for groups.
+
+To set fields in the same transaction that creates the row, use
+`auth.provision_with(identity, email, fields:, by:)` and
+`groups.create_with(identity, id:, name:, fields:, by:)`.
+
+Fields are not loaded when a request is authenticated, so `ctx.guard.user`
+does not carry them. Call `users.fields` where you need them.
+
+`users.get`, `users.fields` and `users.find` called through
+[`auth.in_group`](/docs/auth/groups) only see that group's users.
+
+Like the rest of user administration, these functions are privileged and
+are not exposed over HTTP. A handler that lets a visitor change their own
+username is fine; one that takes a user id from the request must first check
+the caller may act on that user.
+
+## Uniqueness
+
+The database enforces uniqueness, so a taken value is a `409` even when two
+requests race.
+
+Declare a field unique before it is first written. Values stored while it
+was not unique are not checked against.
+
+Values that are unique within a group follow their user through
+`groups.move`, which is a `Conflict` if the destination already holds one.
+
+## Audit
+
+A change is recorded as `user.fields_changed` or `group.fields_changed`,
+with the names of the fields. The values never reach the
+[audit trail](/docs/auth/administration).
+
+## Timestamps
+
+`user.User` and `group.Group` carry `created_at` and `updated_at` as
+`gleam/time` timestamps, in whole seconds. Their JSON has them as RFC 3339
+strings.
+
+A user's `updated_at` moves when they are suspended or resumed, change
+group, or have a field changed. A group's moves when it is renamed or has a
+field changed. Passwords, sessions and membership do not move either.
+
+## When to use your own table
+
+Fields suit a handful of small values you look up by exact match. Anything
+relational, anything large, and anything you query by range belongs in a
+table of your own, with a column that references `howdy_auth_users(id)`.
+[Migrations](/docs/auth/migrations) shows how to create one alongside the
+auth tables.

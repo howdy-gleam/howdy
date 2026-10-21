@@ -1,0 +1,381 @@
+# WebSockets
+
+An ordinary request gets one response and is over. A WebSocket stays open,
+and either side can send a message at any time. That makes it the tool for
+anything the server needs to push: chat, notifications, live prices, a
+progress bar.
+
+If only the server needs to push, and the browser just listens,
+[server-sent events](/docs/controllers/server-sent-events) are simpler:
+they are plain HTTP, and the browser reconnects by itself.
+
+In Howdy a WebSocket is an ordinary route. It starts life as a `GET`
+request, so it is declared on a controller like any other and passes
+through the same middleware, [guards](/docs/controllers/guards) and
+versioning. The handler describes the socket, and finishes with
+`websocket.upgrade` where another handler would return a page.
+
+## An echo server
+
+```gleam
+import howdy/controller.{type Context}
+import howdy/websocket
+
+pub fn echo_controller() {
+  controller.new("echo")
+  |> controller.get("/", fn(ctx: Context) {
+    websocket.new(fn(_socket) { 0 })
+    |> websocket.on_text(fn(socket, count, text) {
+      let _ = websocket.send_text(socket, text)
+      websocket.continue(count + 1)
+    })
+    |> websocket.upgrade(ctx)
+  })
+}
+```
+
+In a browser, `new WebSocket("ws://localhost:8787/echo")` connects to it,
+and every message sent comes straight back.
+
+There are three parts to every socket:
+
+- `websocket.new` takes the function to run when the connection opens. What
+  it returns is the socket's starting state, here a count of `0`.
+- Callbacks such as `on_text` handle what happens next. Each is given the
+  socket to send on and the current state.
+- Each callback returns what to do now: `websocket.continue(state)` to carry
+  on with a new state, or `websocket.close` to end the connection.
+
+State is how a socket remembers things between messages. It can be any type
+you like: a count, a user, a record. Each connection runs in its own
+process, so its state is private to it, and a crash in one connection does
+not touch any other.
+
+## Receiving messages
+
+- `on_text` handles text frames, as a `String`.
+- `on_binary` handles binary frames, as a `BitArray`.
+- `on_json` handles text frames by decoding them as JSON first, and gives
+  the callback the decoded value.
+
+Frames with no callback are ignored. Most apps speak JSON, so `on_json` is
+the usual choice:
+
+```gleam
+import gleam/dynamic/decode
+
+pub type ChatMessage {
+  ChatMessage(body: String)
+}
+
+fn chat_message_decoder() {
+  use body <- decode.field("body", decode.string)
+  decode.success(ChatMessage(body:))
+}
+```
+
+```gleam
+|> websocket.on_json(chat_message_decoder(), fn(socket, state, message) {
+  // message is a ChatMessage here.
+  websocket.continue(state)
+})
+```
+
+`on_json` ignores frames that fail to decode. `on_json_or` takes a second
+callback for those, if you would rather close the connection. `on_json`
+replaces any `on_text` callback, since both handle text frames.
+
+## Sending messages
+
+Send on the socket with `send_text`, `send_binary` or `send_json`:
+
+```gleam
+let _ = websocket.send_json(socket, json.object([#("price", json.int(1250))]))
+```
+
+Each returns a `Result`, which is an error when the client has gone away.
+There is rarely anything useful to do about that, since the connection is
+about to close and `on_close` will run, so it is usually ignored with
+`let _ =`.
+
+## Closing
+
+`websocket.close(socket, code, reason)` sends the client a close frame and
+ends the connection. The code is one of the standard close codes in
+`websocket.CloseCode`:
+
+```gleam
+websocket.close(socket, websocket.NormalClosure, "goodbye")
+```
+
+`NormalClosure` is the usual choice. `InvalidPayloadData` suits a message
+you could not understand, and `PolicyViolation` one that broke your rules.
+`ApplicationCode(code)` carries a code of your own, between 3000 and 4999.
+`websocket.stop()` ends the connection without telling the client why.
+
+`on_close` runs once when a connection ends, however that happens: your
+callback closed it, the client closed it, or the network dropped. Use it to
+tidy up. Nothing can be sent from there, because the connection is gone.
+
+## Channels
+
+A socket callback can only send to its own client. To reach other clients,
+use `howdy/websocket/channel`. A socket joins a topic, and anything in your
+program can broadcast to every socket on that topic.
+
+This is a complete chat room. The room comes from the path and the name
+from the query string, read with the same helpers as any other handler:
+
+```gleam
+import gleam/json
+import howdy/param
+import howdy/query
+import howdy/websocket/channel
+
+fn chat(ctx: Context) {
+  use room <- param.string(ctx, "room")
+  use name <- query.string_or(ctx, "name", default: "anonymous")
+  let topic = "room:" <> room
+
+  websocket.new(fn(socket) {
+    channel.join(socket, topic)
+    channel.broadcast_text(topic, name <> " joined")
+    name
+  })
+  |> websocket.on_json_or(
+    chat_message_decoder(),
+    fn(_socket, name, message: ChatMessage) {
+      channel.broadcast_json(
+        topic,
+        json.object([
+          #("from", json.string(name)),
+          #("body", json.string(message.body)),
+        ]),
+      )
+      websocket.continue(name)
+    },
+    fn(socket, _name, _error) {
+      websocket.close(socket, websocket.InvalidPayloadData, "expected json")
+    },
+  )
+  |> websocket.on_close(fn(_socket, name) {
+    channel.broadcast_text(topic, name <> " left")
+  })
+  |> websocket.upgrade(ctx)
+}
+```
+
+A broadcast reaches every socket on the topic, including the one that sent
+it, so the sender sees their own message arrive like everyone else's.
+
+Things worth knowing about channels:
+
+- A topic is just a string. Nothing needs creating first; a topic exists
+  while it has members.
+- A socket that closes or crashes leaves all its topics automatically, so
+  the chat room above needs no `channel.leave`. Call `leave` when a socket
+  should stop listening but stay open.
+- `broadcast` returns at once. Each socket sends from its own process, so
+  one slow client never holds up the others, or the caller.
+- `channel.size(topic)` tells you how many sockets are on a topic.
+- If your app runs on several connected Erlang nodes, a broadcast reaches
+  the sockets on all of them.
+
+Broadcasting is not limited to sockets. An ordinary HTTP handler, a service
+or a background job can do it too:
+
+```gleam
+fn announce(ctx: Context) {
+  channel.broadcast_text("room:lobby", "Server restarting in five minutes")
+  controller.status(ctx, 202)
+}
+```
+
+## Presence
+
+A channel knows which sockets are on a topic, but not who they belong to.
+`howdy/websocket/presence` tracks people: each socket says who it is with a
+key, such as a user id, and a meta value describing them, such as a name or
+whether they are typing. Someone with the page open in two tabs is one key
+with two metas, present until the last tab closes.
+
+Describe a kind of presence once, with how its meta goes to and from JSON:
+
+```gleam
+import howdy/websocket/presence.{type Presence}
+
+pub type Here {
+  Here(name: String, typing: Bool)
+}
+
+pub fn people() -> Presence(Here) {
+  presence.new(
+    "people",
+    encode: fn(here: Here) {
+      json.object([
+        #("name", json.string(here.name)),
+        #("typing", json.bool(here.typing)),
+      ])
+    },
+    decoder: {
+      use name <- decode.field("name", decode.string)
+      use typing <- decode.field("typing", decode.bool)
+      decode.success(Here(name:, typing:))
+    },
+  )
+}
+```
+
+Then track the socket and watch the room when it opens. Callbacks run in the
+socket's own process, so `process.self()` is the socket:
+
+```gleam
+websocket.new(fn(socket) {
+  presence.track(people(), process.self(), topic, key: name, meta: Here(name:, typing: False))
+  presence.watch(people(), socket, topic)
+  name
+})
+```
+
+Tracking the same socket, topic and key again replaces its meta, which is
+how a status such as typing changes. A socket that closes or crashes leaves
+by itself, like it leaves its channels.
+
+A watching socket is sent everyone on the topic straight away, then a diff
+of joins and leaves after every change. The browser keeps the list with a
+small script that Howdy ships. Mount it as a controller:
+
+```gleam
+howdy.new()
+|> howdy.controller(presence.client(at: "/howdy/presence.js"))
+```
+
+and hand it every message from the socket:
+
+```js
+import { Presence } from "/howdy/presence.js"
+
+const people = new Presence({ name: "people", topic: "room:lobby" })
+  .onSync((list) => render(list))   // [{ key, metas }]
+  .onJoin((key, current, joined) => { if (!current) console.log(key, "arrived") })
+  .onLeave((key, remaining, left) => { if (remaining.length === 0) console.log(key, "left") })
+
+socket.onmessage = (event) => {
+  const message = JSON.parse(event.data)
+  if (people.receive(message)) return
+  // your own messages
+}
+```
+
+Server code reads the same information:
+
+- `presence.list(people(), topic)` returns every key on the topic with its
+  metas, and `presence.count` the number of keys.
+- `presence.subscribe(people(), topic, subject, map)` sends a message made
+  from each diff to a subject, for a live view or a service that reacts to
+  people arriving and leaving. It returns the current list, so nothing is
+  missed between reading it and the first diff.
+
+Presence works across a cluster. Each node keeps its own sockets' presences
+and shares them with the other nodes, so `list` answers for every node from
+memory. If a node goes away its people leave everywhere else, and if it
+comes back they rejoin.
+
+## Messages from your own code
+
+Channels send frames to clients. Sometimes you want to send a value to the
+socket's own code instead, and let it decide what to do. `websocket.subject`
+gives you a `Subject` for the connection, and whatever is sent to it arrives
+at the `on_message` callback:
+
+```gleam
+pub type Push {
+  PriceChanged(Int)
+  Shutdown
+}
+
+fn prices(ctx: Context) {
+  websocket.new(fn(socket) {
+    price_feed.register(websocket.subject(socket))
+    Nil
+  })
+  |> websocket.on_message(fn(socket, state, message) {
+    case message {
+      PriceChanged(pence) -> {
+        let _ =
+          websocket.send_json(socket, json.object([#("price", json.int(pence))]))
+        websocket.continue(state)
+      }
+      Shutdown -> websocket.close(socket, websocket.GoingAway, "server restarting")
+    }
+  })
+  |> websocket.upgrade(ctx)
+}
+```
+
+Here `price_feed.register` stands for your own code, which keeps the subject
+and later calls `process.send(subject, PriceChanged(1250))`. The message
+type is yours, so the socket can react differently to each variant, and
+update its state, which a broadcast frame cannot do.
+
+## Who may connect
+
+A WebSocket is open to a kind of attack an ordinary request is not. Any
+website can open a socket to your server from a visitor's browser, and the
+browser sends your cookies along with it. So before upgrading, Howdy checks
+the `origin` header that browsers attach:
+
+- By default only your own site may connect: the origin must have the same
+  scheme, host and port as the request. Anything else answers `403`.
+- Behind a proxy that terminates TLS, such as Traefik, Caddy or nginx, your
+  app sees plain HTTP. The check then takes the scheme from the proxy's
+  `x-forwarded-proto` header, and the host from `x-forwarded-host` if it
+  sends one, so it works with no configuration. A hostile page cannot set
+  those headers on a visitor's handshake, so this gives nothing away.
+- A request with no `origin` header is allowed, because command line tools
+  and other servers do not send one. Add `websocket.require_origin` to
+  refuse those too, for an endpoint only browsers should use.
+- If your pages are served from somewhere else, such as a separate
+  frontend, list their origins exactly:
+
+```gleam
+websocket.new(on_open)
+|> websocket.allow_origins(["https://app.example.com"])
+|> websocket.require_origin
+|> websocket.upgrade(ctx)
+```
+
+The origin check stops other websites using your visitors' sessions. It
+does not tell you who the visitor is, so it goes alongside authentication,
+not in place of it. Protect a socket route with a
+[guard](/docs/controllers/guards) like any other. One difference: browsers
+cannot set headers on a WebSocket handshake, so a socket guard reads a
+cookie or a query parameter, not an `authorization` header.
+
+## Testing sockets
+
+`howdy/testing` has no connection to upgrade, so a socket route that gets as
+far as `upgrade` answers `426 Upgrade Required` there. That is enough to
+test everything in front of the socket, which is where most mistakes are:
+the guard, the parameters and the origin check.
+
+```gleam
+import howdy/testing
+
+pub fn chat_is_reachable_test() {
+  let res = testing.get("/chat/lobby") |> testing.send(app())
+  assert res.status == 426
+}
+
+pub fn other_sites_are_refused_test() {
+  let res =
+    testing.get("/chat/lobby")
+    |> testing.header("origin", "https://evil.example")
+    |> testing.send(app())
+  assert res.status == 403
+}
+```
+
+To keep the conversation itself testable, put the logic in plain functions
+that take a state and a message and return the new state, and call those
+from the callbacks.

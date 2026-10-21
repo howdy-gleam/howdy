@@ -1,0 +1,26 @@
+{
+  "releases": [
+    {
+      "version": "1.0.0",
+      "date": "2026-10-19",
+      "packages": {
+        "howdy": "1.0.0",
+        "howdy_dev": "1.0.0",
+        "howdy_ui": "1.0.0",
+        "howdy_database": "1.0.0",
+        "howdy_auth": "1.0.0",
+        "howdy_mail": "1.0.0",
+        "howdy_storage": "1.0.0",
+        "howdy_admin": "1.0.0",
+        "howdy_remote": "1.0.0",
+        "howdy_telemetry": "1.0.0",
+        "howdy_openapi": "1.0.0",
+        "howdy_flags": "1.0.0",
+        "howdy_jobs": "1.0.0",
+        "howdy_notifications": "1.0.0",
+        "howdy_cache": "1.0.0",
+        "howdy_i18n": "1.0.0"
+      }
+    }
+  ]
+}

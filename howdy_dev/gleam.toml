@@ -1,0 +1,24 @@
+name = "howdy_dev"
+version = "1.0.0"
+gleam = ">= 1.18.0"
+description = "Hot reload for howdy apps in development"
+licences = ["Apache-2.0"]
+repository = { type = "github", user = "howdy-gleam", repo = "howdy", path = "howdy_dev", tag-prefix = "howdy_dev-" }
+links = [{ title = "Website", href = "https://tryhowdy.dev" }]
+internal_modules = ["howdy/dev/internal/*"]
+target = "erlang"
+
+[erlang]
+extra_applications = ["crypto"]
+
+[dependencies]
+gleam_stdlib = ">= 1.0.0 and < 2.0.0"
+gleam_erlang = ">= 1.3.0 and < 2.0.0"
+gleam_otp = ">= 1.3.0 and < 2.0.0"
+gleam_http = ">= 4.4.0 and < 5.0.0"
+gleam_json = ">= 3.1.0 and < 4.0.0"
+simplifile = ">= 2.7.0 and < 3.0.0"
+howdy = { path = ".." }
+
+[dev_dependencies]
+gleeunit = ">= 1.0.0 and < 2.0.0"

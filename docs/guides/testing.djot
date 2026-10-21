@@ -1,0 +1,242 @@
+# Testing
+
+Howdy apps are tested by sending them requests. The `howdy/testing` module
+builds a request, runs it through your app, and hands back the response,
+all without starting a server. Nothing touches a socket, so tests are fast,
+need no ports, and can run side by side.
+
+The whole pipeline runs, exactly as it would for a real request: routing,
+middleware, guards, versioning, body decoding and validation. A test that
+passes here is a good promise about how the running app behaves.
+
+## Make the app testable
+
+Tests need to build your app, so keep the app separate from `main`. Let
+`main` do the things only a running program needs, such as reading
+configuration, configuring logging and starting the server, and put
+everything else in a function that returns the app:
+
+```gleam
+import howdy
+
+pub fn app() {
+  howdy.new()
+  |> howdy.middleware(logger.log)
+  |> howdy.controller(user_controller())
+}
+
+pub fn main() {
+  logging.configure()
+  let assert Ok(_) = howdy.start(app())
+  process.sleep_forever()
+}
+```
+
+If the app needs something from outside, such as a database connection, take
+it as an argument: `app(db)`. Tests can then pass in one made for the test.
+
+## A first test
+
+Howdy projects use `gleeunit`, which runs every public function whose name
+ends in `_test` when you run `gleam test`:
+
+```gleam
+import gleam/json
+import howdy/testing
+import my_app
+
+pub fn create_user_test() {
+  let res =
+    testing.post("/users", json.object([#("name", json.string("Ada"))]))
+    |> testing.send(my_app.app())
+
+  assert res.status == 201
+}
+```
+
+Every test has the same three steps: build a request, `send` it to the app,
+and assert on the response.
+
+## Building requests
+
+Start with a function for the method:
+
+- `testing.get(path)` and `testing.delete(path)` have no body.
+- `testing.post`, `put` and `patch` take a path and a JSON body, and set the
+  JSON content type.
+- `testing.post_form(path, pairs)` posts an HTML form as a browser would:
+  the name and value pairs are encoded, and the form content type is set.
+- `testing.post_multipart(path, pairs, files)` posts a form with files as
+  `multipart/form-data`, each file a `testing.FormFile`.
+- `testing.request(method, path)` covers everything else, such as `HEAD`
+  and `OPTIONS`, or a `POST` with no body.
+
+A query string written in the path is kept, so `testing.get("/users?page=2")`
+does what you would expect.
+
+Then adjust the request by piping it through any of these:
+
+- `header(name, value)` sets a header.
+- `query(pairs)` sets the query string from name and value pairs, encoding
+  the values for you. It replaces any query already there.
+- `cookie(name, value)` adds a cookie, encoded the way `cookie.set` writes
+  them.
+- `json_body(json)`, `form_body(pairs)`, `multipart_body(pairs, files)`,
+  `text_body(string)` and `bytes_body(bits)` replace the body. All but the last set a matching
+  content type; to send a different one, set the header afterwards.
+- `from_ip(address)` makes the request appear to come from an address.
+  Without it the client address is unknown, and `rate_limit.by_ip` does not
+  count the request.
+
+```gleam
+let res =
+  testing.get("/users")
+  |> testing.query([#("search", "ada lovelace")])
+  |> testing.header("x-api-key", "secret")
+  |> testing.cookie("session", "abc")
+  |> testing.send(my_app.app())
+```
+
+A test request is an ordinary `gleam/http/request` value, so the functions
+in that module work on it too.
+
+## Reading responses
+
+A response is an ordinary `gleam/http/response` value. Read the status and
+headers from it directly:
+
+```gleam
+import gleam/http/response
+
+assert res.status == 200
+assert response.get_header(res, "content-type")
+  == Ok("application/json; charset=utf-8")
+```
+
+For the body, and the things Howdy puts in it, there are helpers:
+
+- `testing.text(res)` is the body as a string. An empty body is `""`.
+- `testing.bytes(res)` is the body as a `BitArray`.
+- `testing.json(res, decoder)` decodes a JSON body with a decoder from
+  `gleam/dynamic/decode`.
+- `testing.error(res)` is the message from a Howdy
+  [error response](/docs/controllers/services), the `error` in
+  `{"error":"..."}`.
+- `testing.field_errors(res)` is the list of field errors from a `422`.
+- `testing.cookies(res)` is every cookie the response sets, as name and
+  decoded value pairs. A deleted cookie has an empty value.
+- `testing.open_events(res)` runs a
+  [server-sent event](/docs/controllers/server-sent-events) stream without
+  a socket. Read what it sends with `testing.next_event` and end it with
+  `testing.close_events`.
+
+Prefer `testing.json` to comparing body text. A test that decodes the body
+into a typed value keeps passing when the order of the fields changes:
+
+```gleam
+pub fn show_user_test() {
+  let res = testing.get("/users/1") |> testing.send(my_app.app())
+
+  assert res.status == 200
+  assert testing.json(res, user_decoder()) == Ok(User(id: 1, name: "Ada"))
+}
+```
+
+For errors, assert on the status and the message:
+
+```gleam
+import howdy/problem
+import howdy/service.{FieldError}
+
+pub fn blank_name_is_rejected_test() {
+  let res =
+    testing.post("/users", json.object([#("name", json.string(""))]))
+    |> testing.send(my_app.app())
+
+  assert res.status == 422
+  assert testing.field_errors(res)
+    == Ok([FieldError("name", problem.Blank)])
+}
+```
+
+## What to test where
+
+Send requests to test what only a request can show: that a route exists,
+that the guard protects it, that bad input gets the right status, that the
+response has the right shape. One or two tests per route is often enough.
+
+Test the rules themselves as plain functions. A validator, a service or a
+decoder takes a value and returns a value, so there is no need to go through
+HTTP, and the tests are shorter for it:
+
+```gleam
+pub fn name_is_trimmed_test() {
+  let assert Ok(user) = validate_new_user(NewUserInput(name: "  Ada "))
+  assert user.name == "Ada"
+}
+```
+
+To check your routes without running any handlers, `router.match` does the
+matching on its own. See [Router](/docs/controllers/router).
+
+## Keeping tests independent
+
+Each test should build what it needs and leave nothing behind, so that tests
+can run in any order, and at the same time.
+
+Build a fresh app in each test, not one shared between them. That matters
+most for anything that keeps state in the app, such as a
+[rate limiter](/docs/middleware/rate-limiting), whose counts would carry
+over from one test to the next.
+
+For a database, give each test its own. A helper that takes the test as a
+function can create an in-memory database, run the migrations, run the test
+and close the database afterwards:
+
+```gleam
+pub fn list_todos_test() {
+  use db <- support.with_db()
+  let res = testing.get("/api/todos") |> testing.send(my_app.app(db))
+  assert res.status == 200
+}
+```
+
+A failed assertion crashes the test, so a plain call after `run_test` would
+never close the database of a test that failed. `testing.cleanup` runs its
+function either way, and the test still fails:
+
+```gleam
+pub fn with_db(run_test: fn(Repo) -> a) -> a {
+  let assert Ok(db) = sqlite.start(sqlite.memory())
+  use <- testing.cleanup(fn() { repo.close(db) })
+  let assert Ok(_) = database.migrate(db)
+  run_test(db)
+}
+```
+
+Create test data through the same validators and services your handlers
+use, not by writing rows by hand. Fixtures built that way cannot drift out
+of step with the rules of the app.
+
+## What testing cannot do
+
+- There is no connection to upgrade, so a
+  [WebSocket](/docs/controllers/websockets) route answers `426` once it
+  reaches `upgrade`. Everything in front of it, including the guard, the
+  parameters and the origin check, is tested as normal.
+- `testing.text` and `testing.bytes` read a body from `howdy/stream` in
+  full, but cannot read a file from `howdy/static`, and panic if asked to.
+  Check the status and headers of those responses instead.
+- Nothing is sent over the network, so the server's own behaviour is not
+  covered: timeouts, TLS, HTTP/2. Start the app with `howdy.start` on
+  port `0` and read the chosen port from `started.data.port` to test those.
+
+## More examples
+
+Each page of these docs ends with a section on testing its subject:
+[query strings](/docs/controllers/query-strings),
+[cookies](/docs/controllers/cookies), [forms](/docs/controllers/forms),
+[guards](/docs/controllers/guards),
+[middleware](/docs/middleware/overview), [CORS](/docs/middleware/cors),
+[CSRF protection](/docs/middleware/csrf) and
+[rate limiting](/docs/middleware/rate-limiting).

@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>howdy chat</title>
+  <style>
+    body { font: 15px/1.4 system-ui, sans-serif; max-width: 48rem; margin: 2rem auto; padding: 0 1rem; }
+    main { display: flex; gap: 1rem; margin: 1rem 0; }
+    #log { flex: 1; border: 1px solid #ccc; height: 20rem; overflow-y: auto; padding: .5rem; }
+    #here { width: 12rem; border: 1px solid #ccc; padding: .5rem; margin: 0; list-style: none; }
+    #here h2 { font-size: .85rem; margin: 0 0 .5rem; color: #555; }
+    #here li { padding: .1rem 0; }
+    .typing { color: #777; font-style: italic; }
+    .notice { color: #777; font-style: italic; }
+    .from { font-weight: 600; }
+    [hidden] { display: none !important; }
+    form { display: flex; gap: .5rem; }
+    input[type=text] { flex: 1; }
+  </style>
+</head>
+<body>
+  <h1>howdy chat</h1>
+  <form id="join">
+    <input type="text" id="name" placeholder="your name" required>
+    <input type="text" id="room" value="lobby" required>
+    <button>Join</button>
+  </form>
+  <main>
+    <div id="log"></div>
+    <ul id="here" hidden></ul>
+  </main>
+  <form id="say" hidden>
+    <input type="text" id="text" placeholder="say something" autocomplete="off">
+    <button>Send</button>
+  </form>
+  <script type="module">
+    import { Presence } from "/howdy/presence.js"
+
+    const log = document.getElementById("log")
+    const here = document.getElementById("here")
+    const input = document.getElementById("text")
+    let socket
+    let typing = false
+    let typingTimer
+
+    function show(text, from, cls) {
+      const line = document.createElement("div")
+      if (cls) line.className = cls
+      if (from) {
+        const name = document.createElement("span")
+        name.className = "from"
+        name.textContent = from + ": "
+        line.append(name)
+      }
+      line.append(text)
+      log.append(line)
+      log.scrollTop = log.scrollHeight
+    }
+
+    // Someone is typing while any of their tabs is.
+    function render(list) {
+      here.replaceChildren()
+      const title = document.createElement("h2")
+      title.textContent = `Here (${list.length})`
+      here.append(title)
+      for (const { key, metas } of list) {
+        const item = document.createElement("li")
+        item.textContent = key
+        if (metas.some((meta) => meta.typing)) {
+          const note = document.createElement("span")
+          note.className = "typing"
+          note.textContent = " typing…"
+          item.append(note)
+        }
+        here.append(item)
+      }
+    }
+
+    function setTyping(value) {
+      if (value === typing || !socket || socket.readyState !== WebSocket.OPEN) return
+      typing = value
+      socket.send(JSON.stringify({ typing }))
+    }
+
+    document.getElementById("join").onsubmit = (e) => {
+      e.preventDefault()
+      const name = document.getElementById("name").value
+      const room = document.getElementById("room").value
+      // The first sync lists whoever was already here; only announce later
+      // arrivals. A person arrives with their first tab and leaves with
+      // their last.
+      let synced = false
+      const people = new Presence({ name: "people", topic: `room:${room}` })
+        .onJoin((key, current) => { if (synced && !current) show(`${key} joined`, null, "notice") })
+        .onLeave((key, remaining) => { if (remaining.length === 0) show(`${key} left`, null, "notice") })
+        .onSync((list) => { synced = true; render(list) })
+
+      const scheme = location.protocol === "https:" ? "wss" : "ws"
+      socket = new WebSocket(`${scheme}://${location.host}/chat/${encodeURIComponent(room)}?name=${encodeURIComponent(name)}`)
+      socket.onopen = () => {
+        document.getElementById("join").hidden = true
+        document.getElementById("say").hidden = false
+        here.hidden = false
+        input.focus()
+      }
+      socket.onmessage = (event) => {
+        const msg = JSON.parse(event.data)
+        if (people.receive(msg)) return
+        if (msg.kind === "notice") show(msg.text, null, "notice")
+        else show(msg.text, msg.from)
+      }
+      socket.onclose = () => show("disconnected", null, "notice")
+    }
+
+    input.oninput = () => {
+      setTyping(input.value !== "")
+      clearTimeout(typingTimer)
+      typingTimer = setTimeout(() => setTyping(false), 3000)
+    }
+
+    document.getElementById("say").onsubmit = (e) => {
+      e.preventDefault()
+      if (input.value) socket.send(JSON.stringify({ text: input.value }))
+      input.value = ""
+      setTyping(false)
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,167 @@
+# Query strings
+
+The query string is the part of a URL after the `?`, as in
+`/users?search=ada&page=2`. It plays no part in routing: the router matches
+on the path alone, so `/users` and `/users?page=2` reach the same handler.
+Reading the values is the handler's job.
+
+The `howdy/query` module does that reading for you. Each function looks up
+one key, hands your handler a typed value, and answers `400` on your behalf
+when the input is missing or has the wrong shape.
+
+## Reading values
+
+The functions are designed for `use`. Each takes the context and a key, and
+the rest of the handler runs only if the value is good:
+
+```gleam
+import gleam/json
+import howdy/controller.{type Context}
+import howdy/query
+
+pub fn user_controller() {
+  controller.new("users")
+  |> controller.get("/", list_users)
+}
+
+fn list_users(ctx: Context) {
+  use search <- query.string_or(ctx, "search", default: "")
+  use page <- query.int_or(ctx, "page", default: 1)
+  use active <- query.bool_or(ctx, "active", default: True)
+
+  controller.json(
+    ctx,
+    json.object([
+      #("search", json.string(search)),
+      #("page", json.int(page)),
+      #("active", json.bool(active)),
+    ]),
+  )
+}
+```
+
+A request for `/users?search=ada&page=2` runs the handler with `search` set
+to `"ada"`, `page` to `2`, and `active` to its default of `True`.
+
+## Required, optional and default
+
+There are three types, `string`, `int` and `bool`, and each comes in three
+forms. They differ only in what happens when the key is absent:
+
+- `query.string`, `int` and `bool` are required. An absent key answers `400`.
+- `query.optional_string`, `optional_int` and `optional_bool` give you an
+  `Option`: `Some(value)` when the key is present, `None` when it is not.
+- `query.string_or`, `int_or` and `bool_or` take a `default:` and use it when
+  the key is absent.
+
+Reach for the optional form when "not given" means something different from
+any default, such as a filter that should only apply when asked for:
+
+```gleam
+import gleam/option.{None, Some}
+
+fn list_orders(ctx: Context) {
+  use status <- query.optional_string(ctx, "status")
+  let orders = case status {
+    Some(status) -> orders_with_status(status)
+    None -> all_orders()
+  }
+  controller.json(ctx, orders_to_json(orders))
+}
+```
+
+## When the input is wrong
+
+A bad value stops the handler and answers `400` with a JSON body that says
+what was wrong. With `use page <- query.int(ctx, "page")`:
+
+- `/users` answers `{"error":"missing query parameter page"}`.
+- `/users?page=hello` answers
+  `{"error":"query parameter page must be an integer"}`.
+- `/users?page=1&page=2` answers
+  `{"error":"query parameter page must occur only once"}`.
+
+Optional and default forms are only forgiving about absence. A default never
+hides a bad value: `query.int_or(ctx, "page", default: 1)` still answers
+`400` for `?page=hello`, rather than quietly using `1`.
+
+A few details of how values are read:
+
+- Booleans accept exactly `true` and `false`. `?active=1` and `?active=yes`
+  answer `400`.
+- Empty strings are kept. `?search=` is present, with the value `""`, so
+  `string_or` does not fall back to its default.
+- Values are percent-decoded for you, so `?search=ada%20lovelace` gives
+  `"ada lovelace"`. A query string with invalid encoding answers `400` from
+  every function.
+
+## Repeated keys
+
+The functions above expect a key to appear at most once. When a key is meant
+to repeat, as in `/users?tag=admin&tag=staff`, use `query.strings`. It gives
+you every value, in the order they were sent:
+
+```gleam
+fn list_users(ctx: Context) {
+  use tags <- query.strings(ctx, "tag")
+  // `tags` is ["admin", "staff"] for the request above.
+  controller.json(ctx, users_to_json(users_with_tags(tags)))
+}
+```
+
+An absent key gives an empty list, so `strings` never answers `400` for a
+missing value, only for invalid encoding.
+
+## Adding constraints
+
+`howdy/query` checks the type of a value, not its range. To require a
+minimum page number or cap a page size, pass the value through
+`howdy/validate`:
+
+```gleam
+import howdy/validate
+
+fn list_users(ctx: Context) {
+  use page <- query.int_or(ctx, "page", default: 1)
+  use page <- validate.check(ctx, {
+    use page <- validate.field("page", page, [validate.min(1)])
+    validate.ok(page)
+  })
+
+  controller.json(ctx, users_to_json(users_on_page(page)))
+}
+```
+
+A request for `/users?page=0` now answers `422`, with the failing field and
+its message in the body:
+
+```json
+{"error":"validation failed","code":"validation","fields":[{"field":"page","code":"too_small","message":"must be at least 1","minimum":1}]}
+```
+
+## Testing query strings
+
+`howdy/testing` keeps a query string written in the path, so the simplest
+test is to ask for the URL you mean:
+
+```gleam
+import howdy/testing
+
+pub fn page_must_be_an_integer_test() {
+  let res = testing.get("/users?page=hello") |> testing.send(app())
+  assert res.status == 400
+}
+```
+
+When a value needs encoding, `testing.query` sets the query string from
+pairs and encodes them for you:
+
+```gleam
+pub fn search_test() {
+  let res =
+    testing.get("/users")
+    |> testing.query([#("search", "ada lovelace")])
+    |> testing.send(app())
+  assert res.status == 200
+}
+```

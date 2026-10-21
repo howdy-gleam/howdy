@@ -1,0 +1,59 @@
+{
+  "@@locale": "pt",
+  "@@x-review": "machine translation, not yet reviewed by a native speaker",
+  "sign_in": {
+    "subject": "Entre no {app}",
+    "heading": "Entre no {app}",
+    "body": "Use isto para entrar. Funciona uma vez e expira em breve.",
+    "action": "Entrar",
+    "closing": "Se você não pediu para entrar, pode ignorar este e-mail."
+  },
+  "registration": {
+    "subject": "Confirme sua conta do {app}",
+    "heading": "Boas-vindas ao {app}",
+    "body": "Confirme este endereço para concluir a criação da sua conta.",
+    "action": "Confirmar e entrar",
+    "closing": "Se você não criou uma conta, pode ignorar este e-mail."
+  },
+  "already_registered": {
+    "subject": "Você já tem uma conta do {app}",
+    "heading": "Você já tem uma conta",
+    "body": "Alguém pediu para cadastrar este endereço, mas ele já tem uma conta. Use isto para entrar nela.",
+    "action": "Entrar",
+    "closing": "Se não foi você, pode ignorar este e-mail. Nada mudou."
+  },
+  "email_change": {
+    "subject": "Confirme seu novo endereço de e-mail",
+    "heading": "Confirme seu novo endereço de e-mail",
+    "body": "Confirme este endereço para que ele passe a ser usado para entrar na sua conta do {app}.",
+    "action": "Confirmar este endereço",
+    "closing": "Se você não pediu isso, pode ignorar este e-mail."
+  },
+  "email_change_approval": {
+    "subject": "Aprove a alteração de e-mail do {app}",
+    "heading": "Aprove a alteração de e-mail",
+    "body": "Alguém conectado à sua conta pediu para transferi-la para outro endereço de e-mail. Aprove enquanto estiver conectado para continuar.",
+    "action": "Aprovar a alteração",
+    "closing": "Se não foi você, não aprove. Entre, altere sua senha e encerre suas outras sessões."
+  },
+  "email_changed": {
+    "subject": "Seu endereço de e-mail do {app} foi alterado",
+    "heading": "Seu endereço de e-mail foi alterado",
+    "body": "Sua conta agora entra com outro endereço de e-mail, e este não pode mais ser usado para recuperá-la.",
+    "closing": "Se não foi você, entre em contato com o suporte imediatamente."
+  },
+  "password_changed": {
+    "subject": "Sua senha do {app} foi alterada",
+    "heading": "Sua senha foi alterada",
+    "body": "A senha da sua conta acabou de ser alterada.",
+    "closing": "Se não foi você, entre com um link enviado por e-mail e defina uma nova senha."
+  },
+  "code_prompt": "Ou digite este código:",
+  "token_prompt": "Cole este token onde ele foi pedido:",
+  "mfa": {
+    "subject": "Seu código de verificação do {app}",
+    "heading": "Seu código de verificação",
+    "body": "Digite este código para concluir a entrada:",
+    "closing": "Se você não está entrando, alguém tem sua senha: altere-a."
+  }
+}

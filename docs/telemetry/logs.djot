@@ -1,0 +1,37 @@
+# Logs
+
+Once telemetry is started, log lines written with the `logging` package, or
+any other use of Erlang's logger, join the trace they were written in:
+
+- Warnings and worse become `log` events on the current span, with the
+  level and the message, so they show up in your tracing backend next to
+  the work that caused them.
+- A process that crashes outside any span becomes a failed `process crash`
+  span, so a crash in a background process is not lost.
+- With a [recorder](/docs/telemetry/overview#Recording-in-development),
+  every line is kept for the admin's **Logs** page, linked to its trace.
+
+## JSON logs
+
+`json_logs` writes each line as one JSON object with the trace and span
+ids, for log collectors that link logs to traces, such as Loki or
+CloudWatch:
+
+```gleam
+logging.configure()
+let assert Ok(Nil) =
+  telemetry.new("acme-web")
+  |> telemetry.otlp
+  |> telemetry.json_logs
+  |> telemetry.start
+```
+
+```json
+{"time":"2026-09-25T12:06:47.045Z","level":"warning","message":"slow notes","trace_id":"cfe5d76ab9bf1510ca60b9449f47eb37","span_id":"b7ad6b7169203331","source":"notes:list/1"}
+```
+
+Call `start` after `logging.configure()`, which sets a formatter of its own.
+
+Log lines go wherever your logs go already. Anything a line holds, such as
+an address in an error message, goes with it, to your log collector and,
+for warnings and worse, to your tracing backend too.
