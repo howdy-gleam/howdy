@@ -80,3 +80,19 @@ fn mtime_seconds(path: String) -> Int
 
 @external(erlang, "watch_test_ffi", "set_mtime_seconds")
 fn set_mtime_seconds(path: String, seconds: Int) -> Nil
+
+pub fn rewriting_a_file_unchanged_is_not_a_change_of_contents_test() {
+  let before =
+    dict.from_list([
+      #("a.gleam", watch.Stamp(1, 3, 7)),
+      #("b.gleam", watch.Stamp(1, 3, 8)),
+    ])
+  let after =
+    dict.from_list([
+      #("a.gleam", watch.Stamp(2, 3, 7)),
+      #("b.gleam", watch.Stamp(2, 4, 9)),
+      #("c.gleam", watch.Stamp(2, 1, 1)),
+    ])
+  assert watch.changed(before, after) == ["a.gleam", "b.gleam", "c.gleam"]
+  assert watch.changed_contents(before, after) == ["b.gleam", "c.gleam"]
+}

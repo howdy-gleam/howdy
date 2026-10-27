@@ -55,3 +55,15 @@ pub fn changed(before: Snapshot, after: Snapshot) -> List(String) {
     })
   list.append(gone, new_or_modified) |> list.sort(string.compare)
 }
+
+/// The paths added, removed or with different contents. A file written
+/// again with the same contents doesn't count.
+pub fn changed_contents(before: Snapshot, after: Snapshot) -> List(String) {
+  changed(before, after)
+  |> list.filter(fn(path) {
+    case dict.get(before, path), dict.get(after, path) {
+      Ok(a), Ok(b) -> a.hash != b.hash || a.size != b.size
+      _, _ -> True
+    }
+  })
+}

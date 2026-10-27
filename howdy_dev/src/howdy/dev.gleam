@@ -39,7 +39,13 @@
 //// ```
 ////
 //// A task that fails stops the build, and its output is shown like a
-//// compiler error.
+//// compiler error. Tasks also run once when the server starts, with no
+//// changed files, so edits made while it was stopped are caught up: if a
+//// task changes what a file contains, the app is rebuilt.
+////
+//// `rewrite_output` changes the compiler's output before it is printed and
+//// shown, so a generator can point errors in the code it wrote back at the
+//// files it wrote them from.
 ////
 //// ## Staying out of production
 ////
@@ -77,6 +83,7 @@ pub opaque type Dev {
     address: String,
     hosts: List(String),
     tasks: List(fn(List(String)) -> Result(String, String)),
+    rewrites: List(fn(String) -> String),
   )
 }
 
@@ -89,6 +96,7 @@ pub fn new(build: fn() -> App) -> Dev {
     address: "127.0.0.1",
     hosts: ["localhost", "127.0.0.1", "[::1]"],
     tasks: [],
+    rewrites: [],
   )
 }
 
@@ -127,6 +135,12 @@ pub fn before_build(
   Dev(..dev, tasks: list.append(dev.tasks, [task]))
 }
 
+/// Change the compiler's output before it is printed and shown over the
+/// page, warnings included. Rewrites run in the order they are added.
+pub fn rewrite_output(dev: Dev, rewrite: fn(String) -> String) -> Dev {
+  Dev(..dev, rewrites: list.append(dev.rewrites, [rewrite]))
+}
+
 /// How often to look for changes, in milliseconds. Defaults to 250.
 pub fn interval(dev: Dev, milliseconds: Int) -> Dev {
   Dev(..dev, interval: milliseconds)
@@ -156,7 +170,10 @@ pub fn run(dev: Dev) -> Result(actor.Started(howdy.Address), actor.StartError) {
     howdy.start_with(dev.build() |> howdy.bind(dev.address), handler)
   case started {
     Ok(_) -> {
-      process.spawn(fn() { loop(dev, session, watch.snapshot(dev.watch)) })
+      process.spawn(fn() {
+        let before = watch.snapshot(dev.watch)
+        loop(dev, session, catch_up(dev, session, before))
+      })
       Nil
     }
     Error(_) -> Nil
@@ -193,6 +210,36 @@ fn loop(dev: Dev, session: reload.Session, before: watch.Snapshot) -> Nil {
   loop(dev, session, next)
 }
 
+/// Runs the tasks once at start. Only a change to what a file contains
+/// counts, so a task that rewrites its output unchanged costs no rebuild.
+fn catch_up(
+  dev: Dev,
+  session: reload.Session,
+  before: watch.Snapshot,
+) -> watch.Snapshot {
+  case dev.tasks {
+    [] -> before
+    tasks -> {
+      let result = run_tasks(tasks, [])
+      let after = watch.snapshot(dev.watch)
+      case result, watch.changed_contents(before, after) {
+        Error(output), _ -> {
+          io.println("howdy_dev: a task before the build failed")
+          reload.show_error(session, output)
+        }
+        Ok(Nil), [] -> Nil
+        Ok(Nil), changed -> {
+          io.println(
+            "howdy_dev: " <> string.join(changed, ", ") <> " changed at start",
+          )
+          rebuild(dev, session)
+        }
+      }
+      after
+    }
+  }
+}
+
 fn poll(
   dev: Dev,
   session: reload.Session,
@@ -210,7 +257,7 @@ fn poll(
       // change, but before the build, so edits made during it still do.
       let after = watch.snapshot(dev.watch)
       case tasks {
-        Ok(Nil) -> rebuild(session)
+        Ok(Nil) -> rebuild(dev, session)
         Error(output) -> {
           io.println("howdy_dev: a task before the build failed")
           reload.show_error(session, output)
@@ -246,9 +293,12 @@ pub fn run_tasks(
   })
 }
 
-fn rebuild(session: reload.Session) -> Nil {
-  case build_project() {
-    #(0, output) -> {
+fn rebuild(dev: Dev, session: reload.Session) -> Nil {
+  let #(status, output) = build_project()
+  let output =
+    list.fold(dev.rewrites, output, fn(output, rewrite) { rewrite(output) })
+  case status {
+    0 -> {
       print_build_output(output)
       let modules = reload_modules()
       io.println(
@@ -258,7 +308,7 @@ fn rebuild(session: reload.Session) -> Nil {
       )
       reload.reload_all(session)
     }
-    #(_, output) -> {
+    _ -> {
       print_build_output(output)
       io.println("howdy_dev: build failed, still serving the previous code")
       reload.show_error(session, output)
