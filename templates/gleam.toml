@@ -1,0 +1,14 @@
+name = "howdy_templates"
+version = "1.0.0"
+gleam = ">= 1.18.0"
+description = "JSX-style HTML templates for Lustre: compiled to typed Gleam, with a language server for editors"
+licences = ["Apache-2.0"]
+repository = { type = "github", user = "howdy-gleam", repo = "howdy", path = "templates", tag-prefix = "howdy_templates-" }
+links = [{ title = "Website", href = "https://tryhowdy.dev" }]
+internal_modules = ["howdy/templates/internal", "howdy/templates/internal/*"]
+
+[dependencies]
+gleam_stdlib = ">= 1.0.0 and < 2.0.0"
+
+[dev_dependencies]
+gleeunit = ">= 1.0.0 and < 2.0.0"
