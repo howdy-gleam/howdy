@@ -4,8 +4,8 @@ HTML templates for [Lustre](https://hexdocs.pm/lustre/), written like React
 components, to be compiled to typed Gleam. Templates and Gleam components
 will use each other freely: layouts, pages and components can be either.
 
-Work in progress: this package parses templates so far. Generating Gleam
-from them comes next.
+Work in progress: this package parses templates and generates a Gleam
+module from each so far. Writing them into a project comes next.
 
 ## A template
 
