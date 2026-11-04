@@ -29,7 +29,7 @@ verify(Signed, Keys) when byte_size(Signed) =< 32768, byte_size(Keys) =< 1048576
     catch _:_ -> {error, nil} end;
 verify(_, _) -> {error, nil}.
 
-unbase64(Value) -> base64:decode(Value, #{mode => url, padding => false}).
+unbase64(Value) -> base64:decode(Value, #{mode => urlsafe, padding => false}).
 
 protect(Run, Message) ->
     try Run()
