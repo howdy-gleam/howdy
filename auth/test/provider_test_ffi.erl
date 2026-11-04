@@ -11,7 +11,7 @@ key() ->
         Key -> Key
     end.
 
-b64(Value) -> base64:encode(Value, #{mode => url, padding => false}).
+b64(Value) -> base64:encode(Value, #{mode => urlsafe, padding => false}).
 sign(Payload, Header) ->
     Message = <<(b64(Header))/binary, ".", (b64(Payload))/binary>>,
     Signature = public_key:sign(Message, sha256, key()),
