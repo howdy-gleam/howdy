@@ -1,6 +1,6 @@
 # howdy_notifications
 
-Notifications for [howdy](https://github.com/howdy-gleam/howdy/blob/v1.0.0/README.md) apps: an inbox kept until read,
+Notifications for [howdy](https://github.com/howdy-gleam/howdy/blob/v1.0.1/README.md) apps: an inbox kept until read,
 pushed live to every page the user has open, with email, digests and Web
 Push.
 
@@ -67,10 +67,10 @@ that are not clustered, add `notifications.across_servers(notifier)` to each
 server's supervisor: on PostgreSQL it sends them through the database, so
 pages open on any server hear them.
 
-Email and push are [background jobs](https://github.com/howdy-gleam/howdy/blob/v1.0.0/jobs/README.md), queued in the
+Email and push are [background jobs](https://github.com/howdy-gleam/howdy/blob/v1.0.1/jobs/README.md), queued in the
 transaction that saves the notification: add them to your app's runner with
 `jobs.runner(db) |> notifications.handle_jobs(notifier)`. They are retried
 when they fail, and runners on several nodes share the work.
 
-See the [notifications docs](https://github.com/howdy-gleam/howdy/tree/v1.0.0/docs/notifications) and
+See the [notifications docs](https://github.com/howdy-gleam/howdy/tree/v1.0.1/docs/notifications) and
 `examples/notifications`.

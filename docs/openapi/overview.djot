@@ -203,5 +203,5 @@ How a client asks for a version is documented the way OpenAPI expects:
 `openapi.version_document(spec, app, "v2")` gives one version's document as
 JSON, and `openapi.versions(app)` lists the versions.
 
-See [`examples/openapi`](https://github.com/howdy-gleam/howdy/tree/v1.0.0/examples/openapi)
+See [`examples/openapi`](https://github.com/howdy-gleam/howdy/tree/v1.0.1/examples/openapi)
 for a complete API.

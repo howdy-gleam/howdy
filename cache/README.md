@@ -1,6 +1,6 @@
 # howdy_cache
 
-An application cache for [howdy](https://github.com/howdy-gleam/howdy/blob/v1.0.0/README.md) apps: keep the result of
+An application cache for [howdy](https://github.com/howdy-gleam/howdy/blob/v1.0.1/README.md) apps: keep the result of
 expensive work for a while, and throw it away when the data it came from
 changes. Entries live in this node's memory or in the app's database,
 PostgreSQL or SQLite, or anywhere a store can reach.
@@ -55,7 +55,7 @@ cache.invalidate(app_cache, ["note:" <> int.to_string(id)])
   `cache_database.schema()` with `howdy/migration` first.
 - Your own: `cache.store` from seven functions.
 
-See the [caching docs](https://github.com/howdy-gleam/howdy/blob/v1.0.0/docs/cache/overview.djot) for the details, and
+See the [caching docs](https://github.com/howdy-gleam/howdy/blob/v1.0.1/docs/cache/overview.djot) for the details, and
 `howdy/conditional` in the core package for answering `304 Not Modified`.
 
 ## Development
