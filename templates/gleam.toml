@@ -10,6 +10,7 @@ internal_modules = ["howdy/templates/internal", "howdy/templates/internal/*"]
 [dependencies]
 gleam_stdlib = ">= 1.0.0 and < 2.0.0"
 filepath = ">= 1.1.0 and < 2.0.0"
+simplifile = ">= 2.7.0 and < 3.0.0"
 
 [dev_dependencies]
 gleeunit = ">= 1.0.0 and < 2.0.0"

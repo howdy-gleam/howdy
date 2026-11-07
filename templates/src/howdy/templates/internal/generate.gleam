@@ -130,6 +130,9 @@ pub fn marker_hash(code: String) -> Result(String, Nil) {
 @external(erlang, "howdy_templates_ffi", "hash")
 fn hash(text: String) -> String
 
+@external(erlang, "howdy_templates_ffi", "gleam_version")
+fn gleam_version() -> String
+
 /// `name` is the function the module exports, named after the file;
 /// `source` is the template's file name, for the marker line.
 pub fn generate(template: Template, name: String, source: String) -> Output {
@@ -242,7 +245,10 @@ pub fn generate(template: Template, name: String, source: String) -> Output {
   let rest =
     string.concat(list.reverse(imports.chunks))
     <> string.concat(list.reverse(main.chunks))
-  let prefix = marker(source, hash(generator_version <> source <> rest))
+  // The formatter's version counts too: a module formatted by another
+  // version of Gleam is written again.
+  let prefix =
+    marker(source, hash(generator_version <> gleam_version() <> source <> rest))
   let shift_imports = string.byte_size(prefix)
   let shift = shift_imports + imports.offset
   let move = fn(span: Span, by: Int) { Span(span.start + by, span.end + by) }
