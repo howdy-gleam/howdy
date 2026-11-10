@@ -62,6 +62,9 @@
 //// checkout.
 //// `gleam run -m howdy/templates -- check` fails if a template has
 //// problems or a module is out of date, for CI and before shipping.
+////
+//// `gleam build 2>&1 | gleam run -m howdy/templates -- rewrite` points
+//// compiler errors back at the template line.
 
 import argv
 import gleam/int
@@ -70,6 +73,7 @@ import gleam/list
 import gleam/result
 import gleam/string
 import howdy/templates/internal/project
+import howdy/templates/internal/rewrite
 
 pub fn main() -> Nil {
   case argv.load().arguments {
@@ -85,9 +89,10 @@ pub fn main() -> Nil {
           halt(1)
         }
       }
+    ["rewrite"] -> io.print(rewrite_output(read_stdin()))
     _ -> {
       io.println_error(
-        "usage: gleam run -m howdy/templates -- [gen [--no-gitignore] | check]",
+        "usage: gleam run -m howdy/templates -- [gen [--no-gitignore] | check | rewrite]",
       )
       halt(1)
     }
@@ -145,6 +150,11 @@ pub fn check(project: String) -> Result(Int, String) {
   project.check(project)
 }
 
+/// Points compiler output about generated modules at their templates.
+pub fn rewrite_output(output: String) -> String {
+  rewrite.rewrite(output)
+}
+
 fn plural(count: Int) -> String {
   case count {
     1 -> "1 template"
@@ -154,3 +164,6 @@ fn plural(count: Int) -> String {
 
 @external(erlang, "erlang", "halt")
 fn halt(code: Int) -> Nil
+
+@external(erlang, "howdy_templates_ffi", "read_stdin")
+fn read_stdin() -> String

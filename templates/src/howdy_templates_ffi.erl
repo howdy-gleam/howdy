@@ -1,5 +1,18 @@
 -module(howdy_templates_ffi).
--export([temporary_directory/0, unique/0, format/1, hash/1, gleam_version/0]).
+-export([read_stdin/0, temporary_directory/0, unique/0, format/1, hash/1,
+         gleam_version/0]).
+
+%% All of stdin, for `rewrite`.
+read_stdin() ->
+    ok = io:setopts(standard_io, [binary, {encoding, unicode}]),
+    read_stdin([]).
+
+read_stdin(Acc) ->
+    case io:get_chars(standard_io, "", 65536) of
+        eof -> unicode:characters_to_binary(lists:reverse(Acc));
+        {error, _} -> unicode:characters_to_binary(lists:reverse(Acc));
+        Data -> read_stdin([Data | Acc])
+    end.
 
 temporary_directory() ->
     Candidates = [os:getenv(V) || V <- ["TMPDIR", "TEMP", "TMP"]],

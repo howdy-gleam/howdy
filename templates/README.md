@@ -4,8 +4,8 @@ HTML templates for [Lustre](https://hexdocs.pm/lustre/), written like React
 components, to be compiled to typed Gleam. Templates and Gleam components
 will use each other freely: layouts, pages and components can be either.
 
-Work in progress: templates generate into a project so far. Pointing the
-compiler's errors back at the template comes next.
+Work in progress: templates generate into a project, and compiler errors
+can be pointed back at them. Regenerating under `gleam dev` comes next.
 
 ## A template
 
@@ -42,6 +42,8 @@ props(orders: List(Order))
 - `gleam run -m howdy/templates` generates every module, formatted, into
   `src/<package>/templates/`, which holds generated modules only and ignores
   itself in git. `-- check` fails if one is out of date.
+- `gleam build 2>&1 | gleam run -m howdy/templates -- rewrite` points
+  compiler errors at the template line.
 
 ## Development
 

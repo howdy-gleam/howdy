@@ -118,6 +118,42 @@ pub fn module_path(project: Project, template: String) -> Result(String, Nil) {
   modules_directory(project) <> "/" <> name <> ".gleam"
 }
 
+/// The template a generated module came from, found from the module's path:
+/// `<root>/src/<package>/templates/<name>.gleam`.
+pub fn template_of_module(module: String) -> Result(#(Project, String), Nil) {
+  let segments = string.split(module, "/")
+  segments
+  |> list.index_map(fn(segment, i) { #(i, segment) })
+  |> list.find_map(fn(entry) {
+    let #(i, segment) = entry
+    let rest = list.drop(segments, i + 1)
+    case segment, rest {
+      "src", [package, "templates", _, ..] -> {
+        let root = case list.take(segments, i) {
+          [] -> "."
+          [""] -> "/"
+          before -> string.join(before, "/")
+        }
+        use project <- result.try(load(root) |> result.replace_error(Nil))
+        case project.name == package {
+          False -> Error(Nil)
+          True -> {
+            let name =
+              list.drop(rest, 2)
+              |> string.join("/")
+              |> string.drop_end(string.length(".gleam"))
+            Ok(#(
+              project,
+              templates_directory(project) <> "/" <> name <> extension,
+            ))
+          }
+        }
+      }
+      _, _ -> Error(Nil)
+    }
+  })
+}
+
 pub type Compiled {
   Compiled(output: Output, problems: List(Problem), template: syntax.Template)
 }
